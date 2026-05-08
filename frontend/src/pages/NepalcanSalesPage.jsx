@@ -39,6 +39,16 @@ const NepalcanSalesPage = () => {
   const [orderHistory, setOrderHistory] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
 
+  // Pagination and filtering state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalOrders, setTotalOrders] = useState(0);
+  const [limit] = useState(10);
+  const [statusFilter, setStatusFilter] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [isFiltering, setIsFiltering] = useState(false);
+
   // Fetch stats from backend
   const fetchStats = async () => {
     try {
@@ -54,6 +64,38 @@ const NepalcanSalesPage = () => {
       console.log('Fetched Nepalcan stats:', res.data);
     } catch (err) {
       console.error('Failed to fetch stats:', err.message);
+    }
+  };
+
+  // Fetch orders from backend with pagination and filters
+  const fetchOrdersFromBackend = async (page = 1, status = '', start = '', end = '') => {
+    setIsFiltering(true);
+    try {
+      const backendToken = localStorage.getItem('token');
+      const headers = {};
+      
+      if (backendToken) {
+        headers['Authorization'] = `Bearer ${backendToken}`;
+      }
+
+      const params = { page, limit };
+      if (status) params.status = status;
+      if (start) params.startDate = start;
+      if (end) params.endDate = end;
+
+      const res = await axios.get(`${API_URL}/nepalcan-orders/orders`, { 
+        headers,
+        params 
+      });
+
+      setOrders(res.data.orders || []);
+      setTotalPages(res.data.pagination?.totalPages || 1);
+      setTotalOrders(res.data.pagination?.total || 0);
+      setCurrentPage(page);
+    } catch (err) {
+      console.error('Failed to fetch orders from backend:', err.message);
+    } finally {
+      setIsFiltering(false);
     }
   };
 
@@ -149,6 +191,8 @@ const NepalcanSalesPage = () => {
     
     attemptAutoFetch();
     fetchStats();
+    // Fetch orders from backend with pagination
+    fetchOrdersFromBackend(1, statusFilter, startDate, endDate);
   }, []);
 
   const handleLoginFormChange = (e) => {
@@ -250,6 +294,28 @@ const NepalcanSalesPage = () => {
     } else {
       setShowLoginForm(true);
     }
+    // Also refresh backend orders with current filters
+    fetchOrdersFromBackend(1, statusFilter, startDate, endDate);
+  };
+
+  // Handle page change
+  const handlePageChange = (newPage) => {
+    if (newPage >= 1 && newPage <= totalPages) {
+      fetchOrdersFromBackend(newPage, statusFilter, startDate, endDate);
+    }
+  };
+
+  // Handle filter apply
+  const handleFilterApply = () => {
+    fetchOrdersFromBackend(1, statusFilter, startDate, endDate);
+  };
+
+  // Handle filter reset
+  const handleFilterReset = () => {
+    setStatusFilter('');
+    setStartDate('');
+    setEndDate('');
+    fetchOrdersFromBackend(1, '', '', '');
   };
 
   const handleLogout = () => {
@@ -717,10 +783,69 @@ const NepalcanSalesPage = () => {
           {/* Orders Table */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
             <div className="p-6 border-b border-slate-100">
-              <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
-                <ShoppingBag size={20} />
-                Recent Orders
-              </h3>
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                  <ShoppingBag size={20} />
+                  Recent Orders
+                  {totalOrders > 0 && (
+                    <span className="text-sm font-normal text-slate-500">
+                      ({totalOrders} total)
+                    </span>
+                  )}
+                </h3>
+                
+                {/* Filters */}
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Status Filter */}
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                  >
+                    <option value="">All Status</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Processing">Processing</option>
+                    <option value="Shipped">Shipped</option>
+                    <option value="Delivered">Delivered</option>
+                    <option value="Cancelled">Cancelled</option>
+                  </select>
+
+                  {/* Date Filters */}
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                    placeholder="Start Date"
+                  />
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                    placeholder="End Date"
+                  />
+
+                  {/* Apply Filters Button */}
+                  <button
+                    onClick={handleFilterApply}
+                    disabled={isFiltering}
+                    className="px-4 py-2 bg-red-600 text-white text-sm font-bold rounded-lg hover:bg-red-700 transition-all disabled:opacity-50"
+                  >
+                    {isFiltering ? 'Filtering...' : 'Apply Filters'}
+                  </button>
+
+                  {/* Reset Filters Button */}
+                  {(statusFilter || startDate || endDate) && (
+                    <button
+                      onClick={handleFilterReset}
+                      className="px-4 py-2 bg-slate-200 text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-300 transition-all"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
             
             {/* Desktop Table View - Hidden on mobile */}
@@ -737,7 +862,7 @@ const NepalcanSalesPage = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {orders.slice(0, 10).map((order) => (
+                  {orders.map((order) => (
                     <tr key={order._id || order.orderId} className="hover:bg-slate-50 transition-all">
                       <td className="px-6 py-4 text-sm font-bold text-blue-600 cursor-pointer hover:underline" onClick={() => fetchOrderHistory(order.orderId || order.orderId)}>
                         {order.orderId || 'N/A'}
@@ -772,6 +897,63 @@ const NepalcanSalesPage = () => {
               </table>
             </div>
 
+            {/* Pagination Controls - Desktop */}
+            {totalPages > 1 && (
+              <div className="hidden lg:flex items-center justify-between px-6 py-4 border-t border-slate-100">
+                <div className="text-sm text-slate-500">
+                  Page {currentPage} of {totalPages} ({totalOrders} total orders)
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handlePageChange(currentPage - 1)}
+                    disabled={currentPage === 1}
+                    className="px-4 py-2 text-sm font-bold bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Previous
+                  </button>
+                  
+                  {/* Page numbers */}
+                  {[...Array(totalPages)].map((_, index) => {
+                    const pageNum = index + 1;
+                    // Show first, last, current, and surrounding pages
+                    if (
+                      pageNum === 1 ||
+                      pageNum === totalPages ||
+                      (pageNum >= currentPage - 1 && pageNum <= currentPage + 1)
+                    ) {
+                      return (
+                        <button
+                          key={pageNum}
+                          onClick={() => handlePageChange(pageNum)}
+                          className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${
+                            currentPage === pageNum
+                              ? 'bg-red-600 text-white'
+                              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                          }`}
+                        >
+                          {pageNum}
+                        </button>
+                      );
+                    } else if (
+                      pageNum === currentPage - 2 ||
+                      pageNum === currentPage + 2
+                    ) {
+                      return <span key={pageNum} className="px-2 text-slate-400">...</span>;
+                    }
+                    return null;
+                  })}
+
+                  <button
+                    onClick={() => handlePageChange(currentPage + 1)}
+                    disabled={currentPage === totalPages}
+                    className="px-4 py-2 text-sm font-bold bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Mobile Card View - Only visible on small screens */}
             <div className="block lg:hidden">
               {orders.length === 0 ? (
@@ -779,7 +961,7 @@ const NepalcanSalesPage = () => {
                   <ShoppingBag size={32} className="text-slate-200 mx-auto mb-2" />
                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">No orders</p>
                 </div>
-              ) : orders.slice(0, 10).map((order) => (
+              ) : orders.map((order) => (
                 <div key={order._id || order.orderId} className="p-4 border-b border-slate-100 last:border-b-0 active:bg-slate-50" onClick={() => fetchOrderHistory(order.orderId || order.orderId)}>
                   <div className="flex items-start justify-between mb-2">
                     <div className="flex-1 min-w-0">
@@ -814,6 +996,29 @@ const NepalcanSalesPage = () => {
                   </div>
                 </div>
               ))}
+
+              {/* Pagination Controls - Mobile */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100">
+                  <button
+                    onClick={() => handlePageChange(currentPage - 1)}
+                    disabled={currentPage === 1}
+                    className="px-3 py-1.5 text-xs font-bold bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-all disabled:opacity-50"
+                  >
+                    Previous
+                  </button>
+                  <span className="text-xs text-slate-500">
+                    {currentPage} / {totalPages}
+                  </span>
+                  <button
+                    onClick={() => handlePageChange(currentPage + 1)}
+                    disabled={currentPage === totalPages}
+                    className="px-3 py-1.5 text-xs font-bold bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-all disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>

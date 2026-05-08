@@ -28,6 +28,24 @@ const LeadModal = ({ isOpen, onClose, onSuccess, token }) => {
 
   useEffect(() => {
     if (isOpen) {
+      // Reset form data when modal opens
+      setFormData({
+        business_name: '',
+        contact_person: '',
+        phone: '',
+        email: '',
+        category: '',
+        location: '',
+        lead_source: 'Inbound',
+        assigned_user: '',
+        expected_product_count: 0,
+        expected_monthly_sales: 0,
+        lead_status: 'New',
+        notes: ''
+      });
+      setErrors({});
+      setDuplicity({ business_name: false, phone: false });
+
       const fetchUsers = async () => {
         try {
           const res = await axios.get(`${API_URL}/users`, {
@@ -109,6 +127,7 @@ const LeadModal = ({ isOpen, onClose, onSuccess, token }) => {
               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Business Name</label>
               <input 
                 name="business_name" required onChange={handleChange} onBlur={handleBlur}
+                value={formData.business_name}
                 className={cn(
                   "w-full px-4 py-3 bg-slate-50 border rounded-xl focus:ring-2 outline-none font-bold text-sm transition-all",
                   duplicity.business_name ? "border-red-500 focus:ring-red-500 bg-red-50" : "border-slate-200 focus:ring-red-600"
@@ -119,14 +138,14 @@ const LeadModal = ({ isOpen, onClose, onSuccess, token }) => {
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Contact Person</label>
               <input 
-                name="contact_person" required onChange={handleChange}
+                name="contact_person" onChange={handleChange}
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-600 outline-none font-bold text-sm"
               />
             </div>
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Email Address</label>
               <input 
-                type="email" name="email" required onChange={handleChange}
+                type="email" name="email" onChange={handleChange}
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-600 outline-none font-bold text-sm"
               />
             </div>
@@ -134,6 +153,7 @@ const LeadModal = ({ isOpen, onClose, onSuccess, token }) => {
               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Phone Number</label>
               <input 
                 name="phone" required onChange={handleChange} onBlur={handleBlur}
+                value={formData.phone}
                 className={cn(
                   "w-full px-4 py-3 bg-slate-50 border rounded-xl focus:ring-2 outline-none font-bold text-sm transition-all",
                   duplicity.phone ? "border-red-500 focus:ring-red-500 bg-red-50" : "border-slate-200 focus:ring-red-600"
@@ -151,7 +171,7 @@ const LeadModal = ({ isOpen, onClose, onSuccess, token }) => {
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Location</label>
               <input 
-                name="location" required onChange={handleChange}
+                name="location" onChange={handleChange}
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-600 outline-none font-bold text-sm"
               />
             </div>
@@ -173,6 +193,7 @@ const LeadModal = ({ isOpen, onClose, onSuccess, token }) => {
                 name="lead_source" required onChange={handleChange}
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-600 outline-none font-bold text-sm"
               >
+                <option value="">Select Source</option>
                 <option value="Inbound">Inbound</option>
                 <option value="Outbound">Outbound</option>
                 <option value="Referral">Referral</option>

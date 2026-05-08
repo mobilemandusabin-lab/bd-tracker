@@ -8,8 +8,8 @@ const leadSchema = new mongoose.Schema({
   },
   contact_person: {
     type: String,
-    required: [true, 'Please provide contact person name'],
-    trim: true
+    trim: true,
+    default: null
   },
   phone: {
     type: String,
@@ -17,9 +17,9 @@ const leadSchema = new mongoose.Schema({
   },
   email: {
     type: String,
-    required: [true, 'Please provide email'],
     lowercase: true,
-    trim: true
+    trim: true,
+    default: null
   },
   category: {
     type: String,
@@ -27,7 +27,8 @@ const leadSchema = new mongoose.Schema({
   },
   location: {
     type: String,
-    required: [true, 'Please provide location']
+    trim: true,
+    default: null
   },
   lead_source: {
     type: String,
