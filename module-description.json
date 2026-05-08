@@ -1,0 +1,37 @@
+{
+  "name": "BD Tracker CRM",
+  "version": "1.0.0",
+  "architecture": "MERN Stack - Modular & Event-Driven",
+  "modules": [
+    {
+      "name": "Lead Management",
+      "path": "backend/src/controllers/leadController.js",
+      "description": "Tracks vendor leads from source to activation."
+    },
+    {
+      "name": "Activity Tracking",
+      "path": "backend/src/controllers/activityController.js",
+      "description": "Logs every call, email, and follow-up for audit."
+    },
+    {
+      "name": "Vendor Onboarding",
+      "path": "backend/src/controllers/vendorController.js",
+      "description": "Manages documentation and verification stages."
+    },
+    {
+      "name": "Dashboard Analytics",
+      "path": "backend/src/controllers/dashboardController.js",
+      "description": "Provides real-time stats and performance metrics."
+    },
+    {
+      "name": "Event System",
+      "path": "backend/src/services/eventService.js",
+      "description": "Handles inter-module synchronization and automated updates."
+    }
+  ],
+  "dependencies": {
+    "auth": "JWT-based with RBAC",
+    "db": "MongoDB with Mongoose schemas",
+    "events": "Node.js EventEmitter for inter-model updates"
+  }
+}

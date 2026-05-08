@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #dc2626; /* red-600 */
+  --color-primary-dark: #991b1b; /* red-800 */
+  --color-secondary: #ffffff;
+  --color-accent: #ef4444;
+  --font-sans: Inter, system-ui, sans-serif;
+}
+
+:root {
+  background-color: #ffffff;
+  color: #1f2937;
+  --font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font-family);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom Red Button */
+.btn-red {
+  @apply bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-2xl shadow-xl shadow-red-100 hover:shadow-red-200 transition-all transform hover:-translate-y-0.5 active:scale-95;
+}
+
+/* Card Style */
+.card {
+  @apply bg-white border border-slate-100 rounded-[2rem] shadow-sm hover:shadow-lg transition-all duration-300;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-200 rounded-full hover:bg-slate-300 transition-colors;
+}
+

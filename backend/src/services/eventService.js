@@ -1,0 +1,273 @@
+const EventEmitter = require('events');
+const Vendor = require('../models/Vendor');
+const AuditLog = require('../models/AuditLog');
+const Activity = require('../models/Activity');
+const ProductReadiness = require('../models/ProductReadiness');
+const Goal = require('../models/Goal');
+const Task = require('../models/Task');
+const User = require('../models/User');
+
+class AppEventEmitter extends EventEmitter {}
+const appEventEmitter = new AppEventEmitter();
+
+/**
+ * Automated Task Generation Rules
+ * These functions create tasks based on specific triggers
+ */
+
+// Rule 1: Lead stuck in "Negotiation" for 7+ days → Escalate
+const checkNegotiationStal = async (lead) => {
+  try {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    
+    // Check if lead has been in Negotiation for 7+ days without update
+    if (lead.lead_status === 'Negotiation' && lead.updated_at < sevenDaysAgo) {
+      // Check if task already exists
+      const existingTask = await Task.findOne({
+        title: { $regex: new RegExp(`lead.*${lead._id}.*stuck.*Negotiation`, 'i') },
+        status: { $ne: 'Done' }
+      });
+
+      if (!existingTask) {
+        await Task.create({
+          title: `Lead Stuck: ${lead.business_name} in Negotiation > 7 days`,
+          description: `This lead has been in Negotiation stage for over 7 days. Please follow up immediately.`,
+          status: 'Open',
+          priority: 1, // Highest priority
+          due_date: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000), // Due in 2 days
+          created_by: lead.assigned_user,
+          assigned_to: lead.assigned_user,
+          department: lead.department
+        });
+        console.log(`[Auto Task] Created escalation task for lead ${lead.business_name}`);
+      }
+    }
+  } catch (err) {
+    console.error('[Auto Task] Error checking negotiation stal:', err.message);
+  }
+};
+
+// Rule 2: Vendor onboarding stuck → Create task for ops team
+const checkVendorOnboardingStal = async (vendor) => {
+  try {
+    const fourteenDaysAgo = new Date();
+    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+    
+    if (vendor.onboarding_stage !== 'seller_activated' && vendor.updated_at < fourteenDaysAgo) {
+      // Find ops team members
+      const opsUsers = await User.find({ role: 'operations' });
+      
+      for (const opsUser of opsUsers) {
+        const existingTask = await Task.findOne({
+          title: { $regex: new RegExp(`vendor.*${vendor._id}.*onboarding.*stuck`, 'i') },
+          status: { $ne: 'Done' },
+          assigned_to: opsUser._id
+        });
+
+        if (!existingTask) {
+          await Task.create({
+            title: `Vendor Onboarding Stuck: ${vendor.lead_id?.business_name || 'Unknown'}`,
+            description: `Vendor has been stuck in ${vendor.onboarding_stage} for over 14 days.`,
+            status: 'Open',
+            priority: 2,
+            due_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+            created_by: opsUser._id,
+            assigned_to: opsUser._id,
+            department: opsUser.department
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[Auto Task] Error checking vendor onboarding stal:', err.message);
+  }
+};
+
+// Rule 3: High-value lead with no follow-up in 48 hours
+const checkHighValueLeadFollowup = async (lead) => {
+  try {
+    if (lead.lead_score >= 70 && lead.assigned_user) {
+      const fortyEightHoursAgo = new Date();
+      fortyEightHoursAgo.setHours(fortyEightHoursAgo.getHours() - 48);
+      
+      // Check last activity
+      const lastActivity = await Activity.findOne({
+        lead_id: lead._id,
+        status: 'completed'
+      }).sort({ created_at: -1 });
+
+      if (!lastActivity || lastActivity.created_at < fortyEightHoursAgo) {
+        const existingTask = await Task.findOne({
+          title: { $regex: new RegExp(`high.*value.*${lead._id}.*follow.*up`, 'i') },
+          status: { $ne: 'Done' }
+        });
+
+        if (!existingTask) {
+          await Task.create({
+            title: `URGENT: High-Value Lead ${lead.business_name} Needs Follow-up`,
+            description: `This hot lead (score: ${lead.lead_score}) hasn't been contacted in 48+ hours. Immediate action required!`,
+            status: 'Open',
+            priority: 1,
+            due_date: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000),
+            created_by: lead.assigned_user,
+            assigned_to: lead.assigned_user,
+            department: lead.department
+          });
+          console.log(`[Auto Task] Created urgent follow-up task for high-value lead ${lead.business_name}`);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[Auto Task] Error checking high-value lead:', err.message);
+  }
+};
+
+// Helper function to update goal progress when lead reaches target stage
+const updateGoalProgress = async (lead, userId) => {
+  try {
+    // Convert lead.assigned_user to string if it's an ObjectId
+    const assignedUserId = lead.assigned_user ? lead.assigned_user.toString() : null;
+    
+    if (!assignedUserId) {
+      console.log('No assigned user for lead, skipping goal update');
+      return;
+    }
+
+    // Find active goals assigned to this user with matching pipeline stage
+    const goals = await Goal.find({
+      assigned_to: assignedUserId,
+      status: 'active',
+      pipeline_stage: lead.lead_status
+    });
+
+    console.log(`Found ${goals.length} goals for user ${assignedUserId} with pipeline stage ${lead.lead_status}`);
+
+    for (const goal of goals) {
+      // Check if the goal period includes today
+      const now = new Date();
+      const startDate = new Date(goal.start_date);
+      const endDate = new Date(goal.end_date);
+
+      if (now >= startDate && now <= endDate) {
+        // Increment the current value
+        goal.current_value += 1;
+        
+        // Auto-complete if target reached
+        if (goal.current_value >= goal.target_value) {
+          goal.status = 'completed';
+        }
+        
+        await goal.save();
+        console.log(`Goal progress updated: ${goal.title} now at ${goal.current_value}/${goal.target_value}`);
+      } else {
+        console.log(`Goal ${goal.title} not in date range: ${startDate} - ${endDate}, now: ${now}`);
+      }
+    }
+  } catch (err) {
+    console.error('Error updating goal progress:', err);
+  }
+};
+
+// Lead Status Change Handler
+appEventEmitter.on('lead.status.changed', async ({ lead, user, previous_status }) => {
+  // 1. Log Activity
+  await Activity.create({
+    lead_id: lead._id,
+    user_id: user._id,
+    activity_type: 'follow_up',
+    description: `Lead status changed from ${previous_status} to ${lead.lead_status}`,
+    status: 'completed'
+  });
+
+  // 2. Log Audit
+  await AuditLog.create({
+    user_id: user._id,
+    action_type: 'UPDATE',
+    module_name: 'Lead',
+    record_id: lead._id,
+    previous_value: { lead_status: previous_status },
+    updated_value: { lead_status: lead.lead_status },
+    ip_address: lead.ip // if provided
+  });
+
+  // 3. Handle specific status transitions
+  if (lead.lead_status === 'Onboarding') {
+    // Check if Vendor already exists
+    let vendor = await Vendor.findOne({ lead_id: lead._id });
+    if (!vendor) {
+      vendor = await Vendor.create({
+        lead_id: lead._id,
+        onboarding_stage: 'documents_pending'
+      });
+      // Also initialize product readiness
+      await ProductReadiness.create({
+        vendor_id: vendor._id
+      });
+    }
+  }
+
+  if (lead.lead_status === 'Activated') {
+    await Vendor.findOneAndUpdate(
+      { lead_id: lead._id },
+      { onboarding_stage: 'seller_activated', onboarding_completion_percentage: 100 }
+    );
+  }
+
+  // 4. Update goal progress for the assigned user
+  await updateGoalProgress(lead, user._id);
+
+  // 5. AUTO-TASK: Check if lead is stuck in Negotiation
+  await checkNegotiationStal(lead);
+
+  // 6. AUTO-TASK: Check high-value leads needing follow-up
+  await checkHighValueLeadFollowup(lead);
+});
+
+// Lead Created Handler - check for goals when new lead is created
+appEventEmitter.on('lead.created', async ({ lead, user }) => {
+  // If the lead is created with a specific status that matches a goal, update progress
+  if (lead.lead_status && lead.assigned_user) {
+    await updateGoalProgress(lead, user._id);
+  }
+});
+
+// Follow-up handler
+appEventEmitter.on('activity.followup.created', async ({ activity, user }) => {
+  await AuditLog.create({
+    user_id: user._id,
+    action_type: 'CREATE',
+    module_name: 'Activity',
+    record_id: activity._id,
+    updated_value: activity
+  });
+});
+
+// Vendor stage change handler
+appEventEmitter.on('vendor.stage.changed', async ({ vendor, user, previous_stage }) => {
+  await AuditLog.create({
+    user_id: user._id,
+    action_type: 'UPDATE',
+    module_name: 'Vendor',
+    record_id: vendor._id,
+    previous_value: { onboarding_stage: previous_stage },
+    updated_value: { onboarding_stage: vendor.onboarding_stage }
+  });
+
+  // If seller activated, update lead status
+  if (vendor.onboarding_stage === 'seller_activated') {
+    const Lead = require('../models/Lead');
+    const lead = await Lead.findById(vendor.lead_id);
+    await Lead.findByIdAndUpdate(vendor.lead_id, { lead_status: 'Activated' });
+    
+    // Also update goal progress when vendor becomes activated
+    if (lead) {
+      await updateGoalProgress(lead, user._id);
+    }
+  }
+
+  // AUTO-TASK: Check if vendor onboarding is stuck
+  await checkVendorOnboardingStal(vendor);
+});
+
+module.exports = appEventEmitter;
