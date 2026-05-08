@@ -3,7 +3,20 @@ const appEventEmitter = require('../services/eventService');
 
 exports.getVendors = async (req, res) => {
   try {
-    const vendors = await Vendor.find().populate('lead_id');
+    const userId = req.user._id;
+    const userRole = req.user.role;
+
+    let vendors;
+    if (userRole === 'user') {
+      vendors = await Vendor.find().populate({
+        path: 'lead_id',
+        match: { $or: [{ assigned_user: userId }, { creator_id: userId }] }
+      });
+      vendors = vendors.filter(v => v.lead_id !== null);
+    } else {
+      vendors = await Vendor.find().populate('lead_id');
+    }
+
     res.status(200).json({ status: 'success', results: vendors.length, data: { vendors } });
   } catch (err) {
     res.status(400).json({ status: 'fail', message: err.message });
