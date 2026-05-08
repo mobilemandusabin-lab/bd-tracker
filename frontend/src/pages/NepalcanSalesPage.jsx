@@ -37,7 +37,6 @@ const NepalcanSalesPage = () => {
   });
   const [showLoginForm, setShowLoginForm] = useState(false);
   const [initialCheckDone, setInitialCheckDone] = useState(false);
-  const [nepalcanStats, setNepalcanStats] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [orderHistory, setOrderHistory] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -346,36 +345,35 @@ const NepalcanSalesPage = () => {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchCustomer, filterStatus, filterPaymentStatus, filterStartDate, filterEndDate]);
-    if (!orders || orders.length === 0) {
-      console.log('No orders to calculate metrics from');
+
+  // Calculate stats from orders
+  const nepalcanStats = useMemo(() => {
+    if (!allOrders || allOrders.length === 0) {
       return null;
     }
 
-    console.log('Calculating metrics from', orders.length, 'orders. Sample:', orders[0]);
+    const orders = allOrders;
 
     // Filter only delivered orders for revenue and AOV calculations
     const deliveredOrdersList = orders.filter(o => o.orderStatus === 'Delivered');
     const deliveredOrdersCount = deliveredOrdersList.length;
     
-    // Revenue from delivered orders only (using totalAmount field)
+    // Revenue from delivered orders only
     const totalRevenue = deliveredOrdersList.reduce((sum, order) => {
       const orderTotal = order.totalAmount || 0;
       return sum + (typeof orderTotal === 'number' ? orderTotal : 0);
     }, 0);
     
-    // AOV (Average Order Value) = Total Amount from Delivered Orders / Number of Delivered Orders
+    // AOV (Average Order Value)
     const aov = deliveredOrdersCount > 0 ? Math.round(totalRevenue / deliveredOrdersCount) : 0;
 
-    // Processing orders (using orderStatus field)
+    // Processing orders
     const processingOrders = orders.filter(o => {
       const status = o.orderStatus || '';
       return status === 'Processing' || status === 'Pending';
     }).length;
     
-    // Delivered orders count
-    const deliveredOrders = deliveredOrdersCount;
-
-    // Unique customers (only from Delivered and Pending orders)
+    // Unique customers
     const uniqueCustomers = [...new Set(
       orders
         .filter(o => {
@@ -386,52 +384,9 @@ const NepalcanSalesPage = () => {
         .filter(Boolean)
     )].length;
 
-    // Top customers by order count (only Delivered and Pending orders)
-    const customerOrders = {};
-    orders.forEach(o => {
-      const status = o.orderStatus || '';
-      if (status === 'Delivered' || status === 'Pending') {
-        const customer = o.customer || 'Unknown';
-        customerOrders[customer] = (customerOrders[customer] || 0) + 1;
-      }
-    });
-    const topCustomers = Object.entries(customerOrders)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([name, count]) => ({ name, count }));
+    return { totalRevenue, aov, processingOrders, deliveredOrders: deliveredOrdersCount, uniqueCustomers };
+  }, [allOrders]);
 
-    // Sales per week (using createdAt and totalAmount)
-    const weeklySales = {};
-    orders.forEach(o => {
-      const dateStr = o.createdAt;
-      if (dateStr) {
-        const date = new Date(dateStr);
-        if (!isNaN(date.getTime())) {
-          const weekStart = new Date(date);
-          weekStart.setDate(date.getDate() - date.getDay());
-          const weekKey = weekStart.toISOString().split('T')[0];
-          const orderTotal = o.totalAmount || 0;
-          weeklySales[weekKey] = (weeklySales[weekKey] || 0) + (typeof orderTotal === 'number' ? orderTotal : 0);
-        }
-      }
-    });
-
-    const salesPerWeek = Object.entries(weeklySales)
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([week, revenue]) => ({ week, revenue }));
-
-    // Orders by status (using orderStatus field)
-    const ordersByStatus = {};
-    orders.forEach(o => {
-      const status = o.orderStatus || 'Unknown';
-      ordersByStatus[status] = (ordersByStatus[status] || 0) + 1;
-    });
-    const statusData = Object.entries(ordersByStatus).map(([name, value]) => ({
-      name,
-      value
-    }));
-
-    // Show login form
   if (showLoginForm || !nepalcanToken) {
     return (
       <div className="space-y-6 lg:space-y-10 max-w-[1600px] mx-auto">
