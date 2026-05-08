@@ -98,9 +98,7 @@ const NepalcanSalesPage = () => {
       try {
         const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
         const headers = {
-          'Content-Type': 'application/json',
-          'Origin': 'https://commerce.thecanbrand.com',
-          'Referer': 'https://commerce.thecanbrand.com/'
+          'Content-Type': 'application/json'
         };
 
         if (storedToken) {
@@ -178,9 +176,7 @@ const NepalcanSalesPage = () => {
         loginForm,
         {
           headers: {
-            'Content-Type': 'application/json',
-            'Origin': 'https://commerce.thecanbrand.com',
-            'Referer': 'https://commerce.thecanbrand.com/'
+            'Content-Type': 'application/json'
           }
         }
       );
@@ -205,9 +201,7 @@ const NepalcanSalesPage = () => {
     setError(null);
     try {
       const headers = {
-        'Content-Type': 'application/json',
-        'Origin': 'https://commerce.thecanbrand.com',
-        'Referer': 'https://commerce.thecanbrand.com/'
+        'Content-Type': 'application/json'
       };
       
       if (npToken) {
