@@ -20,50 +20,18 @@ const LeadActionModal = ({ isOpen, onClose, lead, token, onSuccess }) => {
   const [followUpDate, setFollowUpDate] = useState('');
   const [followUpTime, setFollowUpTime] = useState('');
   const [activityType, setActivityType] = useState('call');
-  const [isAnimatingOut, setIsAnimatingOut] = useState(true); // Start as true for initial animation
-  const [shouldRender, setShouldRender] = useState(false);
-  const [isAnimatingIn, setIsAnimatingIn] = useState(true);
-
-  // Handle open/close animations
-  useEffect(() => {
-    if (isOpen) {
-      setShouldRender(true);
-      setIsAnimatingOut(false);
-      // Small delay to trigger enter animation
-      setTimeout(() => {
-        setIsAnimatingIn(false);
-      }, 10);
-    } else if (shouldRender) {
-      setIsAnimatingOut(true);
-      setIsAnimatingIn(false);
-      const timer = setTimeout(() => {
-        setShouldRender(false);
-        setIsAnimatingOut(false);
-        setIsAnimatingIn(true); // Reset for next open
-      }, 300); // Match animation duration
-      return () => clearTimeout(timer);
-    }
-  }, [isOpen]);
 
   // Sync state when lead changes
   useEffect(() => {
-    if (lead && isOpen) {
+    if (lead) {
       setStatus(lead.lead_status || 'New');
       setNotes('');
       setFollowUpDate('');
       setFollowUpTime('');
     }
-  }, [lead, isOpen]);
+  }, [lead]);
 
-  if (!shouldRender || !lead) return null;
-
-  // Handle close with animation
-  const handleCloseWithAnimation = () => {
-    setIsAnimatingOut(true);
-    setTimeout(() => {
-      onClose();
-    }, 300); // Match animation duration
-  };
+  if (!isOpen || !lead) return null;
 
   const handleUpdateStatus = async () => {
     setLoading(true);
@@ -80,7 +48,7 @@ const LeadActionModal = ({ isOpen, onClose, lead, token, onSuccess }) => {
       });
       toast.success('Enterprise profile synchronized successfully!', { id: loadingToast });
       onSuccess();
-      handleCloseWithAnimation();
+      onClose();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Synchronization failed', { id: loadingToast });
     } finally {
@@ -98,7 +66,7 @@ const LeadActionModal = ({ isOpen, onClose, lead, token, onSuccess }) => {
       });
       toast.success('Lead access revoked permanently', { id: loadingToast });
       onSuccess();
-      handleCloseWithAnimation();
+      onClose();
     } catch (err) {
       toast.error('Revoke operation failed', { id: loadingToast });
     } finally {
@@ -108,8 +76,8 @@ const LeadActionModal = ({ isOpen, onClose, lead, token, onSuccess }) => {
 
   const statuses = [
     'New', 'Contacted', 'Interested', 'Meeting Scheduled', 
-    'Negotiation', 'Onboarding', 'Document Pending', 'Verification', 
-    'Activated', 'Active Seller', 'Lost'
+    'Negotiation', 'Document Pending', 'Verification', 
+    'Onboarding', 'Activated', 'Active Seller', 'Lost'
   ];
 
   const activityTypes = [
@@ -121,25 +89,14 @@ const LeadActionModal = ({ isOpen, onClose, lead, token, onSuccess }) => {
   ];
 
   return (
-    <div 
-      className={`fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-sm transition-opacity duration-300 ${
-        isAnimatingOut ? 'opacity-0' : 'opacity-100'
-      }`}
-      onClick={(e) => { if (e.target === e.currentTarget) handleCloseWithAnimation(); }}
-    >
-      <div className={`bg-white w-full sm:w-full sm:max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[90vh] transition-all duration-300 ${
-        isAnimatingIn 
-          ? 'translate-y-full sm:scale-95 opacity-0' 
-          : isAnimatingOut 
-            ? 'translate-y-full sm:scale-95 opacity-0' 
-            : 'translate-y-0 sm:scale-100 opacity-100'
-      }`}>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="bg-white w-full sm:w-full sm:max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in slide-in-from-bottom sm:zoom-in-95 duration-300 flex flex-col max-h-[95vh] sm:max-h-[90vh]">
         <div className="px-6 sm:px-8 py-4 sm:py-6 bg-slate-900 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3 text-white">
             <RefreshCcw size={20} />
             <h2 className="text-base sm:text-lg font-black uppercase tracking-widest">Execute Action</h2>
           </div>
-          <button onClick={handleCloseWithAnimation} className="p-2 hover:bg-white/10 rounded-full text-white transition-colors">
+          <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full text-white transition-colors">
             <X size={24} />
           </button>
         </div>

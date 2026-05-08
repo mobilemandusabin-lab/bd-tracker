@@ -80,13 +80,13 @@ app.use('/api/v1/nepalcan', nepalcanRoutes);
 app.use('/api/v1/nepalcan-orders', nepalcanOrderRoutes);
 
 // Serve Static Frontend in Production
-// Commented out: Frontend is deployed separately on Vercel
-// if (process.env.NODE_ENV === 'production') {
-//   app.use(express.static(path.join(__dirname, '../../frontend/dist')));  
-//   app.get('*path', (req, res) => {
-//     res.sendFile(path.resolve(__dirname, '../../frontend', 'dist', 'index.html'));
-//   });
-// }
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, '../../frontend/dist')));
+  
+  app.get('*path', (req, res) => {
+    res.sendFile(path.resolve(__dirname, '../../frontend', 'dist', 'index.html'));
+  });
+}
 
 // Error Handling Middleware
 app.use((err, req, res, next) => {

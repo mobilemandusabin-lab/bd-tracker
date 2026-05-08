@@ -27,26 +27,17 @@ const NepalcanSalesPage = () => {
   const [loginLoading, setLoginLoading] = useState(false);
   const [error, setError] = useState(null);
   const [nepalcanToken, setNepalcanToken] = useState(null);
-  const [allOrders, setAllOrders] = useState([]); // Store all fetched orders
-  const [filteredOrders, setFilteredOrders] = useState([]); // Orders after filtering
-  const [currentPage, setCurrentPage] = useState(1);
-  const [ordersPerPage] = useState(10);
+  const [orders, setOrders] = useState([]);
   const [loginForm, setLoginForm] = useState({
     email: 'sabin.awal@buy.nepalcan.com',
     password: '1'
   });
   const [showLoginForm, setShowLoginForm] = useState(false);
   const [initialCheckDone, setInitialCheckDone] = useState(false);
+  const [nepalcanStats, setNepalcanStats] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [orderHistory, setOrderHistory] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
-  
-  // Filter states
-  const [searchCustomer, setSearchCustomer] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
-  const [filterPaymentStatus, setFilterPaymentStatus] = useState('');
-  const [filterStartDate, setFilterStartDate] = useState('');
-  const [filterEndDate, setFilterEndDate] = useState('');
 
   // Fetch stats from backend
   const fetchStats = async () => {
@@ -98,7 +89,9 @@ const NepalcanSalesPage = () => {
       try {
         const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
         const headers = {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Origin': 'https://commerce.thecanbrand.com',
+          'Referer': 'https://commerce.thecanbrand.com/'
         };
 
         if (storedToken) {
@@ -135,7 +128,7 @@ const NepalcanSalesPage = () => {
 
         if (ordersList.length > 0) {
           console.log('Auto-fetched orders:', ordersList.length);
-          setAllOrders(ordersList);
+          setOrders(ordersList);
           setShowLoginForm(false);
           syncOrdersToBackend(ordersList, storedToken);
         } else {
@@ -176,7 +169,9 @@ const NepalcanSalesPage = () => {
         loginForm,
         {
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Origin': 'https://commerce.thecanbrand.com',
+            'Referer': 'https://commerce.thecanbrand.com/'
           }
         }
       );
@@ -201,7 +196,9 @@ const NepalcanSalesPage = () => {
     setError(null);
     try {
       const headers = {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Origin': 'https://commerce.thecanbrand.com',
+        'Referer': 'https://commerce.thecanbrand.com/'
       };
       
       if (npToken) {
@@ -235,8 +232,9 @@ const NepalcanSalesPage = () => {
         ordersList = responseData.data;
       }
 
-      console.log('Fetched orders:', ordersList.length, 'Sample:', ordersList[0]);      
-      setAllOrders(ordersList);
+      console.log('Fetched orders:', ordersList.length, 'Sample:', ordersList[0]);
+      
+      setOrders(ordersList);
       syncOrdersToBackend(ordersList, npToken);
     } catch (err) {
       console.error('Fetch error:', err);
@@ -290,84 +288,40 @@ const NepalcanSalesPage = () => {
     setOrderHistory(null);
   };
 
-  // Calculate paginated orders with filters
-  const { paginatedOrders, totalPages, totalOrders } = useMemo(() => {
-    let filtered = [...allOrders];
-
-    // Filter by customer name (search)
-    if (searchCustomer.trim()) {
-      const search = searchCustomer.toLowerCase();
-      filtered = filtered.filter(order => 
-        (order.customer && order.customer.toLowerCase().includes(search)) ||
-        (order.shippingAddress?.firstName && order.shippingAddress.firstName.toLowerCase().includes(search)) ||
-        (order.shippingAddress?.lastName && order.shippingAddress.lastName.toLowerCase().includes(search))
-      );
-    }
-
-    // Filter by order status
-    if (filterStatus) {
-      filtered = filtered.filter(order => order.orderStatus === filterStatus);
-    }
-
-    // Filter by payment status
-    if (filterPaymentStatus) {
-      filtered = filtered.filter(order => order.paymentStatus === filterPaymentStatus);
-    }
-
-    // Filter by date range
-    if (filterStartDate) {
-      const startDate = new Date(filterStartDate);
-      startDate.setHours(0, 0, 0, 0);
-      filtered = filtered.filter(order => new Date(order.createdAt) >= startDate);
-    }
-
-    if (filterEndDate) {
-      const endDate = new Date(filterEndDate);
-      endDate.setHours(23, 59, 59, 999);
-      filtered = filtered.filter(order => new Date(order.createdAt) <= endDate);
-    }
-
-    const total = filtered.length;
-    const pages = Math.ceil(total / ordersPerPage) || 1;
-    const startIndex = (currentPage - 1) * ordersPerPage;
-    const paginated = filtered.slice(startIndex, startIndex + ordersPerPage);
-
-    return { paginatedOrders: paginated, totalPages: pages, totalOrders: total };
-  }, [allOrders, searchCustomer, filterStatus, filterPaymentStatus, filterStartDate, filterEndDate, currentPage, ordersPerPage]);
-
-  // Reset to page 1 when filters change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchCustomer, filterStatus, filterPaymentStatus, filterStartDate, filterEndDate]);
-
-  // Calculate stats from orders
-  const nepalcanStats = useMemo(() => {
-    if (!allOrders || allOrders.length === 0) {
+  // Calculate dashboard metrics from orders
+  const dashboardMetrics = useMemo(() => {
+    if (!orders || orders.length === 0) {
+      console.log('No orders to calculate metrics from');
       return null;
     }
 
-    const orders = allOrders;
+    console.log('Calculating metrics from', orders.length, 'orders. Sample:', orders[0]);
+
+    const totalOrders = orders.length;
 
     // Filter only delivered orders for revenue and AOV calculations
     const deliveredOrdersList = orders.filter(o => o.orderStatus === 'Delivered');
     const deliveredOrdersCount = deliveredOrdersList.length;
     
-    // Revenue from delivered orders only
+    // Revenue from delivered orders only (using totalAmount field)
     const totalRevenue = deliveredOrdersList.reduce((sum, order) => {
       const orderTotal = order.totalAmount || 0;
       return sum + (typeof orderTotal === 'number' ? orderTotal : 0);
     }, 0);
     
-    // AOV (Average Order Value)
+    // AOV (Average Order Value) = Total Amount from Delivered Orders / Number of Delivered Orders
     const aov = deliveredOrdersCount > 0 ? Math.round(totalRevenue / deliveredOrdersCount) : 0;
 
-    // Processing orders
+    // Processing orders (using orderStatus field)
     const processingOrders = orders.filter(o => {
       const status = o.orderStatus || '';
       return status === 'Processing' || status === 'Pending';
     }).length;
     
-    // Unique customers
+    // Delivered orders count
+    const deliveredOrders = deliveredOrdersCount;
+
+    // Unique customers (only from Delivered and Pending orders)
     const uniqueCustomers = [...new Set(
       orders
         .filter(o => {
@@ -378,9 +332,65 @@ const NepalcanSalesPage = () => {
         .filter(Boolean)
     )].length;
 
-    return { totalRevenue, aov, processingOrders, deliveredOrders: deliveredOrdersCount, uniqueCustomers };
-  }, [allOrders]);
+    // Top customers by order count (only Delivered and Pending orders)
+    const customerOrders = {};
+    orders.forEach(o => {
+      const status = o.orderStatus || '';
+      if (status === 'Delivered' || status === 'Pending') {
+        const customer = o.customer || 'Unknown';
+        customerOrders[customer] = (customerOrders[customer] || 0) + 1;
+      }
+    });
+    const topCustomers = Object.entries(customerOrders)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, count]) => ({ name, count }));
 
+    // Sales per week (using createdAt and totalAmount)
+    const weeklySales = {};
+    orders.forEach(o => {
+      const dateStr = o.createdAt;
+      if (dateStr) {
+        const date = new Date(dateStr);
+        if (!isNaN(date.getTime())) {
+          const weekStart = new Date(date);
+          weekStart.setDate(date.getDate() - date.getDay());
+          const weekKey = weekStart.toISOString().split('T')[0];
+          const orderTotal = o.totalAmount || 0;
+          weeklySales[weekKey] = (weeklySales[weekKey] || 0) + (typeof orderTotal === 'number' ? orderTotal : 0);
+        }
+      }
+    });
+
+    const salesPerWeek = Object.entries(weeklySales)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([week, revenue]) => ({ week, revenue }));
+
+    // Orders by status (using orderStatus field)
+    const ordersByStatus = {};
+    orders.forEach(o => {
+      const status = o.orderStatus || 'Unknown';
+      ordersByStatus[status] = (ordersByStatus[status] || 0) + 1;
+    });
+    const statusData = Object.entries(ordersByStatus).map(([name, value]) => ({
+      name,
+      value
+    }));
+
+    return {
+      totalOrders,
+      totalRevenue,
+      aov,
+      processingOrders,
+      deliveredOrders,
+      uniqueCustomers,
+      topCustomers,
+      salesPerWeek,
+      statusData
+    };
+  }, [orders]);
+
+  // Show login form
   if (showLoginForm || !nepalcanToken) {
     return (
       <div className="space-y-6 lg:space-y-10 max-w-[1600px] mx-auto">
@@ -706,78 +716,11 @@ const NepalcanSalesPage = () => {
 
           {/* Orders Table */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-            <div className="p-4 sm:p-6 border-b border-slate-100 space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
-                  <ShoppingBag size={20} />
-                  Recent Orders ({totalOrders})
-                </h3>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      setSearchCustomer('');
-                      setFilterStatus('');
-                      setFilterPaymentStatus('');
-                      setFilterStartDate('');
-                      setFilterEndDate('');
-                    }}
-                    className="px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-500 hover:text-slate-900 transition-colors"
-                  >
-                    Clear Filters
-                  </button>
-                </div>
-              </div>
-              
-              {/* Filters */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                <input
-                  type="text"
-                  placeholder="Search customer..."
-                  value={searchCustomer}
-                  onChange={(e) => setSearchCustomer(e.target.value)}
-                  className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-600 outline-none font-bold text-xs"
-                />
-                <select
-                  value={filterStatus}
-                  onChange={(e) => setFilterStatus(e.target.value)}
-                  className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-600 outline-none font-bold text-xs"
-                >
-                  <option value="">All Order Status</option>
-                  <option value="Pending">Pending</option>
-                  <option value="Processing">Processing</option>
-                  <option value="Shipped">Shipped</option>
-                  <option value="Delivered">Delivered</option>
-                  <option value="Cancelled">Cancelled</option>
-                </select>
-                <select
-                  value={filterPaymentStatus}
-                  onChange={(e) => setFilterPaymentStatus(e.target.value)}
-                  className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-600 outline-none font-bold text-xs"
-                >
-                  <option value="">All Payment Status</option>
-                  <option value="Paid">Paid</option>
-                  <option value="Pending">Pending</option>
-                  <option value="Completed">Completed</option>
-                  <option value="Failed">Failed</option>
-                </select>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="date"
-                    value={filterStartDate}
-                    onChange={(e) => setFilterStartDate(e.target.value)}
-                    className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-600 outline-none font-bold text-xs"
-                    placeholder="Start Date"
-                  />
-                  <span className="text-slate-400 text-xs">to</span>
-                  <input
-                    type="date"
-                    value={filterEndDate}
-                    onChange={(e) => setFilterEndDate(e.target.value)}
-                    className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-600 outline-none font-bold text-xs"
-                    placeholder="End Date"
-                  />
-                </div>
-              </div>
+            <div className="p-6 border-b border-slate-100">
+              <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                <ShoppingBag size={20} />
+                Recent Orders
+              </h3>
             </div>
             
             {/* Desktop Table View - Hidden on mobile */}
@@ -787,7 +730,6 @@ const NepalcanSalesPage = () => {
                   <tr>
                     <th className="px-6 py-3 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Order ID</th>
                     <th className="px-6 py-3 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Customer</th>
-                    <th className="px-6 py-3 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Phone</th>
                     <th className="px-6 py-3 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Status</th>
                     <th className="px-6 py-3 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Payment Status</th>
                     <th className="px-6 py-3 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Total</th>
@@ -795,21 +737,12 @@ const NepalcanSalesPage = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {paginatedOrders.length === 0 ? (
-                    <tr>
-                      <td colSpan="7" className="px-6 py-8 text-center text-sm text-slate-400">
-                        No orders found with current filters
-                      </td>
-                    </tr>
-                  ) : paginatedOrders.map((order) => (
+                  {orders.slice(0, 10).map((order) => (
                     <tr key={order._id || order.orderId} className="hover:bg-slate-50 transition-all">
                       <td className="px-6 py-4 text-sm font-bold text-blue-600 cursor-pointer hover:underline" onClick={() => fetchOrderHistory(order.orderId || order.orderId)}>
                         {order.orderId || 'N/A'}
                       </td>
                       <td className="px-6 py-4 text-sm text-slate-600">{order.customer || 'N/A'}</td>
-                      <td className="px-6 py-4 text-sm text-slate-600">
-                        {order.shippingAddress?.phone || order.billingAddress?.phone || 'N/A'}
-                      </td>
                       <td className="px-6 py-4">
                         <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${
                           order.orderStatus === 'Delivered' ? 'bg-emerald-100 text-emerald-700' :
@@ -841,20 +774,17 @@ const NepalcanSalesPage = () => {
 
             {/* Mobile Card View - Only visible on small screens */}
             <div className="block lg:hidden">
-              {paginatedOrders.length === 0 ? (
+              {orders.length === 0 ? (
                 <div className="p-8 text-center">
                   <ShoppingBag size={32} className="text-slate-200 mx-auto mb-2" />
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">No orders found</p>
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">No orders</p>
                 </div>
-              ) : paginatedOrders.map((order) => (
+              ) : orders.slice(0, 10).map((order) => (
                 <div key={order._id || order.orderId} className="p-4 border-b border-slate-100 last:border-b-0 active:bg-slate-50" onClick={() => fetchOrderHistory(order.orderId || order.orderId)}>
                   <div className="flex items-start justify-between mb-2">
                     <div className="flex-1 min-w-0">
                       <div className="font-bold text-sm text-blue-600 truncate">{order.orderId || 'N/A'}</div>
                       <div className="text-sm font-bold text-slate-700 truncate mt-0.5">{order.customer || 'N/A'}</div>
-                      <div className="text-[10px] text-slate-500 mt-0.5">
-                        {order.shippingAddress?.phone || order.billingAddress?.phone || 'No phone'}
-                      </div>
                     </div>
                     <div className="ml-2 shrink-0">
                       <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${
@@ -885,29 +815,6 @@ const NepalcanSalesPage = () => {
                 </div>
               ))}
             </div>
-
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <div className="p-4 border-t border-slate-100 flex items-center justify-between">
-                <button
-                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                  disabled={currentPage === 1}
-                  className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-xs font-bold uppercase tracking-widest disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-200 transition-all"
-                >
-                  ← Previous
-                </button>
-                <span className="text-xs font-bold text-slate-600">
-                  Page {currentPage} of {totalPages}
-                </span>
-                <button
-                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                  disabled={currentPage === totalPages}
-                  className="px-4 py-2 bg-red-600 text-white rounded-xl text-xs font-bold uppercase tracking-widest disabled:opacity-50 disabled:cursor-not-allowed hover:bg-red-700 transition-all"
-                >
-                  Next →
-                </button>
-              </div>
-            )}
           </div>
         </div>
       )}

@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const statusHistorySchema = new mongoose.Schema({
   status: {
@@ -109,4 +109,4 @@ nepalcanOrderSchema.methods.getTotalFulfillmentTime = function() {
   return null;
 };
 
-module.exports = mongoose.model('NepalcanOrder', nepalcanOrderSchema);
+export default mongoose.model('NepalcanOrder', nepalcanOrderSchema);

@@ -14,12 +14,10 @@ import {
   Mail,
   MoreVertical,
   ShieldCheck,
-  Building2,
-  Pencil
+  Building2
 } from 'lucide-react';
 import { cn } from '../utils/cn';
 import VendorDetailModal from '../components/VendorDetailModal';
-import VendorActionModal from '../components/VendorActionModal';
 
 import { API_URL } from '../config/api';
 
@@ -28,7 +26,6 @@ const OnboardingPage = () => {
   const [loading, setLoading] = useState(true);
   const [selectedVendor, setSelectedVendor] = useState(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
-  const [isActionModalOpen, setIsActionModalOpen] = useState(false);
   const { token } = useSelector((state) => state.auth);
 
   const fetchVendors = async () => {
@@ -53,17 +50,6 @@ const OnboardingPage = () => {
     setIsDetailModalOpen(true);
   };
 
-  const handleEdit = (vendor) => {
-    setSelectedVendor(vendor);
-    setIsActionModalOpen(true);
-  };
-
-  const handleActionSuccess = () => {
-    setIsActionModalOpen(false);
-    setSelectedVendor(null);
-    fetchVendors();
-  };
-
   const getStageColor = (stage) => {
     switch(stage) {
       case 'documents_pending': return 'bg-amber-50 text-amber-600 border-amber-100';
@@ -79,13 +65,6 @@ const OnboardingPage = () => {
         isOpen={isDetailModalOpen}
         onClose={() => { setIsDetailModalOpen(false); setSelectedVendor(null); }}
         vendor={selectedVendor}
-      />
-      <VendorActionModal
-        isOpen={isActionModalOpen}
-        onClose={() => { setIsActionModalOpen(false); setSelectedVendor(null); }}
-        vendor={selectedVendor}
-        token={token}
-        onSuccess={handleActionSuccess}
       />
       
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 lg:gap-6">
@@ -196,14 +175,9 @@ const OnboardingPage = () => {
                     </div>
                   </td>
                   <td className="px-6 py-3 text-right">
-                    <div className="flex items-center justify-end gap-1.5">
-                      <button onClick={() => handleEdit(vendor)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all" title="Edit Vendor">
-                        <Pencil size={14} />
-                      </button>
-                      <button onClick={() => handleDetail(vendor)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all" title="View Details">
-                        <ExternalLink size={14} />
-                      </button>
-                    </div>
+                    <button onClick={() => handleDetail(vendor)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all">
+                      <ExternalLink size={14} />
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -233,14 +207,9 @@ const OnboardingPage = () => {
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <button onClick={() => handleEdit(vendor)} className="p-2 bg-slate-50 text-slate-400 rounded-xl active:bg-red-50" title="Edit Vendor">
-                    <Pencil size={18} />
-                  </button>
-                  <button onClick={() => handleDetail(vendor)} className="p-2 bg-slate-50 text-slate-400 rounded-xl active:bg-red-50" title="View Details">
-                    <ExternalLink size={18} />
-                  </button>
-                </div>
+                <button onClick={() => handleDetail(vendor)} className="p-2 bg-slate-50 text-slate-400 rounded-xl">
+                  <ExternalLink size={18} />
+                </button>
               </div>
 
               <div className="grid grid-cols-2 gap-3 mb-3">

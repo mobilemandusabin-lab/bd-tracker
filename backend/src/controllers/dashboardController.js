@@ -5,21 +5,7 @@ const Task = require('../models/Task');
 
 exports.getStats = async (req, res) => {
   try {
-    const userId = req.user._id;
-    const userRole = req.user.role;
-
-    let leadFilter = {};
-    let taskFilter = {};
-    let activityFilter = {};
-
-    if (userRole === 'user') {
-      leadFilter = { $or: [{ assigned_user: userId }, { creator_id: userId }] };
-      taskFilter = { assigned_to: userId };
-      activityFilter = { user_id: userId };
-    }
-
     const leadStats = await Lead.aggregate([
-      ...(userRole !== 'user' ? [] : [{ $match: leadFilter }]),
       {
         $group: {
           _id: '$lead_status',
@@ -29,18 +15,6 @@ exports.getStats = async (req, res) => {
     ]);
 
     const onboardingStats = await Vendor.aggregate([
-      ...(userRole !== 'user' ? [] : [
-        {
-          $lookup: {
-            from: 'leads',
-            localField: 'lead_id',
-            foreignField: '_id',
-            as: 'lead'
-          }
-        },
-        { $unwind: '$lead' },
-        { $match: { $or: [{ 'lead.assigned_user': userId }, { 'lead.creator_id': userId }] } }
-      ]),
       {
         $group: {
           _id: '$onboarding_stage',
@@ -49,10 +23,10 @@ exports.getStats = async (req, res) => {
       }
     ]);
 
-    const totalLeads = await Lead.countDocuments(leadFilter);
-    const activeSellers = await Lead.countDocuments({ ...leadFilter, lead_status: 'Active Seller' });
-    const pendingTasks = await Task.countDocuments(taskFilter);
-    const pendingFollowups = await Activity.countDocuments({ ...activityFilter, follow_up_required: true, status: 'pending' });
+    const totalLeads = await Lead.countDocuments();
+    const activeSellers = await Lead.countDocuments({ lead_status: 'Active Seller' });
+    const pendingTasks = await Task.countDocuments({ status: 'pending' });
+    const pendingFollowups = await Activity.countDocuments({ follow_up_required: true, status: 'pending' });
 
     res.status(200).json({
       status: 'success',
@@ -74,15 +48,7 @@ exports.getStats = async (req, res) => {
 
 exports.getLeadGrowth = async (req, res) => {
   try {
-    const userId = req.user._id;
-    const userRole = req.user.role;
-
-    const matchStage = userRole === 'user' 
-      ? { $or: [{ assigned_user: userId }, { creator_id: userId }] }
-      : {};
-
     const growth = await Lead.aggregate([
-      ...(Object.keys(matchStage).length ? [{ $match: matchStage }] : []),
       {
         $group: {
           _id: { $month: "$created_at" },
