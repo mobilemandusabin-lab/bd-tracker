@@ -74,7 +74,15 @@ exports.getStats = async (req, res) => {
 
 exports.getLeadGrowth = async (req, res) => {
   try {
+    const userId = req.user._id;
+    const userRole = req.user.role;
+
+    const matchStage = userRole === 'user' 
+      ? { $or: [{ assigned_user: userId }, { creator_id: userId }] }
+      : {};
+
     const growth = await Lead.aggregate([
+      ...(Object.keys(matchStage).length ? [{ $match: matchStage }] : []),
       {
         $group: {
           _id: { $month: "$created_at" },
