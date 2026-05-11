@@ -107,37 +107,37 @@ const [pipelineFilter, setPipelineFilter] = useState('all');
   const [followupInfo, setFollowupInfo] = useState(null);
 
 // Helper to refetch leads based on current tab context
-    const refetchLeads = useCallback(() => {
-      const limit = 25; // 25 leads per batch for better performance
-      
-      // When searching, filter within the currently active tab
-      // When not searching, filter by current tab
-      if (searchQuery) {
-        if (activeTab === 'database') {
-          dispatch(fetchLeads({ page: 1, limit, search: searchQuery }));
-        } else if (activeTab === 'pending') {
-          dispatch(fetchLeads({ assignment_status: 'pending', page: 1, limit: 10, search: searchQuery }));
-        } else if (activeTab === 'recent') {
-          // Recent shows both pending (newly assigned) and accepted leads
-          dispatch(fetchLeads({ recent: 'true', page: 1, limit, search: searchQuery }));
-        } else if (activeTab === 'accepted') {
-          dispatch(fetchLeads({ assignment_status: 'accepted', page: 1, limit, search: searchQuery }));
-        } else if (activeTab !== 'followup') {
-          dispatch(fetchLeads({ assignment_status: activeTab, page: 1, limit: 10, search: searchQuery }));
-        } else {
-          dispatch(fetchLeads({ page: 1, limit, search: searchQuery }));
-        }
-      } else if (activeTab === 'pending') {
-        dispatch(fetchLeads({ assignment_status: 'pending', page: 1, limit: 10 }));
-      } else if (activeTab === 'recent') {
-        // Recent shows both pending (newly assigned) and accepted leads for "recently added" view
-        dispatch(fetchLeads({ recent: 'true', page: 1, limit }));
-      } else if (activeTab === 'accepted') {
-        dispatch(fetchLeads({ assignment_status: 'accepted', page: 1, limit }));
-      } else if (activeTab !== 'followup' && activeTab !== 'database') {
-        dispatch(fetchLeads({ assignment_status: activeTab, page: 1, limit: 10 }));
-      }
-    }, [activeTab, dispatch, searchQuery]);
+const refetchLeads = useCallback(() => {
+       const limit = 25; // 25 leads per batch for better performance
+       
+       // When searching, filter within the currently active tab
+       // When not searching, filter by current tab
+       if (searchQuery) {
+         if (activeTab === 'database') {
+           dispatch(fetchLeads({ page: 1, limit, search: searchQuery, all: 'true' }));
+         } else if (activeTab === 'pending') {
+           dispatch(fetchLeads({ assignment_status: 'pending', page: 1, limit: 10, search: searchQuery }));
+         } else if (activeTab === 'recent') {
+           // Recent shows both pending (newly assigned) and accepted leads
+           dispatch(fetchLeads({ recent: 'true', page: 1, limit, search: searchQuery }));
+         } else if (activeTab === 'accepted') {
+           dispatch(fetchLeads({ assignment_status: 'accepted', page: 1, limit, search: searchQuery }));
+         } else if (activeTab !== 'followup') {
+           dispatch(fetchLeads({ assignment_status: activeTab, page: 1, limit: 10, search: searchQuery }));
+         } else {
+           dispatch(fetchLeads({ page: 1, limit, search: searchQuery }));
+         }
+       } else if (activeTab === 'pending') {
+         dispatch(fetchLeads({ assignment_status: 'pending', page: 1, limit: 10 }));
+       } else if (activeTab === 'recent') {
+         // Recent shows both pending (newly assigned) and accepted leads for "recently added" view
+         dispatch(fetchLeads({ recent: 'true', page: 1, limit }));
+       } else if (activeTab === 'accepted') {
+         dispatch(fetchLeads({ assignment_status: 'accepted', page: 1, limit }));
+       } else if (activeTab !== 'followup' && activeTab !== 'database') {
+         dispatch(fetchLeads({ assignment_status: activeTab, page: 1, limit: 10 }));
+       }
+     }, [activeTab, dispatch, searchQuery]);
 
 // Handle tab changes - reset search
    useEffect(() => {

@@ -5,6 +5,7 @@ const InstallPrompt = () => {
   const [showPrompt, setShowPrompt] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [isInstalled, setIsInstalled] = useState(false);
 
   useEffect(() => {
     const checkPlatform = () => {
@@ -14,6 +15,10 @@ const InstallPrompt = () => {
     };
     
     checkPlatform();
+    
+    // Check if running as PWA (installed)
+    const isPWA = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+    setIsInstalled(isPWA);
 
     const handler = (e) => {
       e.preventDefault();
@@ -32,11 +37,23 @@ const InstallPrompt = () => {
       const { outcome } = await deferredPrompt.userChoice;
       if (outcome === 'accepted') {
         setShowPrompt(false);
+        setIsInstalled(true);
       }
       setDeferredPrompt(null);
     }
   };
 
+  const handleDismiss = () => {
+    setShowPrompt(false);
+    // Remember dismissal for this session
+    sessionStorage.setItem('installPromptDismissed', 'true');
+  };
+
+  // Don't show if already installed or dismissed in session, or not relevant platform
+  if (isInstalled || sessionStorage.getItem('installPromptDismissed')) return null;
+  
+  // For iOS, show only if not already in standalone mode (already checked above)
+  // For Android/desktop, show only when beforeinstallprompt fires
   if (!showPrompt && !isIOS) return null;
 
   const isMobileSafari = isIOS && !window.MSStream;
@@ -50,12 +67,12 @@ const InstallPrompt = () => {
         <div className="flex-1">
           <h3 className="font-black text-slate-900 text-sm">Install BD Tracker</h3>
           <p className="text-xs text-slate-500 mt-1">
-            {isMobileSafari
+            {isIOS
               ? 'Tap Share → "Add to Home Screen"'
               : 'Install for quick access and notifications'
             }
           </p>
-          {!isMobileSafari && deferredPrompt && (
+          {!isIOS && deferredPrompt && (
             <button
               onClick={handleInstall}
               className="mt-2 px-3 py-1.5 bg-red-600 text-white text-xs font-black rounded-lg"
@@ -65,7 +82,7 @@ const InstallPrompt = () => {
           )}
         </div>
         <button
-          onClick={() => setShowPrompt(false)}
+          onClick={handleDismiss}
           className="p-1 text-slate-400 hover:text-slate-600"
         >
           <X size={16} />

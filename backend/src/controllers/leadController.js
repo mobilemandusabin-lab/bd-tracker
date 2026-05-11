@@ -117,16 +117,16 @@ exports.getAllLeads = async (req, res) => {
     const query = {};
     const user = req.user;
     
-    // Implement strict role-based visibility for viewing leads
-    if (user.role === 'super_admin') {
-      // Super Admin can see all leads
-    } else {
-      // Everyone else (Admins, Users, etc.) can ONLY see leads assigned to them
+    // Database search mode (all=true with search) allows searching entire database
+    const isGlobalSearch = req.query.all === 'true' && req.query.search;
+    
+    if (!isGlobalSearch) {
+      // Default: Users see only their assigned leads
       query.assigned_user = user._id;
     }
 
     // Filter by assignment status if provided
-    if (req.query.assignment_status) {
+    if (req.query.assignment_status && !isGlobalSearch) {
       query.assignment_status = req.query.assignment_status;
     }
 
