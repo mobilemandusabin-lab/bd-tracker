@@ -117,11 +117,12 @@ exports.getAllLeads = async (req, res) => {
     const query = {};
     const user = req.user;
     
-    // Database search mode (all=true with search) allows searching entire database
+    // Database search mode (all=true with search) allows searching entire database for all users
     const isGlobalSearch = req.query.all === 'true' && req.query.search;
     
-    if (!isGlobalSearch) {
-      // Default: Users see only their assigned leads
+    // Super admin sees all leads by default, other users see only their assigned leads
+    // Database search bypasses all user filtering for all users
+    if (!isGlobalSearch && user.role !== 'super_admin') {
       query.assigned_user = user._id;
     }
 
