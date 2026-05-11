@@ -26,6 +26,7 @@ const leadSlice = createSlice({
   initialState: {
     items: [],
     loading: false,
+    loadingMore: false,
     error: null,
     pagination: null,
     currentPage: 1,
@@ -41,11 +42,18 @@ const leadSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
-      .addCase(fetchLeads.pending, (state) => {
-        state.loading = true;
+      .addCase(fetchLeads.pending, (state, action) => {
+        // Check if this is a load more request (page > 1)
+        const page = action.meta.arg?.page || 1;
+        if (page > 1 && state.items.length > 0) {
+          state.loadingMore = true;
+        } else {
+          state.loading = true;
+        }
       })
       .addCase(fetchLeads.fulfilled, (state, action) => {
         state.loading = false;
+        state.loadingMore = false;
         const newLeads = action.payload.data.leads;
         const pagination = action.payload.pagination;
         
@@ -58,11 +66,19 @@ const leadSlice = createSlice({
         }
         
         state.currentPage = pagination ? pagination.page : 1;
-        state.hasMore = pagination ? (pagination.page < pagination.totalPages) : false;
+        // Determine hasMore: if pagination info exists, use totalPages; otherwise compare results to limit
+        if (pagination && pagination.totalPages) {
+          state.hasMore = pagination.page < pagination.totalPages;
+        } else if (newLeads.length === 0 || newLeads.length < (pagination?.limit || newLeads.length)) {
+          state.hasMore = false;
+        } else {
+          state.hasMore = true;
+        }
         state.pagination = pagination;
       })
       .addCase(fetchLeads.rejected, (state, action) => {
         state.loading = false;
+        state.loadingMore = false;
         state.error = action.payload?.message || 'Failed to fetch leads';
       });
   }

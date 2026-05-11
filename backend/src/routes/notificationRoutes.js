@@ -7,6 +7,7 @@ router.use(authMiddleware.protect);
 
 router.get('/', notificationController.getMyNotifications);
 router.get('/unread-count', notificationController.getUnreadCount);
+router.get('/follow-ups/today', notificationController.getTodayFollowUps);
 router.patch('/mark-all-read', notificationController.markAllAsRead);
 router.patch('/:id/mark-read', notificationController.markAsRead);
 

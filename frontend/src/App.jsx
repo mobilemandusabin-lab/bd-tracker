@@ -16,6 +16,7 @@ import TicketsPage from './pages/TicketsPage';
 import BDLeaderboardPage from './pages/BDLeaderboardPage';
 import NepalcanSalesPage from './pages/NepalcanSalesPage';
 import ProtectedRoute from './components/ProtectedRoute';
+import InstallPrompt from './components/InstallPrompt';
 
 function App() {
   const dispatch = useDispatch();
@@ -50,6 +51,7 @@ function App() {
           },
         }}
       />
+      <InstallPrompt />
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />

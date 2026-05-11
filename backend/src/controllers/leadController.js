@@ -1,4 +1,5 @@
 const Lead = require('../models/Lead');
+const User = require('../models/User');
 const appEventEmitter = require('../services/eventService');
 
 exports.createLead = async (req, res) => {
@@ -38,6 +39,16 @@ exports.createLead = async (req, res) => {
       } else {
         leadData.assignment_status = 'pending';
       }
+    }
+
+    // Set default email to TBD if not provided
+    if (!leadData.email || leadData.email.trim() === '') {
+      leadData.email = 'TBD';
+    }
+
+    // Validate phone number (must be 10 digits)
+    if (leadData.phone && !/^\d{10}$/.test(leadData.phone)) {
+      return res.status(400).json({ status: 'fail', message: 'Phone number must be exactly 10 digits' });
     }
 
     const newLead = await Lead.create(leadData);    
@@ -106,25 +117,12 @@ exports.getAllLeads = async (req, res) => {
     const query = {};
     const user = req.user;
     
-    // Implement role-based hierarchy for viewing leads
+    // Implement strict role-based visibility for viewing leads
     if (user.role === 'super_admin') {
-      // Can see all leads - no filter needed
-    } else if (user.role === 'admin') {
-      // Can see leads assigned to 'user' role staff, plus own leads
-      const juniorUsers = await User.find({ role: 'user' }).select('_id');
-      const juniorUserIds = juniorUsers.map(u => u._id);
-      juniorUserIds.push(user._id); // Include own ID
-      
-      query.$or = [
-        { assigned_user: { $in: juniorUserIds } },
-        { creator_id: { $in: juniorUserIds } }
-      ];
+      // Super Admin can see all leads
     } else {
-      // Regular users can only see their own leads
-      query.$or = [
-        { assigned_user: user._id },
-        { creator_id: user._id }
-      ];
+      // Everyone else (Admins, Users, etc.) can ONLY see leads assigned to them
+      query.assigned_user = user._id;
     }
 
     // Filter by assignment status if provided
@@ -132,9 +130,26 @@ exports.getAllLeads = async (req, res) => {
       query.assignment_status = req.query.assignment_status;
     }
 
+    // Special handling for "recent" - show both pending and accepted (newly assigned leads)
+    if (req.query.recent === 'true') {
+      query.assignment_status = { $in: ['pending', 'accepted'] };
+    }
+
     // Filter by lead status if provided
     if (req.query.lead_status) {
       query.lead_status = req.query.lead_status;
+    }
+
+    // Search functionality - search by business_name, contact_person, phone, email, location
+    if (req.query.search) {
+      const searchTerm = req.query.search.trim();
+      query.$or = [
+        { business_name: { $regex: searchTerm, $options: 'i' } },
+        { contact_person: { $regex: searchTerm, $options: 'i' } },
+        { phone: { $regex: searchTerm, $options: 'i' } },
+        { email: { $regex: searchTerm, $options: 'i' } },
+        { location: { $regex: searchTerm, $options: 'i' } }
+      ];
     }
 
     // Pagination support
@@ -183,8 +198,16 @@ exports.getAllLeads = async (req, res) => {
 
 exports.getLead = async (req, res) => {
   try {
-    const lead = await Lead.findById(req.params.id).populate('assigned_user', 'name email');
-    if (!lead) return res.status(404).json({ status: 'fail', message: 'No lead found' });
+    const query = { _id: req.params.id };
+    
+    // Visibility check - super_admin sees all, others see assigned leads
+    // Use $or to allow access if lead is either assigned to user OR created by user
+    if (req.user.role !== 'super_admin') {
+      query.assigned_user = req.user._id;
+    }
+    
+    const lead = await Lead.findOne(query).populate('assigned_user', 'name email');
+    if (!lead) return res.status(404).json({ status: 'fail', message: 'No lead found or access denied' });
     res.status(200).json({ status: 'success', data: { lead } });
   } catch (err) {
     res.status(400).json({ status: 'fail', message: err.message });
@@ -193,11 +216,28 @@ exports.getLead = async (req, res) => {
 
 exports.updateLead = async (req, res) => {
   try {
-    const oldLead = await Lead.findById(req.params.id);
-    if (!oldLead) return res.status(404).json({ status: 'fail', message: 'No lead found' });
+    // Validate phone number (must be 10 digits if provided)
+    if (req.body.phone && !/^\d{10}$/.test(req.body.phone)) {
+      return res.status(400).json({ status: 'fail', message: 'Phone number must be exactly 10 digits' });
+    }
+
+    const query = { _id: req.params.id };
+    
+    // Strict visibility check for update
+    if (req.user.role !== 'super_admin') {
+      query.assigned_user = req.user._id;
+    }
+
+    const oldLead = await Lead.findOne(query);
+    if (!oldLead) return res.status(404).json({ status: 'fail', message: 'No lead found or access denied' });
 
     const previousStatus = oldLead.lead_status;
     
+    // Auto-assign lead to current user if it's unassigned and they are taking an action
+    if (!oldLead.assigned_user) {
+      req.body.assigned_user = req.user._id;
+    }
+
     // Add logic for tracking conversion and drops
     if (req.body.lead_status === 'Activated' && previousStatus !== 'Activated') {
       req.body.converted_at = Date.now();
@@ -274,8 +314,15 @@ exports.updateLead = async (req, res) => {
 
 exports.deleteLead = async (req, res) => {
   try {
-    const lead = await Lead.findByIdAndDelete(req.params.id);
-    if (!lead) return res.status(404).json({ status: 'fail', message: 'No lead found' });
+    const query = { _id: req.params.id };
+    
+    // Strict visibility check for delete
+    if (req.user.role !== 'super_admin') {
+      query.assigned_user = req.user._id;
+    }
+
+    const lead = await Lead.findOneAndDelete(query);
+    if (!lead) return res.status(404).json({ status: 'fail', message: 'No lead found or access denied' });
     res.status(204).json({ status: 'success', data: null });
   } catch (err) {
     res.status(400).json({ status: 'fail', message: err.message });
@@ -341,20 +388,20 @@ exports.bulkUploadLeads = async (req, res) => {
         // Super admin assignments are auto-accepted, others depend on whether assigned to self
         const assignmentStatus = req.user.role === 'super_admin' || assignedUser.toString() === req.user._id.toString() ? 'accepted' : 'pending';
         
-        const newLead = await Lead.create({
-          business_name: vendorName,
-          contact_person: vendorName, // Default to vendor name
-          phone: phone,
-          email: `vendor_${Date.now()}_${Math.random().toString(36).substr(2, 5)}@nepalcan.com`, // Dummy email
-          category: 'General',
-          location: 'TBD', // To be filled by BD
-          lead_source: 'Bulk Upload',
-          assigned_user: assignedUser,
-          creator_id: req.user._id,
-          lead_status: 'New',
-          assignment_status: assignmentStatus,
-          notes: remarks || 'Bulk uploaded - pending details'
-        });
+const newLead = await Lead.create({
+           business_name: vendorName,
+           contact_person: vendorName, // Default to vendor name
+           phone: phone,
+           email: 'TBD', // To be filled by BD
+           category: 'General',
+           location: 'TBD', // To be filled by BD
+           lead_source: 'Bulk Upload',
+           assigned_user: assignedUser,
+           creator_id: req.user._id,
+           lead_status: 'New',
+           assignment_status: assignmentStatus,
+           notes: remarks || 'Bulk uploaded - pending details'
+         });
 
         // Calculate lead score
         newLead.lead_score = newLead.calculateLeadScore();

@@ -2,13 +2,17 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
+import * as DialogPrimitive from "@radix-ui/react-dialog";
+import { motion, AnimatePresence } from 'framer-motion';
 import { fetchLeads, resetLeads } from '../store/leadSlice';
-import { Plus, Search, MoreVertical, Phone, MapPin, ExternalLink, Clock, MessageCircle, X, Upload, Loader2, User, FileSpreadsheet, AlertCircle, Briefcase } from 'lucide-react';
+import { Plus, Search, MoreVertical, Phone, MapPin, ExternalLink, Clock, MessageCircle, Upload, Loader2, User, FileSpreadsheet, AlertCircle, Briefcase, X, CalendarCheck, Brain, CheckCircle } from 'lucide-react';
 import LeadModal from '../components/LeadModal';
 import LeadActionModal from '../components/LeadActionModal';
 import LeadDetailModal from '../components/LeadDetailModal';
 import { cn } from '../utils/cn';
+import { Button } from '../components/ui/button';
 import * as XLSX from 'xlsx';
+import toast from 'react-hot-toast';
 import { API_URL } from '../config/api';
 
 const StatusBadge = ({ status }) => {
@@ -72,20 +76,21 @@ const PriorityBadge = ({ priority, score }) => {
 const LeadsPage = () => {
   const dispatch = useDispatch();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { items: allLeads, loading, hasMore, currentPage } = useSelector((state) => state.leads);
-  const { token } = useSelector((state) => state.auth);
+  const { items: allLeads, loading, loadingMore: reduxLoadingMore, hasMore, currentPage } = useSelector((state) => state.leads);
+  const { token, user } = useSelector((state) => state.auth);
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedLead, setSelectedLead] = useState(null);
   const [isActionModalOpen, setIsActionModalOpen] = useState(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('accepted');
   const [todayFollowups, setTodayFollowups] = useState([]);
+  const [pendingFollowups, setPendingFollowups] = useState([]);
   const [followupLoading, setFollowupLoading] = useState(false);
-  const [pipelineFilter, setPipelineFilter] = useState('all');
-  const [sortOption, setSortOption] = useState('newest');
-  const [loadingMore, setLoadingMore] = useState(false);
-  const leadsContainerRef = useRef(null);
+const [pipelineFilter, setPipelineFilter] = useState('all');
+   const [sortOption, setSortOption] = useState('newest');
+   const leadsContainerRef = useRef(null);
 
   // Bulk Upload Modal states
   const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
@@ -96,45 +101,107 @@ const LeadsPage = () => {
   const [bulkPreviewData, setBulkPreviewData] = useState([]);
   const [bulkUploadResults, setBulkUploadResults] = useState(null);
 
-  // Helper to refetch leads based on current tab context
-  const refetchLeads = useCallback(() => {
-    if (activeTab === 'pending') {
-      dispatch(fetchLeads({ assignment_status: 'pending', page: 1, limit: 10 }));
-    } else if (activeTab === 'recent') {
-      dispatch(fetchLeads({ assignment_status: 'accepted', page: 1, limit: 0 }));
-    } else if (activeTab === 'accepted') {
-      dispatch(fetchLeads({ assignment_status: 'accepted' }));
-    } else if (activeTab !== 'followup') {
-      dispatch(fetchLeads({ assignment_status: activeTab }));
-    }
-  }, [activeTab, dispatch]);
+  // Follow-up confirmation modal states
+  const [showFollowupConfirm, setShowFollowupConfirm] = useState(false);
+  const [followupToCancel, setFollowupToCancel] = useState(null);
+  const [followupInfo, setFollowupInfo] = useState(null);
 
-  // Initial fetch when tab changes
-  useEffect(() => {
-    dispatch(resetLeads());
-    refetchLeads();
-  }, [activeTab, dispatch, refetchLeads]);
+// Helper to refetch leads based on current tab context
+    const refetchLeads = useCallback(() => {
+      const limit = 25; // 25 leads per batch for better performance
+      
+      // When searching, filter within the currently active tab
+      // When not searching, filter by current tab
+      if (searchQuery) {
+        if (activeTab === 'database') {
+          dispatch(fetchLeads({ page: 1, limit, search: searchQuery }));
+        } else if (activeTab === 'pending') {
+          dispatch(fetchLeads({ assignment_status: 'pending', page: 1, limit: 10, search: searchQuery }));
+        } else if (activeTab === 'recent') {
+          // Recent shows both pending (newly assigned) and accepted leads
+          dispatch(fetchLeads({ recent: 'true', page: 1, limit, search: searchQuery }));
+        } else if (activeTab === 'accepted') {
+          dispatch(fetchLeads({ assignment_status: 'accepted', page: 1, limit, search: searchQuery }));
+        } else if (activeTab !== 'followup') {
+          dispatch(fetchLeads({ assignment_status: activeTab, page: 1, limit: 10, search: searchQuery }));
+        } else {
+          dispatch(fetchLeads({ page: 1, limit, search: searchQuery }));
+        }
+      } else if (activeTab === 'pending') {
+        dispatch(fetchLeads({ assignment_status: 'pending', page: 1, limit: 10 }));
+      } else if (activeTab === 'recent') {
+        // Recent shows both pending (newly assigned) and accepted leads for "recently added" view
+        dispatch(fetchLeads({ recent: 'true', page: 1, limit }));
+      } else if (activeTab === 'accepted') {
+        dispatch(fetchLeads({ assignment_status: 'accepted', page: 1, limit }));
+      } else if (activeTab !== 'followup' && activeTab !== 'database') {
+        dispatch(fetchLeads({ assignment_status: activeTab, page: 1, limit: 10 }));
+      }
+    }, [activeTab, dispatch, searchQuery]);
 
-  // Load more leads for paginated tabs (pending only)
-  const loadMoreLeads = useCallback(() => {
-    if (loadingMore || !hasMore) return;
-    
-    setLoadingMore(true);
-    dispatch(fetchLeads({ 
-      assignment_status: 'pending', 
-      page: currentPage + 1, 
-      limit: 10 
-    })).finally(() => {
-      setLoadingMore(false);
-    });
-  }, [loadingMore, hasMore, currentPage, dispatch]);
+// Handle tab changes - reset search
+   useEffect(() => {
+     setSearchTerm('');
+     setSearchQuery('');
+     dispatch(resetLeads());
+   }, [activeTab, dispatch]);
 
-  // Infinite scroll for pending assignments
-  useEffect(() => {
-    if (activeTab !== 'pending') return;
-    
-    const handleScroll = (e) => {
-      if (loading || loadingMore || !hasMore) return;
+   // Initial fetch on mount
+   useEffect(() => {
+     refetchLeads();
+   }, []);
+
+// Handle search button click - triggers API call
+    const handleSearch = useCallback(() => {
+      dispatch(resetLeads());
+      setSearchQuery(searchTerm);
+    }, [dispatch, searchTerm]);
+
+    // Handle clearing search - resets to active leads
+    const handleClearSearch = useCallback(() => {
+      setSearchTerm('');
+      setSearchQuery('');
+      dispatch(resetLeads());
+    }, [dispatch]);
+
+   // When searchQuery changes, fetch leads
+   useEffect(() => {
+     if (activeTab !== 'followup') {
+       refetchLeads();
+     }
+   }, [searchQuery, activeTab, refetchLeads]);
+
+const loadMoreLeads = useCallback(() => {
+      if (reduxLoadingMore || !hasMore) return;
+      
+      const limit = 25; // 25 leads per batch for better performance
+      
+      // Determine the correct parameters based on active tab
+      let params = { page: currentPage + 1, limit };
+      if (searchQuery) {
+        params.search = searchQuery;
+      }
+      if (activeTab === 'pending') {
+        params.assignment_status = 'pending';
+        params.limit = 10;
+      } else if (activeTab === 'recent') {
+        params.assignment_status = 'accepted';
+      } else if (activeTab === 'accepted') {
+        params.assignment_status = 'accepted';
+      } else if (activeTab !== 'followup' && activeTab !== 'database') {
+        params.assignment_status = activeTab;
+        params.limit = 10;
+      }
+      
+      dispatch(fetchLeads(params));
+   }, [reduxLoadingMore, hasMore, currentPage, dispatch, activeTab, searchQuery]);
+
+// Infinite scroll for accepted, recent, and pending tabs
+    useEffect(() => {
+     if (activeTab === 'followup' || activeTab === 'database') return; // Don't apply infinite scroll to followup or database tabs
+     
+     const handleScroll = (e) => {
+      if (loading || reduxLoadingMore || !hasMore) return;
       
       const container = e.currentTarget;
       const scrollTop = container.scrollTop;
@@ -151,28 +218,42 @@ const LeadsPage = () => {
       container.addEventListener('scroll', handleScroll);
       return () => container.removeEventListener('scroll', handleScroll);
     }
-  }, [activeTab, loading, loadingMore, hasMore, loadMoreLeads]);
+  }, [activeTab, loading, reduxLoadingMore, hasMore, loadMoreLeads]);
 
-  // Fetch today's followups
-  useEffect(() => {
-    const fetchTodayFollowups = async () => {
-      setFollowupLoading(true);
-      try {
-        const res = await axios.get(`${API_URL}/activities/today`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        setTodayFollowups(res.data.data.followups);
-      } catch (err) {
-        console.error('Error fetching today followups:', err);
-      } finally {
-        setFollowupLoading(false);
-      }
-    };
+// Fetch today's followups
+   const fetchTodayFollowups = useCallback(async () => {
+     if (!user || !token) return;
+     
+     setFollowupLoading(true);
+     try {
+       // For Super Admin, we don't send userId so they see everything by default
+       // For others, we send userId to match their assigned leads
+       const params = user.role === 'super_admin' ? {} : { userId: user._id };
+       
+       const res = await axios.get(`${API_URL}/activities/today`, {
+         params,
+         headers: { Authorization: `Bearer ${token}` }
+       });
+       // Check for both camelCase and lowercase keys for backward compatibility
+       const fetchedFollowups = res.data.data?.followUps || res.data.data?.followups || [];
+       setTodayFollowups(fetchedFollowups);
+     } catch (err) {
+       console.error('Error fetching today followups:', err);
+     } finally {
+       setFollowupLoading(false);
+     }
+   }, [token, user]);
 
-    if (activeTab === 'followup') {
-      fetchTodayFollowups();
-    }
-  }, [activeTab, token]);
+  // Check if a lead has upcoming follow-ups
+const hasUpcomingFollowup = useCallback((leadId) => {
+    return todayFollowups.some(f => f._id === leadId || f.lead_id?._id === leadId);
+  }, [todayFollowups]);
+
+useEffect(() => {
+     if (user && token) {
+       fetchTodayFollowups();
+     }
+   }, [fetchTodayFollowups, user, token]);
 
   // Fetch users for bulk upload modal
   useEffect(() => {
@@ -192,20 +273,34 @@ const LeadsPage = () => {
     }
   }, [isBulkUploadOpen, token]);
 
-  // Deep-link intelligence check
+// Deep-link intelligence check - fetch lead if needed
+  const processedIntelligenceRef = useRef(null);
+  const intelligenceParam = searchParams.get('intelligence');
+
   useEffect(() => {
-    if (!loading && allLeads.length > 0) {
-      const intelligenceId = searchParams.get('intelligence');
-      if (intelligenceId) {
-        const targetLead = allLeads.find(l => l._id === intelligenceId);
-        if (targetLead) {
-          setSelectedLead(targetLead);
-          setIsDetailModalOpen(true);
-          setSearchParams({}, { replace: true });
-        }
-      }
+    if (!intelligenceParam || processedIntelligenceRef.current === intelligenceParam) return;
+
+    const targetLead = allLeads.find(l => l._id === intelligenceParam);
+    if (targetLead) {
+      setSelectedLead(targetLead);
+      setIsDetailModalOpen(true);
+      processedIntelligenceRef.current = intelligenceParam;
+      setSearchParams({}, { replace: true });
+    } else if (token) {
+      // Lead not in current list, fetch directly from API
+      axios.get(`${API_URL}/leads/${intelligenceParam}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      }).then(res => {
+        setSelectedLead(res.data.data.lead);
+        setIsDetailModalOpen(true);
+        processedIntelligenceRef.current = intelligenceParam;
+        setSearchParams({}, { replace: true });
+      }).catch(err => {
+        console.error('Error fetching lead for intelligence:', err);
+        toast.error('Lead not found or access denied');
+      });
     }
-  }, [loading, allLeads, searchParams, setSearchParams]);
+  }, [intelligenceParam, allLeads, token, setSearchParams]);
 
   const handleSuccess = () => {
     refetchLeads();
@@ -221,30 +316,81 @@ const LeadsPage = () => {
     setIsActionModalOpen(true);
   };
 
-  // Select the appropriate leads based on active tab
-  const getActiveLeads = useCallback(() => {
-    if (activeTab === 'recent') {
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      return allLeads.filter(lead => {
-        const createdAt = new Date(lead.created_at);
-        return createdAt >= sevenDaysAgo;
-      }).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    }
-    if (activeTab === 'followup') return allLeads;
-    return allLeads.filter(lead => lead.assignment_status === activeTab);
-  }, [activeTab, allLeads]);
+  // Handle phone call with follow-up check
+  const handleCall = async (lead) => {
+    try {
+      const res = await axios.post(`${API_URL}/activities/log-call`, {
+        lead_id: lead._id,
+        description: 'Quick call from lead list'
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
 
-  const filteredLeads = getActiveLeads().filter(lead => {
-    const businessName = lead.business_name || '';
-    const contactPerson = lead.contact_person || '';
-    const matchesSearch = businessName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         contactPerson.toLowerCase().includes(searchTerm.toLowerCase());
+      if (res.data.data.autoCancelled) {
+        toast.success('Same-day follow-up automatically completed!', {
+          icon: '✅',
+          duration: 4000
+        });
+      }
+
+      if (res.data.data.needsConfirmation) {
+        setFollowupInfo(res.data.data.followupInfo);
+        setShowFollowupConfirm(true);
+      } else if (!res.data.data.autoCancelled) {
+        toast.success('Call logged successfully');
+      }
+      
+      refetchLeads();
+      fetchTodayFollowups();
+    } catch (err) {
+      console.error('Error logging call:', err);
+    }
+  };
+
+  // Handle follow-up decision after user confirmation
+  const handleFollowupDecision = async (decision) => {
+    if (!followupInfo) return;
     
-    const matchesPipeline = pipelineFilter === 'all' || lead.lead_status === pipelineFilter;
-    
-    return matchesSearch && matchesPipeline;
-  }).sort((a, b) => {
+    try {
+      await axios.patch(`${API_URL}/activities/followup/${followupInfo.activity_id}/decision`, { decision }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      if (decision === 'cancel') {
+        toast.success('Follow-up cancelled as per your decision');
+      } else {
+        toast.success('Follow-up kept for the original scheduled day');
+      }
+
+      setShowFollowupConfirm(false);
+      setFollowupInfo(null);
+      refetchLeads();
+      fetchTodayFollowups();
+    } catch (err) {
+      console.error('Error handling follow-up decision:', err);
+    }
+  };
+
+// Select the appropriate leads based on active tab
+    const getActiveLeads = useCallback(() => {
+      if (activeTab === 'recent') {
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        return allLeads.filter(lead => {
+          const createdAt = new Date(lead.created_at);
+          return createdAt >= sevenDaysAgo;
+        }).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      }
+      if (activeTab === 'followup') return allLeads;
+      if (activeTab === 'database') return allLeads;
+      return allLeads.filter(lead => lead.assignment_status === activeTab);
+    }, [activeTab, allLeads]);
+
+   const filteredLeads = getActiveLeads().filter(lead => {
+      const matchesPipeline = pipelineFilter === 'all' || lead.lead_status === pipelineFilter;
+      
+      return matchesPipeline;
+    }).sort((a, b) => {
     if (sortOption === 'newest') {
       return new Date(b.created_at) - new Date(a.created_at);
     } else if (sortOption === 'oldest') {
@@ -315,6 +461,27 @@ const LeadsPage = () => {
     setBulkUploadResults(null);
   };
 
+  // Filter followups based on search term
+  const filteredFollowups = (todayFollowups || []).map(f => ({
+    ...f,
+    // Flatten data to ensure compatibility with both raw and enriched API responses
+    display_business_name: f.business_name || f.lead_id?.business_name || 'Unknown Enterprise',
+    display_location: f.location || f.lead_id?.location || 'N/A',
+    display_contact_person: f.contact_person || f.lead_id?.contact_person || 'N/A',
+    display_phone: f.phone || f.lead_id?.phone || 'N/A',
+    display_message: f.message || f.description || 'No notes available',
+    display_category: f.category || f.lead_id?.category || 'N/A',
+    display_status: f.lead_status || f.lead_id?.lead_status || 'New',
+    display_manager_name: f.manager?.name || f.user_id?.name || 'Unassigned',
+    display_time: f.scheduled_time || f.follow_up_time,
+    display_scheduled_for: f.scheduled_for || f.follow_up_date,
+    display_activity_id: f.activity_id || f._id
+  })).filter(f => 
+    (f.display_business_name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+    (f.display_contact_person?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+    (f.display_phone?.toLowerCase() || '').includes(searchTerm.toLowerCase())
+  );
+
   return (
     <div className="space-y-4 lg:space-y-8 max-w-[1600px] mx-auto">
       <LeadModal 
@@ -330,11 +497,22 @@ const LeadsPage = () => {
         token={token}
         onSuccess={handleSuccess}
       />
-      <LeadDetailModal
-        isOpen={isDetailModalOpen}
-        onClose={() => { setIsDetailModalOpen(false); setSelectedLead(null); }}
-        lead={selectedLead}
-        token={token}
+<LeadDetailModal
+          isOpen={isDetailModalOpen}
+          onClose={() => { setIsDetailModalOpen(false); setSelectedLead(null); }}
+          lead={selectedLead}
+          token={token}
+          user={user}
+          onSuccess={(updatedLead) => {
+            setSelectedLead(updatedLead);
+            refetchLeads();
+          }}
+        />
+      <FollowupConfirmModal 
+        isOpen={showFollowupConfirm}
+        onClose={() => setShowFollowupConfirm(false)}
+        onDecision={handleFollowupDecision}
+        followupInfo={followupInfo}
       />
       
       {/* Page Header */}
@@ -413,25 +591,54 @@ const LeadsPage = () => {
             </span>
             {activeTab === 'followup' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-red-600 rounded-t-full" />}
           </button>
+          <button 
+            onClick={() => setActiveTab('database')}
+            className={cn(
+              "px-4 lg:px-6 py-3 text-[10px] lg:text-xs font-black uppercase tracking-widest transition-all relative whitespace-nowrap",
+              activeTab === 'database' ? "text-red-600" : "text-slate-400 hover:text-slate-600"
+            )}
+          >
+            Database Search
+            {activeTab === 'database' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-red-600 rounded-t-full" />}
+          </button>
         </div>
 
-         <div className="grid grid-cols-1 md:grid-cols-12 gap-3 lg:gap-4">
-           <div className="md:col-span-9 relative group">
-             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-red-600 transition-colors" size={18} />
-             <input 
-               type="text" 
-               placeholder="Search leads..."
-               value={searchTerm}
-               onChange={(e) => setSearchTerm(e.target.value)}
-               className="w-full pl-12 pr-4 py-3 lg:py-4 bg-white border border-slate-200 rounded-xl lg:rounded-2xl focus:ring-2 focus:ring-red-600 focus:border-transparent outline-none transition-all font-bold text-sm text-slate-800 shadow-sm"
-             />
-           </div>
-           <div className="md:col-span-3">
-             <div className="space-y-2">
-               <div className="flex items-center gap-2">
-                 <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">Pipeline</label>
-                 <select 
-                   value={pipelineFilter}
+<div className="grid grid-cols-1 md:grid-cols-12 gap-3 lg:gap-4">
+            <div className="md:col-span-12 lg:col-span-6 relative group">
+<Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-red-600 transition-colors" size={18} />
+                <input 
+                  type="text" 
+                  placeholder={activeTab === 'database' 
+                    ? "Search by business name, email, phone or address..." 
+                    : "Search by business name, contact, phone or email..."}
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+                  className="w-full pl-12 pr-24 py-3 lg:py-4 bg-white border border-slate-200 rounded-xl lg:rounded-2xl focus:ring-2 focus:ring-red-600 focus:border-transparent outline-none transition-all font-bold text-sm text-slate-800 shadow-sm"
+               />
+               {searchTerm && (
+                 <button
+                   onClick={handleClearSearch}
+                   className="absolute right-24 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-red-600 transition-colors"
+                   title="Clear search"
+                 >
+                   <X size={16} />
+                 </button>
+               )}
+               <button
+                 onClick={handleSearch}
+                 disabled={loading}
+                 className="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-1.5 bg-red-600 text-white rounded-lg font-black text-[10px] uppercase tracking-widest hover:bg-red-700 transition-all disabled:opacity-50"
+               >
+                 Search
+               </button>
+            </div>
+            <div className="md:col-span-12 lg:col-span-6">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">Pipeline</label>
+                  <select 
+                    value={pipelineFilter}
                    onChange={(e) => setPipelineFilter(e.target.value)}
                    className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-red-600 font-bold text-sm"
                  >
@@ -461,108 +668,166 @@ const LeadsPage = () => {
          </div>
       </div>
 
-      {/* Leads Table/Grid */}
-      <div className="bg-white rounded-2xl lg:rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
-        {/* Desktop Table View - Hidden on mobile */}
-        <div className="hidden lg:block overflow-x-auto" ref={activeTab === 'pending' ? leadsContainerRef : null}>
+{/* Leads Table/Grid */}
+        <div className="bg-white rounded-2xl lg:rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
+          {/* Desktop Table View - Hidden on mobile */}
+          <div 
+            className="hidden lg:block overflow-x-auto overflow-y-auto" 
+            ref={leadsContainerRef}
+            style={{ maxHeight: 'calc(100vh - 320px)' }}
+          >
           {activeTab === 'followup' ? (
-            <table className="w-full text-left border-collapse table-fixed">
-              <thead>
-                <tr className="bg-amber-50/50 border-b border-amber-100">
-                  <th className="w-[15%] px-6 py-4 text-[9px] font-black text-amber-600 uppercase tracking-widest">Time</th>
-                  <th className="w-[25%] px-6 py-4 text-[9px] font-black text-amber-600 uppercase tracking-widest">Enterprise</th>
-                  <th className="w-[30%] px-6 py-4 text-[9px] font-black text-amber-600 uppercase tracking-widest">Follow-up Note</th>
-                  <th className="w-[20%] px-6 py-4 text-[9px] font-black text-amber-600 uppercase tracking-widest">Key Contact</th>
-                  <th className="w-[10%] px-6 py-4 text-[9px] font-black text-amber-600 uppercase tracking-widest text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {followupLoading ? (
-                  <tr>
-                    <td colSpan="5" className="px-6 py-12 text-center">
-                      <div className="flex flex-col items-center gap-2">
-                        <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Loading Follow-ups...</span>
-                      </div>
-                    </td>
-                  </tr>
-                ) : todayFollowups.length === 0 ? (
-                  <tr>
-                    <td colSpan="5" className="px-6 py-12 text-center">
-                      <div className="flex flex-col items-center gap-2">
-                        <Clock size={32} className="text-slate-200" />
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">No follow-ups for today</span>
-                      </div>
-                    </td>
-                  </tr>
-                ) : todayFollowups.map((followup) => (
-                  <tr key={followup._id} className="hover:bg-amber-50/30 transition-colors group">
-                    <td className="px-6 py-3">
-                      <div className="flex items-center gap-2">
-                        <div className="p-1.5 bg-amber-100 text-amber-600 rounded-lg">
-                          <Clock size={12} />
+<table className="w-full text-left border-collapse table-fixed">
+               <thead>
+                 <tr className="bg-amber-50/50 border-b border-amber-100">
+                   <th className="w-[10%] px-6 py-4 text-[9px] font-black text-amber-600 uppercase tracking-widest">Time</th>
+                   <th className="w-[15%] px-6 py-4 text-[9px] font-black text-amber-600 uppercase tracking-widest">Enterprise</th>
+                   <th className="w-[12%] px-6 py-4 text-[9px] font-black text-amber-600 uppercase tracking-widest">Key Contact</th>
+                   <th className="w-[25%] px-6 py-4 text-[9px] font-black text-amber-600 uppercase tracking-widest">Follow-up Note</th>
+                   <th className="w-[10%] px-6 py-4 text-[9px] font-black text-amber-600 uppercase tracking-widest">Pipeline</th>
+                   <th className="w-[13%] px-6 py-4 text-[9px] font-black text-amber-600 uppercase tracking-widest">Manager</th>
+                   <th className="w-[10%] px-6 py-4 text-[9px] font-black text-amber-600 uppercase tracking-widest text-center">Recent Activity</th>
+                   <th className="w-[15%] px-6 py-4 text-[9px] font-black text-amber-600 uppercase tracking-widest text-right">Action</th>
+                 </tr>
+               </thead>
+               <tbody className="divide-y divide-slate-50">
+                 {followupLoading ? (
+                   <tr>
+                     <td colSpan="8" className="px-6 py-12 text-center">
+                       <div className="flex flex-col items-center gap-2">
+                         <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                         <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Loading Follow-ups...</span>
+                       </div>
+                     </td>
+                   </tr>
+                 ) : filteredFollowups.length === 0 ? (
+                   <tr>
+                     <td colSpan="8" className="px-6 py-12 text-center">
+                       <div className="flex flex-col items-center gap-2">
+                         <Clock size={32} className="text-slate-200" />
+                         <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">No follow-ups for today</span>
+                       </div>
+                     </td>
+                   </tr>
+                ) : filteredFollowups.map((followup) => (
+                   <tr key={followup.display_activity_id} className="hover:bg-amber-50/30 transition-colors group">
+                     <td className="px-6 py-3">
+                       <div className="flex items-center gap-2">
+                         <div className={cn(
+                           "p-1.5 rounded-lg",
+                           followup.is_overdue ? "bg-rose-100 text-rose-600" : "bg-amber-100 text-amber-600"
+                         )}>
+                           <Clock size={12} />
+                         </div>
+                         <div className="flex flex-col">
+                           <span className={cn(
+                             "font-black text-sm",
+                             followup.is_overdue ? "text-rose-600" : "text-slate-900"
+                           )}>
+                             {followup.display_time ? (
+                               new Date(`1970-01-01T${followup.display_time}`).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                             ) : followup.display_scheduled_for ? (
+                               new Date(followup.display_scheduled_for).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                             ) : 'No Time'}
+                           </span>
+                           {followup.is_overdue && (
+                             <span className="text-[8px] font-black uppercase text-rose-500">Overdue</span>
+                           )}
+                         </div>
+                       </div>
+                     </td>
+<td className="px-6 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="font-bold text-slate-900 text-sm truncate">{followup.display_business_name}</div>
+                          {followup.hasActivity && (
+                            <CheckCircle size={16} className="text-emerald-600" title="Follow-up completed" />
+                          )}
                         </div>
-                        <span className="font-black text-slate-900 text-sm">{followup.follow_up_time || 'No Time'}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-3">
-                      <div className="font-bold text-slate-900 text-sm truncate">{followup.lead_id?.business_name}</div>
-                      <div className="flex items-center gap-1 text-[9px] font-bold text-slate-400 mt-0.5 uppercase truncate">
-                        <MapPin size={8} className="text-red-400" /> {followup.lead_id?.location}
-                      </div>
-                    </td>
-                    <td className="px-6 py-3">
-                      <p className="text-xs text-slate-600 line-clamp-2 italic">"{followup.description}"</p>
-                    </td>
-                    <td className="px-6 py-3">
-                      <div className="text-xs font-bold text-slate-700 truncate">{followup.lead_id?.contact_person}</div>
-                      <div className="text-[9px] font-black text-slate-400 uppercase">{followup.lead_id?.phone}</div>
-                    </td>
-                    <td className="px-6 py-3 text-right">
-                      <button onClick={() => handleDetail(followup.lead_id)} className="p-2 bg-white border border-slate-200 text-slate-400 hover:text-red-600 hover:border-red-100 rounded-xl shadow-sm transition-all active:scale-95">
-                        <ExternalLink size={14} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <table className="w-full text-left border-collapse table-fixed">
-              <thead>
-                <tr className="bg-slate-50/50 border-b border-slate-100">
-                  <th className="w-[20%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Enterprise</th>
-                  <th className="w-[15%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Key Contact</th>
-                  <th className="w-[10%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Category</th>
-                  <th className="w-[10%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Priority</th>
-                  <th className="w-[15%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Pipeline</th>
-                  <th className="w-[15%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Manager</th>
-                  <th className="w-[15%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {loading ? (
-                  <tr>
-                    <td colSpan="7" className="px-6 py-12 text-center">
-                      <div className="flex flex-col items-center gap-2">
-                        <div className="w-6 h-6 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Syncing Leads...</span>
-                      </div>
-                    </td>
-                  </tr>
-                ) : filteredLeads.length === 0 ? (
-                  <tr>
-                    <td colSpan="7" className="px-6 py-12 text-center">
-                      <div className="flex flex-col items-center gap-2">
-                        <Briefcase size={32} className="text-slate-200" />
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">No Records</span>
-                      </div>
-                    </td>
-                  </tr>
+                        <div className="flex items-center gap-1 text-[9px] font-bold text-slate-400 mt-0.5 uppercase truncate">
+                          <MapPin size={8} className="text-red-400" /> {followup.display_location}
+                        </div>
+                      </td>
+                     <td className="px-6 py-3">
+                       <div className="text-xs font-bold text-slate-700 truncate">{followup.display_contact_person}</div>
+                       <div className="text-[9px] font-black text-slate-400 uppercase">{followup.display_phone}</div>
+                     </td>
+                     <td className="px-6 py-3">
+                       <p className="text-[10px] font-bold text-slate-600 line-clamp-2 italic">"{followup.display_message}"</p>
+                       <span className="text-[8px] font-black text-slate-400 uppercase mt-1 inline-block bg-slate-100 px-1.5 py-0.5 rounded">{followup.display_category}</span>
+                     </td>
+                     <td className="px-6 py-3">
+                       <StatusBadge status={followup.display_status} />
+                     </td>
+                     <td className="px-6 py-3">
+                       <div className="flex items-center gap-2">
+                         <div className="w-6 h-6 bg-slate-900 rounded-lg flex items-center justify-center text-[8px] font-black text-white">
+                           {followup.display_manager_name[0]}
+                         </div>
+                         <span className="text-[10px] font-bold text-slate-700 truncate">{followup.display_manager_name}</span>
+                       </div>
+                     </td>
+                     <td className="px-6 py-3 text-center">
+                       {followup.hasActivity ? (
+                         <span className="inline-flex items-center gap-1 text-green-600 font-black text-[10px]">
+                           <span>&#10003;</span> Yes
+                         </span>
+                       ) : (
+                         <span className="inline-flex items-center gap-1 text-amber-600 font-black text-[10px]">
+                           <AlertCircle size={14} /> No
+                         </span>
+                       )}
+                     </td>
+                     <td className="px-6 py-3 text-right">
+                       <button onClick={() => handleDetail(followup)} className="p-2 bg-white border border-slate-200 text-slate-400 hover:text-red-600 hover:border-red-100 rounded-xl shadow-sm transition-all active:scale-95">
+                         <ExternalLink size={14} />
+                       </button>
+                     </td>
+                   </tr>
+                 ))}
+               </tbody>
+             </table>
+) : (
+             <table className="w-full text-left border-collapse table-fixed">
+               <thead>
+                 <tr className="bg-slate-50/50 border-b border-slate-100">
+                   <th className="w-[18%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Enterprise</th>
+                   <th className="w-[13%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Key Contact</th>
+                   <th className="w-[9%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Category</th>
+                   <th className="w-[9%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Priority</th>
+                   <th className="w-[12%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Pipeline</th>
+                   <th className="w-[11%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Manager</th>
+                   <th className="w-[11%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Intelligence</th>
+                   <th className="w-[15%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest text-right">Action</th>
+                 </tr>
+               </thead>
+               <tbody className="divide-y divide-slate-50">
+                 {loading ? (
+                   <tr>
+                     <td colSpan="8" className="px-6 py-12 text-center">
+                       <div className="flex flex-col items-center gap-2">
+                         <div className="w-6 h-6 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
+                         <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Syncing Leads...</span>
+                       </div>
+                     </td>
+                   </tr>
+                 ) : filteredLeads.length === 0 ? (
+                   <tr>
+                     <td colSpan="8" className="px-6 py-12 text-center">
+                       <div className="flex flex-col items-center gap-2">
+                         <Briefcase size={32} className="text-slate-200" />
+                         <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">No Records</span>
+                       </div>
+                     </td>
+                   </tr>
                 ) : filteredLeads.map((lead) => (
                   <tr key={lead._id} className="hover:bg-slate-50/50 transition-colors group">
                     <td className="px-6 py-3">
-                      <div className="font-bold text-slate-900 text-sm truncate">{lead.business_name}</div>
+                      <div className="flex items-center gap-1">
+                        <div className="font-bold text-slate-900 text-sm truncate">{lead.business_name}</div>
+                        {hasUpcomingFollowup(lead._id) && (
+                          <CalendarCheck size={14} className="text-red-600 animate-pulse" title="Upcoming follow-up" />
+                        )}
+                      </div>
                       <div className="flex items-center gap-1 text-[9px] font-bold text-slate-400 mt-0.5 uppercase truncate">
                         <MapPin size={8} className="text-red-400" /> {lead.location}
                       </div>
@@ -591,50 +856,81 @@ const LeadsPage = () => {
                         <span className="text-[10px] font-bold text-slate-700 truncate">{lead.assigned_user?.name || 'Unassigned'}</span>
                       </div>
                     </td>
-                    <td className="px-6 py-3 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <a 
-                          href={`tel:${lead.phone}`} 
-                          className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-all"
-                          title="Call Now"
-                          onClick={() => {
-                            axios.post(`${API_URL}/activities`, {
-                              lead_id: lead._id,
-                              activity_type: 'call',
-                              description: 'Quick call from lead list',
-                              status: 'completed'
-                            }, {
-                              headers: { Authorization: `Bearer ${token}` }
-                            }).catch(err => console.error('Error logging call:', err));
-                          }}
-                        >
-                          <Phone size={14} />
-                        </a>
-                        <a 
-                          href={`https://wa.me/${lead.phone.replace(/\D/g, '')}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="p-1.5 text-green-500 hover:bg-green-50 rounded-lg transition-all"
-                          title="WhatsApp"
-                        >
-                          <MessageCircle size={14} />
-                        </a>
-                        <button onClick={() => handleDetail(lead)} className="p-1.5 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all"><ExternalLink size={14} /></button>
-                        <button onClick={() => handleAction(lead)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"><MoreVertical size={16} /></button>
+                    <td className="px-6 py-3">
+                      <div className="flex items-center gap-1">
+                        <Brain size={12} className="text-purple-500" />
+                        <span className="text-[9px] font-bold text-slate-600">
+                          {lead.lead_score || 0}/100
+                        </span>
+                      </div>
+                      <div className="text-[8px] font-black text-slate-400 uppercase mt-0.5">
+                        {lead.priority || 'Cold'} Priority
                       </div>
                     </td>
+<td className="px-6 py-3 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          {lead.assignment_status === 'pending' && (
+                            <button
+                              onClick={async () => {
+                                try {
+                                  const res = await axios.patch(`${API_URL}/leads/${lead._id}/accept`, {}, {
+                                    headers: { Authorization: `Bearer ${token}` }
+                                  });
+                                  toast.success('Assignment accepted');
+                                  refetchLeads();
+                                } catch (err) {
+                                  toast.error(err.response?.data?.message || 'Failed to accept');
+                                }
+                              }}
+                              className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+                              title="Accept Assignment"
+                            >
+                              <CheckCircle size={14} />
+                            </button>
+                          )}
+                          <a 
+                            href={`tel:${lead.phone}`} 
+                            className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-all"
+                            title="Call Now"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleCall(lead);
+                            }}
+                          >
+                            <Phone size={14} />
+                          </a>
+                         <a 
+                           href={`https://wa.me/${lead.phone.replace(/\D/g, '')}`}
+                           target="_blank"
+                           rel="noopener noreferrer"
+                           className="p-1.5 text-green-500 hover:bg-green-50 rounded-lg transition-all"
+                           title="WhatsApp"
+                         >
+                           <MessageCircle size={14} />
+                         </a>
+                         <button onClick={() => handleDetail(lead)} className="p-1.5 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all"><ExternalLink size={14} /></button>
+                         <button onClick={() => handleAction(lead)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"><MoreVertical size={16} /></button>
+                       </div>
+                     </td>
                   </tr>
                 ))}
-                {activeTab === 'pending' && loadingMore && (
-                  <tr>
-                    <td colSpan="7" className="px-6 py-4 text-center">
-                      <div className="flex items-center justify-center gap-2">
-                        <div className="w-4 h-4 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Loading more...</span>
-                      </div>
-                    </td>
-                  </tr>
-                )}
+{reduxLoadingMore && (
+                    <tr>
+                      <td colSpan="8" className="px-6 py-4 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="w-4 h-4 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
+                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Loading more...</span>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                 {!hasMore && allLeads.length > 0 && !loading && (
+                    <tr>
+                      <td colSpan="8" className="px-6 py-3 text-center">
+                        <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">No more leads to load</span>
+                      </td>
+                    </tr>
+                  )}
               </tbody>
             </table>
           )}
@@ -661,7 +957,12 @@ const LeadsPage = () => {
               <div key={lead._id} className="p-4 border-b border-slate-100 last:border-b-0 active:bg-slate-50">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1 min-w-0">
-                    <div className="font-bold text-slate-900 text-sm truncate">{lead.business_name}</div>
+                    <div className="flex items-center gap-1">
+                      <div className="font-bold text-slate-900 text-sm truncate">{lead.business_name}</div>
+                      {hasUpcomingFollowup(lead._id) && (
+                        <CalendarCheck size={16} className="text-red-600 animate-pulse" title="Upcoming follow-up" />
+                      )}
+                    </div>
                     <div className="flex items-center gap-1 text-[9px] font-bold text-slate-400 uppercase mt-0.5">
                       <MapPin size={8} className="text-red-400 shrink-0" /> 
                       <span className="truncate">{lead.location}</span>
@@ -683,23 +984,46 @@ const LeadsPage = () => {
                   <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded-md shrink-0">{lead.category}</span>
                 </div>
 
-                <div className="flex items-center justify-between pt-2 border-t border-slate-50">
-                  <PriorityBadge priority={lead.priority} score={lead.lead_score} />
-                  <div className="flex items-center gap-1">
-                    <a href={`tel:${lead.phone}`} className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-all active:scale-95">
-                      <Phone size={16} />
-                    </a>
-                    <a href={`https://wa.me/${lead.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" className="p-2 text-green-500 hover:bg-green-50 rounded-lg transition-all active:scale-95">
-                      <MessageCircle size={16} />
-                    </a>
-                    <button onClick={() => handleDetail(lead)} className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all active:scale-95">
-                      <ExternalLink size={16} />
-                    </button>
-                    <button onClick={() => handleAction(lead)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all active:scale-95">
-                      <MoreVertical size={16} />
-                    </button>
+<div className="flex items-center justify-between pt-2 border-t border-slate-50">
+                    <PriorityBadge priority={lead.priority} score={lead.lead_score} />
+                    <div className="flex items-center gap-1">
+                      {lead.assignment_status === 'pending' && (
+                        <button 
+                          onClick={async () => {
+                            try {
+                              const res = await axios.patch(`${API_URL}/leads/${lead._id}/accept`, {}, {
+                                headers: { Authorization: `Bearer ${token}` }
+                              });
+                              toast.success('Assignment accepted');
+                              refetchLeads();
+                            } catch (err) {
+                              toast.error(err.response?.data?.message || 'Failed to accept');
+                            }
+                          }}
+                          className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all active:scale-95"
+                          title="Accept Assignment"
+                        >
+                          <CheckCircle size={16} />
+                        </button>
+                      )}
+                      <button 
+                        onClick={() => handleCall(lead)}
+                        className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-all active:scale-95"
+                        title="Call Now"
+                      >
+                        <Phone size={16} />
+                      </button>
+                      <a href={`https://wa.me/${lead.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" className="p-2 text-green-500 hover:bg-green-50 rounded-lg transition-all active:scale-95">
+                        <MessageCircle size={16} />
+                      </a>
+                      <button onClick={() => handleDetail(lead)} className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all active:scale-95">
+                        <ExternalLink size={16} />
+                      </button>
+                      <button onClick={() => handleAction(lead)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all active:scale-95">
+                        <MoreVertical size={16} />
+                      </button>
+                    </div>
                   </div>
-                </div>
               </div>
             ))}
           </div>
@@ -711,29 +1035,64 @@ const LeadsPage = () => {
                 <div className="w-8 h-8 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Loading Follow-ups...</p>
               </div>
-            ) : todayFollowups.length === 0 ? (
+            ) : filteredFollowups.length === 0 ? (
               <div className="p-12 text-center">
                 <Clock size={40} className="text-slate-200 mx-auto mb-4" />
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No follow-ups for today</p>
               </div>
-            ) : todayFollowups.map((followup) => (
-              <div key={followup._id} className="p-4 active:bg-amber-50 transition-colors border-l-4 border-amber-500">
-                <div className="flex justify-between items-center mb-2">
-                  <div className="flex items-center gap-2">
-                    <Clock size={14} className="text-amber-600" />
-                    <span className="font-black text-slate-900 text-xs">{followup.follow_up_time || 'No Time'}</span>
-                  </div>
-                  <button onClick={() => handleDetail(followup.lead_id)} className="p-2 bg-white border border-slate-100 rounded-lg text-slate-400">
-                    <ExternalLink size={16} />
-                  </button>
-                </div>
-                <h3 className="font-black text-slate-900 mb-1">{followup.lead_id?.business_name}</h3>
-                <p className="text-[10px] text-slate-500 italic line-clamp-2 mb-3">"{followup.description}"</p>
+            ) : filteredFollowups.map((followup) => (
+<div key={followup.display_activity_id} className="p-4 active:bg-amber-50 transition-colors border-l-4 border-amber-500">
+                 <div className="flex justify-between items-center mb-2">
+                   <div className="flex items-center gap-2">
+                     <div className={cn(
+                       "p-1 bg-amber-100 rounded",
+                       followup.is_overdue ? "bg-rose-100 text-rose-600" : "text-amber-600"
+                     )}>
+                       <Clock size={14} />
+                     </div>
+                     <div className="flex flex-col">
+                       <span className={cn(
+                         "font-black text-xs",
+                         followup.is_overdue ? "text-rose-600" : "text-slate-900"
+                       )}>
+                         {followup.display_time ? (
+                           new Date(`1970-01-01T${followup.display_time}`).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                         ) : followup.display_scheduled_for ? (
+                           new Date(followup.display_scheduled_for).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                         ) : 'No Time'}
+                       </span>
+                       {followup.is_overdue && (
+                         <span className="text-[7px] font-black uppercase text-rose-500">Overdue</span>
+                       )}
+                     </div>
+                   </div>
+                   <div className="flex items-center gap-2">
+                     {followup.hasActivity ? (
+                       <span className="p-1 bg-green-100 text-green-600 rounded">
+                         <span className="text-[10px] font-black">&#10003;</span>
+                       </span>
+                     ) : (
+                       <span className="p-1 bg-amber-100 text-amber-600 rounded">
+                         <AlertCircle size={12} />
+                       </span>
+                     )}
+                     <button onClick={() => handleDetail(followup)} className="p-2 bg-white border border-slate-100 rounded-lg text-slate-400">
+                       <ExternalLink size={16} />
+                     </button>
+                   </div>
+                 </div>
+                <h3 className="font-black text-slate-900 mb-1">{followup.display_business_name}</h3>
+                <p className="text-[10px] text-slate-500 italic line-clamp-2 mb-3">"{followup.display_message}"</p>
                 <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase">
-                  <span>{followup.lead_id?.contact_person}</span>
-                  <a href={`tel:${followup.lead_id?.phone}`} className="text-red-600">{followup.lead_id?.phone}</a>
+                  <span>{followup.display_contact_person}</span>
+                  <a href={`tel:${followup.display_phone}`} className="text-red-600">{followup.display_phone}</a>
                 </div>
-              </div>
+<div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-50">
+                   <span className="text-[9px] font-black text-slate-500">
+                     Manager: {followup.display_manager_name}
+                   </span>
+                 </div>
+               </div>
             ))}
           </div>
         )}
@@ -743,7 +1102,9 @@ const LeadsPage = () => {
           <span className="text-[9px] lg:text-[10px] font-black text-slate-400 uppercase tracking-widest text-center sm:text-left">
             {activeTab === 'followup' 
               ? `Showing ${todayFollowups.length} follow-ups scheduled for today`
-              : `Showing ${filteredLeads.length} of ${allLeads.length} records`
+              : activeTab === 'database'
+                ? `Showing ${filteredLeads.length} database search results`
+                : `Showing ${filteredLeads.length} of ${allLeads.length} records`
             }
           </span>
           <div className="flex items-center gap-2 w-full sm:w-auto justify-center">
@@ -882,3 +1243,80 @@ const LeadsPage = () => {
 };
 
 export default LeadsPage;
+
+// Follow-up confirmation modal component with smooth animations
+const FollowupConfirmModal = ({ isOpen, onClose, onDecision, followupInfo }) => {
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <DialogPrimitive.Root open={isOpen} onOpenChange={onClose}>
+          <DialogPrimitive.Portal>
+            <DialogPrimitive.Overlay asChild>
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm" 
+              />
+            </DialogPrimitive.Overlay>
+            <DialogPrimitive.Content asChild>
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9, y: -20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                transition={{ type: "spring", damping: 25, stiffness: 300 }}
+                className="fixed top-[50%] left-[50%] z-[101] w-full max-w-md translate-x-[-50%] translate-y-[-50%] rounded-2xl bg-white p-0 shadow-2xl outline-none"
+              >
+                <div className="px-6 py-4 bg-red-50 border-b border-red-100">
+                  <div className="flex items-center gap-3">
+                    <AlertCircle size={20} className="text-red-600" />
+                    <DialogPrimitive.Title className="text-sm font-black text-slate-900 uppercase tracking-widest">
+                      Follow-up Confirmation Required
+                    </DialogPrimitive.Title>
+                  </div>
+                </div>
+                <div className="p-6">
+                  <p className="text-xs font-bold text-slate-600 mb-4">
+                    This lead has a scheduled follow-up. Do you want to keep it or cancel it?
+                  </p>
+                  {followupInfo && (
+                    <div className="bg-slate-50 p-3 rounded-lg mb-4">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Scheduled for:</p>
+                      <p className="text-xs font-bold text-slate-900">
+                        {new Date(followupInfo.scheduled_for).toLocaleDateString()} at {followupInfo.scheduled_time || 'No Time'}
+                      </p>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 mb-1">Note:</p>
+                      <p className="text-xs font-bold text-slate-900">"{followupInfo.message}"</p>
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <Button 
+                      variant="outline" 
+                      onClick={() => onDecision('cancel')}
+                      className="flex-1 text-xs font-black uppercase tracking-widest border-red-200 text-red-600 hover:bg-red-50"
+                    >
+                      No, Cancel It
+                    </Button>
+                    <Button 
+                      variant="default" 
+                      onClick={() => onDecision('continue')}
+                      className="flex-1 bg-red-600 hover:bg-red-700 text-white text-xs font-black uppercase tracking-widest"
+                    >
+                      Yes, Continue
+                    </Button>
+                  </div>
+                </div>
+                <DialogPrimitive.Close asChild>
+                  <button className="absolute top-4 right-4 rounded-xs p-1 opacity-70 hover:opacity-100">
+                    <X size={16} />
+                  </button>
+                </DialogPrimitive.Close>
+              </motion.div>
+            </DialogPrimitive.Content>
+          </DialogPrimitive.Portal>
+        </DialogPrimitive.Root>
+      )}
+    </AnimatePresence>
+  );
+};

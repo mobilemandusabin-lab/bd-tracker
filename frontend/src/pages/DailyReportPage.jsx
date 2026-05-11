@@ -3,17 +3,11 @@ import axios from 'axios';
 import { useSelector } from 'react-redux';
 import { 
   PhoneCall, 
-  ArrowRight, 
-  User, 
-  Building2, 
-  Clock, 
-  Calendar,
-  ShieldCheck,
-  TrendingUp,
   History,
-  CheckCircle2,
-  AlertCircle,
-  ExternalLink
+  Calendar,
+  ExternalLink,
+  Clock,
+  ShieldCheck
 } from 'lucide-react';
 import { cn } from '../utils/cn';
 
@@ -50,7 +44,6 @@ const DailyReportPage = () => {
       const res = await axios.get(`${API_URL}/dashboard/daily-call-report`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      // Filter for the specific user
       const filteredCalls = res.data.data.report.filter(call => call.user_id?._id === userId);
       setUserCalls(filteredCalls);
     } catch (err) {
@@ -63,11 +56,6 @@ const DailyReportPage = () => {
   const handleUserClick = (userPerf) => {
     setSelectedLeadUser(userPerf);
     fetchUserDetails(userPerf._id);
-  };
-
-  const getStatusCount = (stats, status) => {
-    // Count occurrences of status in the stats array
-    return stats.filter(s => s.status === status).length;
   };
 
   const getStatusColor = (status) => {
@@ -84,299 +72,342 @@ const DailyReportPage = () => {
     }
   };
 
-  const stages = [
-    'Contacted', 
-    'Interested', 
-    'Meeting Scheduled', 
-    'Negotiation', 
-    'Document Pending', 
-    'Verification', 
-    'Activated', 
-    'Active Seller'
-  ];
-
-  return (
-    <div className="space-y-10 max-w-[1600px] mx-auto pb-20 px-4">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+  // Mobile-first compact header
+  const MobileHeader = () => (
+    <div className="flex flex-col gap-4 pb-4">
+      <div className="flex items-center justify-between">
         <div>
-          <div className="flex items-center gap-2 mb-2">
-            <div className="h-1 w-8 bg-red-600 rounded-full" />
-            <span className="text-[10px] font-black text-red-600 uppercase tracking-[0.2em]">Super Admin Intelligence</span>
+          <div className="flex items-center gap-2 mb-1">
+            <div className="h-1 w-6 bg-red-600 rounded-full" />
+            <span className="text-[8px] font-black text-red-600 uppercase tracking-[0.2em]">Team Performance</span>
           </div>
-          <h1 className="text-4xl font-black text-slate-900 tracking-tight">Team Performance Audit</h1>
-          <p className="text-sm font-bold text-slate-400 mt-2 uppercase tracking-widest">Collective pipeline movement per officer</p>
+          <h1 className="text-xl font-black text-slate-900 tracking-tight">Daily Call Report</h1>
         </div>
-        <div className="flex items-center gap-4 px-6 py-4 bg-white rounded-3xl border border-slate-100 shadow-sm">
-          <Calendar size={20} className="text-red-600" />
-          <div className="text-right">
-            <p className="text-[10px] font-black text-slate-400 uppercase">Report Date</p>
-            <p className="text-sm font-black text-slate-900">{new Date().toLocaleDateString(undefined, { dateStyle: 'long' })}</p>
-          </div>
+        <div className="flex items-center gap-2 px-3 py-2 bg-white rounded-xl border border-slate-100 shadow-sm">
+          <Calendar size={14} className="text-red-600" />
+          <span className="text-[9px] font-black text-slate-900">
+            {new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+          </span>
         </div>
       </div>
+    </div>
+  );
 
-      {selectedUser ? (
-        // ... (rest of the selectedUser view remains similar but ensure width is consistent)
-        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-          <button 
-            onClick={() => setSelectedLeadUser(null)}
-            className="flex items-center gap-2 text-[10px] font-black text-slate-400 hover:text-red-600 uppercase tracking-widest transition-colors"
-          >
-            <History size={14} className="rotate-180" />
-            <span>Back to Performance Overview</span>
-          </button>
+  // Mobile user card - more compact
+  const MobileUserCard = ({ userPerf }) => (
+    <div className="p-3 border-b border-slate-100 last:border-b-0 active:bg-slate-50">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center text-white text-xs font-black">
+            {userPerf.user?.name?.[0] || 'U'}
+          </div>
+          <div className="min-w-0">
+            <div className="font-black text-slate-900 text-sm truncate">{userPerf.user?.name}</div>
+            <div className="text-[8px] text-slate-400 truncate">{userPerf.user?.email}</div>
+          </div>
+        </div>
+        <button 
+          onClick={() => handleUserClick(userPerf)}
+          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+        >
+          <ExternalLink size={14} />
+        </button>
+      </div>
+      <div className="flex items-center gap-2">
+        <div className="flex-1 bg-slate-50 rounded-lg p-2 text-center">
+          <div className="text-lg font-black text-slate-900">{userPerf.total_calls}</div>
+          <div className="text-[7px] font-black text-slate-400 uppercase">Calls</div>
+        </div>
+        <div className="flex-1 bg-slate-50 rounded-lg p-2 text-center">
+          <div className="text-lg font-black text-slate-900">{userPerf.total_vendors_touched}</div>
+          <div className="text-[7px] font-black text-slate-400 uppercase">Vendors</div>
+        </div>
+      </div>
+    </div>
+  );
 
-          <div className="bg-slate-900 p-10 rounded-[3rem] text-white relative overflow-hidden shadow-2xl">
-            <div className="absolute top-0 right-0 w-96 h-96 bg-red-600/10 rounded-full blur-3xl -mr-48 -mt-48" />
-            <div className="relative flex items-center justify-between">
-              <div className="flex items-center gap-6">
-                <div className="w-20 h-20 bg-red-600 rounded-[2rem] flex items-center justify-center font-black text-3xl shadow-xl ring-4 ring-white/10">
-                  {selectedUser.user?.name?.[0] || 'U'}
-                </div>
-                <div>
-                  <h2 className="text-3xl font-black uppercase tracking-tight">{selectedUser.user?.name}</h2>
-                  <p className="text-slate-400 font-bold tracking-widest uppercase text-xs mt-1">{selectedUser.user?.email}</p>
+  // Mobile call card - optimized for phone
+  const MobileCallCard = ({ call }) => (
+    <div className="p-3 border-b border-slate-100 last:border-b-0 active:bg-slate-50">
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <div className="flex-1 min-w-0">
+          <div className="font-black text-slate-900 text-sm truncate">{call.lead_id?.business_name}</div>
+          <div className="flex items-center gap-1 text-[10px] text-slate-400 mt-0.5">
+            <Clock size={10} className="text-red-600" />
+            {new Date(call.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </div>
+        </div>
+        <span className={cn(
+          "px-2 py-0.5 rounded-full text-[8px] font-black uppercase border shrink-0",
+          getStatusColor(call.lead_id?.lead_status)
+        )}>
+          {call.lead_id?.lead_status}
+        </span>
+      </div>
+      <p className="text-xs text-slate-600 italic line-clamp-2">"{call.description}"</p>
+    </div>
+  );
+
+return (
+    <div className="min-h-screen bg-slate-50">
+      {/* Desktop Container - Original Layout */}
+      <div className="hidden lg:block max-w-7xl mx-auto px-6 py-8 space-y-6">
+        {/* Desktop Header */}
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <div className="h-1 w-8 bg-red-600 rounded-full" />
+              <span className="text-[10px] font-black text-red-600 uppercase tracking-[0.2em]">Super Admin Intelligence</span>
+            </div>
+            <h1 className="text-4xl font-black text-slate-900 tracking-tight">Team Performance Audit</h1>
+            <p className="text-sm font-bold text-slate-400 mt-2 uppercase tracking-widest">Collective pipeline movement per officer</p>
+          </div>
+          <div className="flex items-center gap-4 px-6 py-4 bg-white rounded-3xl border border-slate-100 shadow-sm">
+            <Calendar size={20} className="text-red-600" />
+            <div className="text-right">
+              <p className="text-[10px] font-black text-slate-400 uppercase">Report Date</p>
+              <p className="text-sm font-black text-slate-900">{new Date().toLocaleDateString(undefined, { dateStyle: 'long' })}</p>
+            </div>
+          </div>
+        </div>
+
+        {selectedUser ? (
+          <div className="space-y-6 animate-in fade-in duration-300">
+            <button 
+              onClick={() => setSelectedLeadUser(null)}
+              className="flex items-center gap-2 text-[10px] font-black text-slate-400 hover:text-red-600 uppercase tracking-widest"
+            >
+              <History size={14} className="rotate-180" />
+              <span>Back to Overview</span>
+            </button>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-1">
+                <div className="bg-slate-900 p-6 rounded-3xl text-white">
+                  <div className="flex items-center gap-4 mb-4">
+                    <div className="w-16 h-16 bg-red-600 rounded-2xl flex items-center justify-center font-black text-2xl">
+                      {selectedUser.user?.name?.[0] || 'U'}
+                    </div>
+                    <div>
+                      <div className="font-black text-xl">{selectedUser.user?.name}</div>
+                      <div className="text-sm text-slate-400">{selectedUser.user?.email}</div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-white/10 rounded-2xl p-4 text-center">
+                      <div className="text-3xl font-black">{selectedUser.total_calls}</div>
+                      <div className="text-xs uppercase">Total Calls</div>
+                    </div>
+                    <div className="bg-white/10 rounded-2xl p-4 text-center">
+                      <div className="text-3xl font-black text-red-600">{selectedUser.total_vendors_touched}</div>
+                      <div className="text-xs uppercase">Vendors Touched</div>
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div className="flex gap-10 text-right">
-                <div>
-                  <p className="text-4xl font-black text-white">{selectedUser.total_calls}</p>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Calls Today</p>
-                </div>
-                <div className="w-px h-12 bg-slate-800" />
-                <div>
-                  <p className="text-4xl font-black text-red-600">{selectedUser.total_vendors_touched}</p>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Unique Vendors</p>
+
+              <div className="lg:col-span-2">
+                <div className="bg-white rounded-3xl border border-slate-100 overflow-hidden">
+                  <div className="px-6 py-4 border-b border-slate-100">
+                    <h3 className="font-black text-slate-900 text-lg">Call Logs</h3>
+                  </div>
+                  <div className="max-h-[500px] overflow-y-auto">
+                    {detailsLoading ? (
+                      <div className="p-8 text-center">
+                        <div className="w-6 h-6 border-2 border-red-600 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+                        <p className="text-xs font-black text-slate-400 uppercase">Loading...</p>
+                      </div>
+                    ) : userCalls.length === 0 ? (
+                      <div className="p-8 text-center">
+                        <ShieldCheck size={32} className="text-slate-200 mx-auto mb-2" />
+                        <p className="text-xs font-black text-slate-400 uppercase">No call logs found</p>
+                      </div>
+                    ) : (
+                      <table className="w-full">
+                        <thead className="bg-slate-50">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-black text-slate-400 uppercase">Business</th>
+                            <th className="px-4 py-3 text-left text-xs font-black text-slate-400 uppercase">Time</th>
+                            <th className="px-4 py-3 text-left text-xs font-black text-slate-400 uppercase">Status</th>
+                            <th className="px-4 py-3 text-left text-xs font-black text-slate-400 uppercase">Notes</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {userCalls.map(call => (
+                            <tr key={call._id} className="border-b border-slate-50 last:border-b-0">
+                              <td className="px-4 py-3 font-bold text-slate-900">{call.lead_id?.business_name}</td>
+                              <td className="px-4 py-3 text-sm text-slate-400">
+                                {new Date(call.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={cn(
+                                  "px-3 py-1 rounded-full text-xs font-black uppercase",
+                                  getStatusColor(call.lead_id?.lead_status)
+                                )}>
+                                  {call.lead_id?.lead_status}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-sm text-slate-600 max-w-xs truncate">{call.description}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-
-          <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
-            <div className="p-10 border-b border-slate-50 flex items-center gap-4 bg-slate-50/30">
-              <PhoneCall size={24} className="text-red-600" />
-              <h3 className="text-xl font-black text-slate-900">Today's Call Intelligence</h3>
+        ) : (
+          <div className="bg-white rounded-3xl border border-slate-100 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100">
+              <h3 className="font-black text-slate-900 text-lg">Officer Activity</h3>
+              <p className="text-xs text-slate-400 uppercase">Today's performance overview</p>
             </div>
-            
-            {/* Desktop Table View - Hidden on mobile */}
-            <div className="hidden lg:block overflow-x-auto">
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="bg-slate-50/50">
-                    <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Time</th>
-                    <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Vendor</th>
-                    <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Discussion Details</th>
-                    <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Pipeline Update</th>
+            {loading ? (
+              <div className="p-8 text-center">
+                <div className="w-6 h-6 border-2 border-red-600 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+                <p className="text-xs font-black text-slate-400 uppercase">Loading...</p>
+              </div>
+            ) : performance.length === 0 ? (
+              <div className="p-8 text-center">
+                <ShieldCheck size={32} className="text-slate-200 mx-auto mb-2" />
+                <p className="text-xs font-black text-slate-400 uppercase">No activity today</p>
+              </div>
+            ) : (
+              <table className="w-full">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-black text-slate-400 uppercase">Officer</th>
+                    <th className="px-6 py-3 text-center text-xs font-black text-slate-400 uppercase">Calls</th>
+                    <th className="px-6 py-3 text-center text-xs font-black text-slate-400 uppercase">Vendors</th>
+                    <th className="px-6 py-3 text-right text-xs font-black text-slate-400 uppercase">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {detailsLoading ? (
-                    <tr><td colSpan="4" className="px-10 py-20 text-center text-slate-400 animate-pulse font-black uppercase tracking-widest">Retrieving logs...</td></tr>
-                  ) : userCalls.length === 0 ? (
-                    <tr><td colSpan="4" className="px-10 py-20 text-center text-slate-400 font-black uppercase tracking-widest">No detailed logs found</td></tr>
-                  ) : userCalls.map(call => (
-                    <tr key={call._id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="px-10 py-8">
-                        <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
-                          <Clock size={14} className="text-red-600" />
-                          {new Date(call.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                <tbody>
+                  {performance.map(userPerf => (
+                    <tr key={userPerf._id} className="border-b border-slate-50 last:border-b-0">
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-white font-black">
+                            {userPerf.user?.name?.[0] || 'U'}
+                          </div>
+                          <div>
+                            <div className="font-black text-slate-900">{userPerf.user?.name}</div>
+                            <div className="text-xs text-slate-400">{userPerf.user?.email}</div>
+                          </div>
                         </div>
                       </td>
-                      <td className="px-10 py-8">
-                        <div className="font-black text-slate-900">{call.lead_id?.business_name}</div>
-                      </td>
-                      <td className="px-10 py-8 max-w-md">
-                        <p className="text-sm font-bold text-slate-600 leading-relaxed italic">"{call.description}"</p>
-                      </td>
-                      <td className="px-10 py-8">
-                        <span className={cn(
-                          "px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border",
-                          getStatusColor(call.lead_id?.lead_status)
-                        )}>
-                          {call.lead_id?.lead_status}
-                        </span>
+                      <td className="px-6 py-4 text-center font-black text-slate-900">{userPerf.total_calls}</td>
+                      <td className="px-6 py-4 text-center font-black text-red-600">{userPerf.total_vendors_touched}</td>
+                      <td className="px-6 py-4 text-right">
+                        <button 
+                          onClick={() => handleUserClick(userPerf)}
+                          className="px-4 py-2 bg-slate-900 text-white text-xs font-black rounded-xl hover:bg-red-600 transition-colors"
+                        >
+                          View Details
+                        </button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Mobile Container - Optimized */}
+      <div className="block lg:hidden max-w-lg mx-auto px-3 py-4 space-y-4">
+        <MobileHeader />
+
+        {selectedUser ? (
+          <div className="space-y-4 animate-in fade-in duration-300">
+            <button 
+              onClick={() => setSelectedLeadUser(null)}
+              className="flex items-center gap-2 text-[10px] font-black text-slate-400 hover:text-red-600 uppercase tracking-widest"
+            >
+              <History size={14} className="rotate-180" />
+              <span>Back</span>
+            </button>
+
+            <div className="bg-slate-900 p-4 rounded-2xl text-white">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-12 h-12 bg-red-600 rounded-xl flex items-center justify-center font-black text-xl">
+                  {selectedUser.user?.name?.[0] || 'U'}
+                </div>
+                <div className="min-w-0">
+                  <div className="font-black text-lg truncate">{selectedUser.user?.name}</div>
+                  <div className="text-[9px] text-slate-400 truncate">{selectedUser.user?.email}</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-white/10 rounded-xl p-2 text-center">
+                  <div className="text-2xl font-black">{selectedUser.total_calls}</div>
+                  <div className="text-[8px] uppercase">Calls</div>
+                </div>
+                <div className="bg-white/10 rounded-xl p-2 text-center">
+                  <div className="text-2xl font-black text-red-600">{selectedUser.total_vendors_touched}</div>
+                  <div className="text-[8px] uppercase">Vendors</div>
+                </div>
+              </div>
             </div>
 
-            {/* Mobile Card View - Only visible on small screens */}
-            <div className="block lg:hidden">
-              {detailsLoading ? (
-                <div className="p-8 text-center">
-                  <div className="w-6 h-6 border-2 border-red-600 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Retrieving logs...</p>
-                </div>
-              ) : userCalls.length === 0 ? (
-                <div className="p-8 text-center">
-                  <PhoneCall size={32} className="text-slate-200 mx-auto mb-2" />
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">No detailed logs found</p>
-                </div>
-              ) : userCalls.map(call => (
-                <div key={call._id} className="p-4 border-b border-slate-100 last:border-b-0 active:bg-slate-50">
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex-1 min-w-0">
-                      <div className="font-black text-slate-900 text-sm truncate">{call.lead_id?.business_name}</div>
-                      <div className="flex items-center gap-1 text-[10px] text-slate-400 mt-0.5">
-                        <Clock size={10} className="text-red-600" />
-                        {new Date(call.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </div>
-                    </div>
-                    <span className={cn(
-                      "px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest border shrink-0 ml-2",
-                      getStatusColor(call.lead_id?.lead_status)
-                    )}>
-                      {call.lead_id?.lead_status}
-                    </span>
+            <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-50 flex items-center gap-2">
+                <PhoneCall size={18} className="text-red-600" />
+                <h3 className="font-black text-slate-900">Call Logs</h3>
+              </div>
+              <div className="max-h-[60vh] overflow-y-auto">
+                {detailsLoading ? (
+                  <div className="p-8 text-center">
+                    <div className="w-5 h-5 border-2 border-red-600 border-t-transparent rounded-full animate-spin mx-auto mb-1" />
+                    <p className="text-[9px] font-black text-slate-400 uppercase">Loading...</p>
                   </div>
-                  <p className="text-xs font-bold text-slate-600 leading-relaxed italic line-clamp-2">"{call.description}"</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden animate-in fade-in duration-500">
-          <div className="p-10 border-b border-slate-50 flex items-center justify-between bg-slate-50/30">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-red-600 shadow-sm border border-slate-100">
-                <ShieldCheck size={24} />
-              </div>
-              <div>
-                <h3 className="text-xl font-black text-slate-900">Officer Performance Matrix</h3>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Live synchronization of today's field activity</p>
+                ) : userCalls.length === 0 ? (
+                  <div className="p-8 text-center">
+                    <PhoneCall size={28} className="text-slate-200 mx-auto mb-1" />
+                    <p className="text-[9px] font-black text-slate-400 uppercase">No logs</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="block">
+                      {userCalls.map(call => (
+                        <MobileCallCard key={call._id} call={call} />
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
-
-          {/* Desktop Table View - Hidden on mobile */}
-          <div className="hidden lg:block overflow-x-auto overflow-y-visible">
-            <table className="w-full text-left min-w-[1200px]">
-              <thead>
-                <tr className="bg-slate-50/50">
-                  <th className="px-10 py-8 text-[11px] font-black text-slate-400 uppercase tracking-widest sticky left-0 bg-slate-50/50 z-10">Field Officer</th>
-                  <th className="px-6 py-8 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center">Total Calls</th>
-                  {stages.map(stage => (
-                    <th key={stage} className="px-4 py-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center whitespace-nowrap">{stage}</th>
-                  ))}
-                  <th className="px-10 py-8 text-[11px] font-black text-slate-400 uppercase tracking-widest text-right">Audit</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {loading ? (
-                  <tr><td colSpan={stages.length + 3} className="px-10 py-32 text-center text-slate-400 animate-pulse font-black uppercase tracking-widest">Syncing Performance Matrix...</td></tr>
-                ) : performance.length === 0 ? (
-                  <tr><td colSpan={stages.length + 3} className="px-10 py-32 text-center text-slate-400 font-black uppercase tracking-widest">No activity recorded for today</td></tr>
-                ) : performance.map(userPerf => (
-                  <tr key={userPerf._id} className="hover:bg-slate-50/50 transition-colors group">
-                    <td className="px-10 py-8 sticky left-0 bg-white group-hover:bg-slate-50/50 z-10">
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center text-white text-xs font-black shadow-xl ring-4 ring-slate-50">
-                          {userPerf.user?.name?.[0] || 'U'}
-                        </div>
-                        <div>
-                          <div className="font-black text-slate-900 group-hover:text-red-600 transition-colors text-base">{userPerf.user?.name}</div>
-                          <div className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-tight">{userPerf.user?.email}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-8 text-center">
-                      <div className="inline-flex flex-col items-center">
-                        <span className="text-xl font-black text-slate-900">{userPerf.total_calls}</span>
-                        <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Calls</span>
-                      </div>
-                    </td>
-                    {stages.map(stage => (
-                      <td key={stage} className="px-4 py-8 text-center">
-                        {getStatusCount(userPerf.stats, stage) > 0 ? (
-                          <div className="inline-flex flex-col items-center gap-1">
-                            <span className={cn(
-                              "w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black border shadow-sm transition-transform group-hover:scale-110",
-                              getStatusColor(stage)
-                            )}>
-                              {getStatusCount(userPerf.stats, stage)}
-                            </span>
-                            <span className="text-[8px] font-black text-slate-400 uppercase tracking-tighter">Vendors</span>
-                          </div>
-                        ) : (
-                          <span className="text-slate-100 font-black">-</span>
-                        )}
-                      </td>
-                    ))}
-                    <td className="px-10 py-8 text-right">
-                      <button 
-                        onClick={() => handleUserClick(userPerf)}
-                        className="p-4 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-[1.5rem] transition-all group-hover:rotate-12"
-                        title="View Detailed Call Logs"
-                      >
-                        <ExternalLink size={24} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Mobile Card View - Only visible on small screens */}
-          <div className="block lg:hidden">
+        ) : (
+          <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-50">
+              <h3 className="font-black text-slate-900 text-sm">Officer Activity</h3>
+              <p className="text-[8px] text-slate-400 uppercase">Today's calls</p>
+            </div>
+            
             {loading ? (
               <div className="p-8 text-center">
-                <div className="w-6 h-6 border-2 border-red-600 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Syncing Performance Matrix...</p>
+                <div className="w-5 h-5 border-2 border-red-600 border-t-transparent rounded-full animate-spin mx-auto mb-1" />
+                <p className="text-[9px] font-black text-slate-400 uppercase">Loading...</p>
               </div>
             ) : performance.length === 0 ? (
               <div className="p-8 text-center">
-                <ShieldCheck size={32} className="text-slate-200 mx-auto mb-2" />
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">No activity recorded for today</p>
+                <ShieldCheck size={28} className="text-slate-200 mx-auto mb-1" />
+                <p className="text-[9px] font-black text-slate-400 uppercase">No activity</p>
               </div>
-            ) : performance.map(userPerf => (
-              <div key={userPerf._id} className="p-4 border-b border-slate-100 last:border-b-0 active:bg-slate-50">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-white text-xs font-black shrink-0">
-                    {userPerf.user?.name?.[0] || 'U'}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-black text-slate-900 text-sm truncate">{userPerf.user?.name}</div>
-                    <div className="text-[9px] font-bold text-slate-400 uppercase tracking-tight truncate">{userPerf.user?.email}</div>
-                  </div>
-                  <button 
-                    onClick={() => handleUserClick(userPerf)}
-                    className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all shrink-0"
-                    title="View Detailed Call Logs"
-                  >
-                    <ExternalLink size={16} />
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 gap-2 mb-3">
-                  <div className="bg-slate-50 rounded-xl p-2.5 text-center">
-                    <div className="text-lg font-black text-slate-900">{userPerf.total_calls}</div>
-                    <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Calls</div>
-                  </div>
-                  <div className="bg-slate-50 rounded-xl p-2.5">
-                    <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Stages</div>
-                    <div className="flex flex-wrap gap-1">
-                      {stages.map(stage => (
-                        getStatusCount(userPerf.stats, stage) > 0 && (
-                          <span key={stage} className={cn(
-                            "px-1.5 py-0.5 rounded text-[9px] font-black uppercase",
-                            getStatusColor(stage)
-                          )}>
-                            {stage}: {getStatusCount(userPerf.stats, stage)}
-                          </span>
-                        )
-                      ))}
-                    </div>
-                  </div>
-                </div>
+            ) : (
+              <div className="divide-y divide-slate-50">
+                {performance.map(userPerf => (
+                  <MobileUserCard key={userPerf._id} userPerf={userPerf} />
+                ))}
               </div>
-            ))}
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 };

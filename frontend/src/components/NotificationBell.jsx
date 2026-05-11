@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { Bell, Check, BellOff, Clock, AlertCircle, Calendar } from 'lucide-react';
@@ -14,9 +14,42 @@ const NotificationBell = ({ token }) => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef(null);
   const lastFetchedRef = useRef(new Date());
+  const notifiedIdsRef = useRef(new Set());
   const audioRef = useRef(new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3'));
 
-  const requestPermission = async () => {
+  const playNotificationSound = useCallback(() => {
+    audioRef.current.play().catch(() => {
+      console.log('Audio play blocked by browser. User interaction required.');
+    });
+  }, []);
+
+  const handleNotificationClick = useCallback((notification) => {
+    if (notification.related_id && notification.related_model === 'Lead') {
+      navigate(`/leads?intelligence=${notification.related_id}`);
+      setIsOpen(false);
+    }
+  }, [navigate]);
+
+  const showDesktopNotification = useCallback((title, message, notificationData) => {
+    if (Notification.permission === "granted") {
+      const notification = new Notification(title, {
+        body: message,
+        icon: '/favicon.ico',
+        badge: '/favicon.ico',
+        tag: 'bd-tracker-alert',
+        vibrate: [200, 100, 200],
+        data: notificationData
+      });
+
+      notification.onclick = () => {
+        window.focus();
+        handleNotificationClick(notificationData);
+        notification.close();
+      };
+    }
+  }, [handleNotificationClick]);
+
+  const requestPermission = useCallback(async () => {
     if (!("Notification" in window)) {
       console.log("This browser does not support desktop notification");
       return;
@@ -29,41 +62,18 @@ const NotificationBell = ({ token }) => {
         playNotificationSound();
       }
     }
-  };
-
-  const playNotificationSound = () => {
-    audioRef.current.play().catch(error => {
-      console.log('Audio play blocked by browser. User interaction required.');
-    });
-  };
-
-  const handleNotificationClick = (notification) => {
-    if (notification.related_id && notification.related_model === 'Lead') {
-      navigate(`/leads?intelligence=${notification.related_id}`);
-      setIsOpen(false);
+    
+    if ('serviceWorker' in navigator && 'PushManager' in window) {
+      try {
+        const registration = await navigator.serviceWorker.register('/sw.js');
+        console.log('Service Worker registered:', registration);
+      } catch (e) {
+        console.log('Service Worker registration failed:', e);
+      }
     }
-  };
+  }, [playNotificationSound]);
 
-  const showDesktopNotification = (title, message, notificationData) => {
-    if (Notification.permission === "granted") {
-      const notification = new Notification(title, {
-        body: message,
-        icon: '/favicon.ico',
-        badge: '/favicon.ico',
-        tag: 'bd-tracker-alert', // Avoid multiple notifications for the same alert
-        vibrate: [200, 100, 200], // Vibration for mobile devices
-        data: notificationData
-      });
-
-      notification.onclick = () => {
-        window.focus();
-        handleNotificationClick(notificationData);
-        notification.close();
-      };
-    }
-  };
-
-  const fetchNotifications = async () => {
+  const fetchNotifications = useCallback(async () => {
     try {
       const res = await axios.get(`${API_URL}/notifications`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -74,7 +84,11 @@ const NotificationBell = ({ token }) => {
       const latestNotification = newNotifications[0];
       if (latestNotification && !latestNotification.is_read) {
         const notifDate = new Date(latestNotification.created_at);
-        if (notifDate > lastFetchedRef.current) {
+        const notifId = latestNotification._id || latestNotification.id;
+        
+        // Only trigger alert if: newer than last fetch AND not already notified
+        if (notifDate > lastFetchedRef.current && !notifiedIdsRef.current.has(notifId)) {
+          notifiedIdsRef.current.add(notifId);
           // Trigger all alert mechanisms
           playNotificationSound();
           toast(latestNotification.message, {
@@ -97,7 +111,7 @@ const NotificationBell = ({ token }) => {
     } catch (err) {
       console.error('Error fetching notifications:', err);
     }
-  };
+  }, [token, handleNotificationClick, playNotificationSound, showDesktopNotification]);
 
   useEffect(() => {
     if (token) {
@@ -106,7 +120,7 @@ const NotificationBell = ({ token }) => {
       const interval = setInterval(fetchNotifications, 10000); // Poll every 10 seconds for more responsiveness
       return () => clearInterval(interval);
     }
-  }, [token]);
+  }, [token, requestPermission, fetchNotifications]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -118,27 +132,29 @@ const NotificationBell = ({ token }) => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const markAsRead = async (id) => {
+  const markAsRead = useCallback(async (id) => {
     try {
       await axios.patch(`${API_URL}/notifications/${id}/mark-read`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      notifiedIdsRef.current.delete(id);
       fetchNotifications();
     } catch (err) {
       console.error('Error marking notification as read:', err);
     }
-  };
+  }, [fetchNotifications, token]);
 
-  const markAllAsRead = async () => {
+  const markAllAsRead = useCallback(async () => {
     try {
       await axios.patch(`${API_URL}/notifications/mark-all-read`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      notifiedIdsRef.current.clear();
       fetchNotifications();
     } catch (err) {
       console.error('Error marking all notifications as read:', err);
     }
-  };
+  }, [fetchNotifications, token]);
 
   return (
     <div className="relative" ref={dropdownRef}>

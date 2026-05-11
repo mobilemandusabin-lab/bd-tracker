@@ -19,16 +19,30 @@ import {
   ShieldCheck,
   AlertCircle,
   Loader2,
-  Send
+  Send,
+  Edit2,
+  Check,
+  X as XIcon
 } from 'lucide-react';
 import { cn } from '../utils/cn';
 
 import { API_URL } from '../config/api';
 
-const LeadDetailModal = ({ isOpen, onClose, lead, token }) => {
+const LeadDetailModal = ({ isOpen, onClose, lead, token, user, onSuccess }) => {
   const [activities, setActivities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editData, setEditData] = useState({
+    business_name: '',
+    contact_person: '',
+    phone: '',
+    email: '',
+    location: '',
+    category: '',
+    lead_source: ''
+  });
+  const [phoneError, setPhoneError] = useState('');
   const [newActivity, setNewActivity] = useState({
     description: '',
     activity_type: 'call',
@@ -53,6 +67,15 @@ const LeadDetailModal = ({ isOpen, onClose, lead, token }) => {
   useEffect(() => {
     if (isOpen && lead) {
       fetchActivities();
+      setEditData({
+        business_name: lead.business_name || '',
+        contact_person: lead.contact_person || '',
+        phone: lead.phone || '',
+        email: lead.email || '',
+        location: lead.location || '',
+        category: lead.category || '',
+        lead_source: lead.lead_source || ''
+      });
     }
   }, [isOpen, lead, token]);
 
@@ -141,7 +164,7 @@ const LeadDetailModal = ({ isOpen, onClose, lead, token }) => {
                   <div className="hidden sm:block w-1 h-1 bg-slate-700 rounded-full" />
                   <div className="flex items-center gap-1.5">
                     <Clock size={10} className="sm:w-3 sm:h-3" />
-                    <span className="text-[8px] sm:text-[10px] font-bold uppercase tracking-widest">Record: {lead._id.slice(-6).toUpperCase()}</span>
+                    <span className="text-[8px] sm:text-[10px] font-bold uppercase tracking-widest">Record: {lead?._id ? lead._id.slice(-6).toUpperCase() : 'N/A'}</span>
                   </div>
                 </div>
               </div>
@@ -159,46 +182,150 @@ const LeadDetailModal = ({ isOpen, onClose, lead, token }) => {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-10">
             {/* Sidebar Info - 4 Columns */}
             <div className="lg:col-span-4 space-y-6 sm:space-y-8">
-              <section className="bg-white p-6 sm:p-8 rounded-[1.5rem] sm:rounded-[2.5rem] shadow-sm border border-slate-100 space-y-4 sm:space-y-6">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="h-1 w-6 bg-red-600 rounded-full" />
-                  <h3 className="text-[8px] sm:text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Corporate Identity</h3>
+<section className="bg-white p-6 sm:p-8 rounded-[1.5rem] sm:rounded-[2.5rem] shadow-sm border border-slate-100 space-y-4 sm:space-y-6">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="h-1 w-6 bg-red-600 rounded-full" />
+                    <h3 className="text-[8px] sm:text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Corporate Identity</h3>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {lead.assignment_status === 'pending' && (
+                      <button
+                        onClick={async () => {
+                          try {
+                            const res = await axios.patch(`${API_URL}/leads/${lead._id}/accept`, {}, {
+                              headers: { Authorization: `Bearer ${token}` }
+                            });
+                            toast.success('Assignment accepted successfully');
+                            const updatedLead = res.data?.data?.lead;
+                            if (onSuccess && updatedLead) onSuccess(updatedLead);
+                          } catch (err) {
+                            toast.error(err.response?.data?.message || 'Failed to accept assignment');
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg font-black text-[9px] uppercase tracking-widest hover:bg-emerald-700 transition-all flex items-center gap-1"
+                      >
+                        <Check size={12} />
+                        <span>Accept Assignment</span>
+                      </button>
+                    )}
+                    {!editing && (
+                      <button
+                        onClick={() => setEditing(true)}
+                        className="p-1.5 sm:p-2 hover:bg-slate-100 rounded-lg transition-all"
+                      >
+                        <Edit2 size={14} className="text-slate-500" />
+                      </button>
+                    )}
+                  </div>
                 </div>
-                
-                <div className="space-y-4 sm:space-y-5">
-                  {[
-                    { icon: User, label: 'Primary Contact', value: lead.contact_person, color: 'text-blue-500' },
-                    { icon: Phone, label: 'Phone Number', value: lead.phone, color: 'text-emerald-500', href: `tel:${lead.phone}` },
-                    { icon: Mail, label: 'Email Address', value: lead.email, color: 'text-indigo-500', href: `mailto:${lead.email}` },
-                    { icon: MapPin, label: 'Business Location', value: lead.location, color: 'text-rose-500' },
-                    { icon: Tag, label: 'Industry Category', value: lead.category, color: 'text-amber-500' },
-                  ].map((item, i) => (
-                    item.href ? (
-                      <a key={i} href={item.href} className="flex items-start gap-3 sm:gap-4 group cursor-pointer">
-                        <div className={cn("w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-slate-50 flex items-center justify-center transition-all group-hover:bg-red-600 group-hover:scale-110 shrink-0", item.color.replace('text', 'bg').replace('500', '50'))}>
-                          <item.icon size={14} className={cn("sm:w-[18px] sm:h-[18px] group-hover:text-white transition-colors", item.color)} />
+                 
+                 <div className="space-y-4 sm:space-y-5">
+{[
+                      { icon: User, label: 'Primary Contact', key: 'contact_person', value: lead.contact_person, color: 'text-blue-500' },
+                      { icon: Phone, label: 'Phone Number', key: 'phone', value: lead.phone, color: 'text-emerald-500', href: `tel:${editing ? editData.phone : lead.phone}`, isPhone: true },
+                      { icon: Mail, label: 'Email Address', key: 'email', value: lead.email, color: 'text-indigo-500', href: editing ? '' : `mailto:${lead.email}` },
+                      { icon: MapPin, label: 'Business Location', key: 'location', value: lead.location, color: 'text-rose-500' },
+                      { icon: Tag, label: 'Industry Category', key: 'category', value: lead.category, color: 'text-amber-500' },
+                    ].map((item, i) => (
+                      editing ? (
+                        <div key={i} className="flex items-start gap-3 sm:gap-4">
+                          <div className={cn("w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-slate-50 flex items-center justify-center shrink-0", item.color.replace('text', 'bg').replace('500', '50'))}>
+                            <item.icon size={14} className={cn("sm:w-[18px] sm:h-[18px]", item.color)} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[8px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">{item.label}</p>
+<input
+                               type={item.isPhone ? "tel" : "text"}
+                               value={editData[item.key] ?? ''}
+                               onChange={(e) => {
+                                let value = e.target.value;
+                                if (item.isPhone) {
+                                  value = value.replace(/\D/g, '').slice(0, 10);
+                                  if (value.length > 0 && value.length < 10) {
+                                    setPhoneError('Phone number must be exactly 10 digits');
+                                  } else {
+                                    setPhoneError('');
+                                  }
+                                }
+                                setEditData({...editData, [item.key]: value});
+                              }}
+                              className={cn(
+                                "w-full text-xs sm:text-sm font-black text-slate-900 bg-slate-50 border rounded-lg px-2 py-1 focus:ring-2 outline-none",
+                                item.isPhone && phoneError ? "border-red-500 focus:ring-red-500" : "border-slate-200 focus:ring-red-600"
+                              )}
+                            />
+                            {item.isPhone && phoneError && (
+                              <p className="text-[9px] font-bold text-red-500 mt-1">{phoneError}</p>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[8px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">{item.label}</p>
-                          <p className="text-xs sm:text-sm font-black text-slate-900 group-hover:text-red-600 transition-colors truncate block">
-                            {item.value}
-                          </p>
-                        </div>
-                      </a>
-                    ) : (
-                      <div key={i} className="flex items-start gap-3 sm:gap-4 group">
-                        <div className={cn("w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-slate-50 flex items-center justify-center transition-all group-hover:scale-110 shrink-0", item.color.replace('text', 'bg').replace('500', '50'))}>
-                          <item.icon size={14} className={cn("sm:w-[18px] sm:h-[18px]", item.color)} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[8px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">{item.label}</p>
-                          <p className="text-xs sm:text-sm font-black text-slate-900 truncate">{item.value}</p>
-                        </div>
+                      ) : (
+                        item.href ? (
+                          <a key={i} href={item.href} className="flex items-start gap-3 sm:gap-4 group cursor-pointer">
+                            <div className={cn("w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-slate-50 flex items-center justify-center transition-all group-hover:bg-red-600 group-hover:scale-110 shrink-0", item.color.replace('text', 'bg').replace('500', '50'))}>
+                              <item.icon size={14} className={cn("sm:w-[18px] sm:h-[18px] group-hover:text-white transition-colors", item.color)} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[8px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">{item.label}</p>
+                              <p className="text-xs sm:text-sm font-black text-slate-900 group-hover:text-red-600 transition-colors truncate block">
+                                {item.value}
+                              </p>
+                            </div>
+                          </a>
+                        ) : (
+                          <div key={i} className="flex items-start gap-3 sm:gap-4 group">
+                            <div className={cn("w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-slate-50 flex items-center justify-center transition-all group-hover:scale-110 shrink-0", item.color.replace('text', 'bg').replace('500', '50'))}>
+                              <item.icon size={14} className={cn("sm:w-[18px] sm:h-[18px]", item.color)} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[8px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">{item.label}</p>
+                              <p className="text-xs sm:text-sm font-black text-slate-900 truncate">{item.value}</p>
+                            </div>
+                          </div>
+                        )
+                      )
+                    ))}
+{editing && (
+                      <div className="flex items-center gap-2 pt-2">
+<button
+                          onClick={async () => {
+                            if (editData.phone && !/^\d{10}$/.test(editData.phone)) {
+                              setPhoneError('Phone number must be exactly 10 digits');
+                              return;
+                            }
+                            setPhoneError('');
+                            try {
+                              await axios.patch(`${API_URL}/leads/${lead._id}`, editData, {
+                                headers: { Authorization: `Bearer ${token}` }
+                              });
+                              toast.success('Lead updated successfully');
+                              const res = await axios.get(`${API_URL}/leads/${lead._id}`, {
+                                headers: { Authorization: `Bearer ${token}` }
+                              });
+                              const updatedLead = res.data?.data?.lead;
+                              if (onSuccess && updatedLead) onSuccess(updatedLead);
+                              setEditing(false);
+                            } catch (err) {
+                              toast.error(err.response?.data?.message || 'Update failed');
+                            }
+                          }}
+                         className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg font-black text-[10px] uppercase tracking-widest hover:bg-red-700 transition-all flex items-center justify-center gap-1"
+                        >
+                          <Check size={12} />
+                          <span>Save</span>
+                        </button>
+                        <button
+                          onClick={() => setEditing(false)}
+                          className="flex-1 px-4 py-2 bg-slate-100 text-slate-700 rounded-lg font-black text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all flex items-center justify-center gap-1"
+                        >
+                          <XIcon size={12} />
+                          <span>Cancel</span>
+                        </button>
                       </div>
-                    )
-                  ))}
-                </div>
-              </section>
+                    )}
+                 </div>
+               </section>
 
               <section className="bg-white p-6 sm:p-8 rounded-[1.5rem] sm:rounded-[2.5rem] shadow-sm border border-slate-100 space-y-4 sm:space-y-6">
                 <div className="flex items-center gap-2 mb-2">
@@ -338,7 +465,7 @@ const LeadDetailModal = ({ isOpen, onClose, lead, token }) => {
                 </div>
               ) : (
                 <div className="relative space-y-4 sm:space-y-6 before:absolute before:left-[19px] sm:before:left-[23px] before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-100">
-                  {activities.map((activity, idx) => (
+                  {activities.map((activity) => (
                     <div key={activity._id} className="relative pl-10 sm:pl-14 group">
                       {/* Timeline Node */}
                       <div className="absolute left-0 top-0 w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-white border-2 border-slate-100 flex items-center justify-center group-hover:border-red-600 group-hover:shadow-lg group-hover:shadow-red-50 transition-all z-10">
@@ -387,6 +514,39 @@ const LeadDetailModal = ({ isOpen, onClose, lead, token }) => {
                         <p className="text-xs sm:text-sm font-bold text-slate-700 leading-relaxed mb-4 sm:mb-6">
                           {activity.description}
                         </p>
+
+                        {/* Super Admin Early Call Info */}
+                        {user?.role === 'super_admin' && activity.early_call_status && (
+                          <div className="mb-4 p-3 bg-amber-50 border border-amber-100 rounded-xl">
+                            <div className="flex items-center gap-2 mb-2">
+                              <ShieldCheck size={12} className="text-amber-600" />
+                              <span className="text-[9px] font-black text-amber-600 uppercase tracking-widest">Super Admin: Early Call Intel</span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <p className="text-[8px] font-black text-slate-400 uppercase">Original Schedule</p>
+                                <p className="text-[10px] font-bold text-slate-700">
+                                  {activity.original_follow_up_date ? new Date(activity.original_follow_up_date).toLocaleDateString() : 'N/A'} at {activity.original_follow_up_time || 'N/A'}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-[8px] font-black text-slate-400 uppercase">Early Call Status</p>
+                                <p className={cn(
+                                  "text-[10px] font-bold uppercase",
+                                  activity.early_call_status === 'continued' ? "text-blue-600" : "text-red-600"
+                                )}>
+                                  {activity.early_call_status.replace('_', ' ')}
+                                </p>
+                              </div>
+                              <div className="col-span-2">
+                                <p className="text-[8px] font-black text-slate-400 uppercase">Call Logged At</p>
+                                <p className="text-[10px] font-bold text-slate-700">
+                                  {activity.early_call_at ? new Date(activity.early_call_at).toLocaleString() : 'N/A'}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
 
                         <div className="flex items-center justify-between pt-4 sm:pt-6 border-t border-slate-50">
                           <div className="flex items-center gap-2 sm:gap-3">

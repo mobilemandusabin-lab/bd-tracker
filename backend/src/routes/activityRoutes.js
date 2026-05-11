@@ -7,6 +7,9 @@ const router = express.Router();
 router.use(authMiddleware.protect);
 
 router.post('/', activityController.createActivity);
+router.post('/log-call', activityController.logCallWithFollowupCheck);
+router.patch('/followup/:activity_id/decision', activityController.handleEarlyCallDecision);
+router.patch('/followup/:activity_id/cancel', activityController.handleEarlyCallDecision);
 router.get('/lead/:leadId', activityController.getActivitiesByLead);
 router.get('/pending-followups', activityController.getPendingFollowups);
 router.get('/today', activityController.getTodayFollowups);

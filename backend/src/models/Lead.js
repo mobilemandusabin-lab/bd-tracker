@@ -8,8 +8,8 @@ const leadSchema = new mongoose.Schema({
   },
   contact_person: {
     type: String,
-    trim: true,
-    default: null
+    required: [true, 'Please provide contact person name'],
+    trim: true
   },
   phone: {
     type: String,
@@ -17,9 +17,10 @@ const leadSchema = new mongoose.Schema({
   },
   email: {
     type: String,
+    required: false,
+    default: 'TBD',
     lowercase: true,
-    trim: true,
-    default: null
+    trim: true
   },
   category: {
     type: String,
@@ -27,8 +28,7 @@ const leadSchema = new mongoose.Schema({
   },
   location: {
     type: String,
-    trim: true,
-    default: null
+    required: [true, 'Please provide location']
   },
   lead_source: {
     type: String,
@@ -172,6 +172,9 @@ leadSchema.virtual('priority').get(function() {
   if (this.lead_score >= 40) return 'Warm';
   return 'Cold';
 });
+
+leadSchema.set('toJSON', { virtuals: true });
+leadSchema.set('toObject', { virtuals: true });
 
 const Lead = mongoose.model('Lead', leadSchema);
 module.exports = Lead;
