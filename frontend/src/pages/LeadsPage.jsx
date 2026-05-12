@@ -197,28 +197,49 @@ const loadMoreLeads = useCallback(() => {
    }, [reduxLoadingMore, hasMore, currentPage, dispatch, activeTab, searchQuery]);
 
 // Infinite scroll for accepted, recent, and pending tabs
-    useEffect(() => {
-     if (activeTab === 'followup' || activeTab === 'database') return; // Don't apply infinite scroll to followup or database tabs
+     useEffect(() => {
+      if (activeTab === 'followup' || activeTab === 'database') return; // Don't apply infinite scroll to followup or database tabs
+      
+      const handleScroll = () => {
+       if (loading || reduxLoadingMore || !hasMore) return;
+       
+       // Check window scroll for mobile
+       const scrollTop = window.scrollY || document.documentElement.scrollTop;
+       const scrollHeight = document.documentElement.scrollHeight;
+       const clientHeight = window.innerHeight;
+       
+       if (scrollHeight - scrollTop - clientHeight < 200) {
+         loadMoreLeads();
+       }
+     };
      
-     const handleScroll = (e) => {
-      if (loading || reduxLoadingMore || !hasMore) return;
-      
-      const container = e.currentTarget;
-      const scrollTop = container.scrollTop;
-      const scrollHeight = container.scrollHeight;
-      const clientHeight = container.clientHeight;
-      
-      if (scrollHeight - scrollTop - clientHeight < 100) {
-        loadMoreLeads();
-      }
-    };
-
-    const container = leadsContainerRef.current;
-    if (container) {
-      container.addEventListener('scroll', handleScroll);
-      return () => container.removeEventListener('scroll', handleScroll);
-    }
-  }, [activeTab, loading, reduxLoadingMore, hasMore, loadMoreLeads]);
+     // For desktop, check container scroll
+     const container = leadsContainerRef.current;
+     const desktopScrollHandler = (e) => {
+       if (loading || reduxLoadingMore || !hasMore) return;
+       
+       const scrollTop = e.currentTarget.scrollTop;
+       const scrollHeight = e.currentTarget.scrollHeight;
+       const clientHeight = e.currentTarget.clientHeight;
+       
+       if (scrollHeight - scrollTop - clientHeight < 100) {
+         loadMoreLeads();
+       }
+     };
+     
+     // Add event listeners
+     window.addEventListener('scroll', handleScroll);
+     if (container) {
+       container.addEventListener('scroll', desktopScrollHandler);
+     }
+     
+     return () => {
+       window.removeEventListener('scroll', handleScroll);
+       if (container) {
+         container.removeEventListener('scroll', desktopScrollHandler);
+       }
+     };
+   }, [activeTab, loading, reduxLoadingMore, hasMore, loadMoreLeads]);
 
 // Fetch today's followups
    const fetchTodayFollowups = useCallback(async () => {
@@ -604,8 +625,8 @@ useEffect(() => {
         </div>
 
 <div className="grid grid-cols-1 md:grid-cols-12 gap-3 lg:gap-4">
-            <div className="md:col-span-12 lg:col-span-6 relative group">
-<Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-red-600 transition-colors" size={18} />
+              <div className="md:col-span-12 lg:col-span-6 relative group">
+                <Search className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-red-600 transition-colors" size={16} />
                 <input 
                   type="text" 
                   placeholder={activeTab === 'database' 
@@ -614,24 +635,24 @@ useEffect(() => {
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-                  className="w-full pl-12 pr-24 py-3 lg:py-4 bg-white border border-slate-200 rounded-xl lg:rounded-2xl focus:ring-2 focus:ring-red-600 focus:border-transparent outline-none transition-all font-bold text-sm text-slate-800 shadow-sm"
+                  className="w-full pl-10 sm:pl-12 pr-24 py-2.5 sm:py-3 lg:py-4 bg-white border border-slate-200 rounded-xl lg:rounded-2xl focus:ring-2 focus:ring-red-600 focus:border-transparent outline-none transition-all font-bold text-xs sm:text-sm text-slate-800 shadow-sm"
                />
-               {searchTerm && (
-                 <button
-                   onClick={handleClearSearch}
-                   className="absolute right-24 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-red-600 transition-colors"
-                   title="Clear search"
-                 >
-                   <X size={16} />
-                 </button>
-               )}
-               <button
-                 onClick={handleSearch}
-                 disabled={loading}
-                 className="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-1.5 bg-red-600 text-white rounded-lg font-black text-[10px] uppercase tracking-widest hover:bg-red-700 transition-all disabled:opacity-50"
-               >
-                 Search
-               </button>
+{searchTerm && (
+                  <button
+                    onClick={handleClearSearch}
+                    className="absolute right-24 top-1/2 -translate-y-1/2 p-0.5 sm:p-1 text-slate-400 hover:text-red-600 transition-colors"
+                    title="Clear search"
+                  >
+                    <X size={14} className="sm:w-4 sm:h-4" />
+                  </button>
+                )}
+                <button
+                  onClick={handleSearch}
+                  disabled={loading}
+                  className="absolute right-1.5 sm:right-2 top-1/2 -translate-y-1/2 px-3 sm:px-4 py-1 sm:py-1.5 bg-red-600 text-white rounded-lg font-black text-[9px] sm:text-[10px] uppercase tracking-widest hover:bg-red-700 transition-all disabled:opacity-50"
+                >
+                  Search
+                </button>
             </div>
             <div className="md:col-span-12 lg:col-span-6">
               <div className="space-y-2">
@@ -1024,10 +1045,23 @@ useEffect(() => {
                       </button>
                     </div>
                   </div>
-              </div>
-            ))}
-          </div>
-        ) : (
+</div>
+             ))}
+             {reduxLoadingMore && (
+               <div className="p-4 text-center">
+                 <div className="flex items-center justify-center gap-2">
+                   <div className="w-4 h-4 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
+                   <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Loading more...</span>
+                 </div>
+               </div>
+             )}
+             {!hasMore && filteredLeads.length > 0 && !loading && (
+               <div className="p-4 text-center">
+                 <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">No more leads to load</span>
+               </div>
+             )}
+           </div>
+         ) : (
           // Mobile List View for Followups
           <div className="lg:hidden divide-y divide-slate-50">
             {followupLoading ? (

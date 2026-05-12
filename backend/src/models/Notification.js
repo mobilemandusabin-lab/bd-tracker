@@ -16,7 +16,7 @@ const notificationSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['follow_up', 'follow_up_overdue', 'follow_up_critical', 'escalation', 'lead_assigned', 'system'],
+    enum: ['follow_up', 'follow_up_overdue', 'follow_up_critical', 'escalation', 'lead_assigned', 'task_assigned', 'system'],
     default: 'system'
   },
   priority: {
@@ -30,7 +30,7 @@ const notificationSchema = new mongoose.Schema({
   },
   related_model: {
     type: String,
-    enum: ['Lead', 'Activity', 'Vendor']
+    enum: ['Lead', 'Activity', 'Vendor', 'Task']
   },
   is_read: {
     type: Boolean,

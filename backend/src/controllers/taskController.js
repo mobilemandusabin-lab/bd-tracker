@@ -1,6 +1,7 @@
 const Task = require('../models/Task');
 const User = require('../models/User');
 const AuditLog = require('../models/AuditLog');
+const Notification = require('../models/Notification');
 
 // Logging helper
 const logAction = async (userId, action, details) => {
@@ -150,15 +151,15 @@ exports.createTask = async (req, res) => {
     let assignee = assigned_to;
 
     if (userRole === 'super_admin') {
-      // SuperAdmin must assign to Admin
+      // SuperAdmin can assign to any active user (admin or user)
       if (!assigned_to) {
-        return res.status(400).json({ status: 'fail', message: 'SuperAdmin must assign a task to an Admin' });
+        return res.status(400).json({ status: 'fail', message: 'SuperAdmin must assign a task to a user' });
       }
       const targetUser = await User.findById(assigned_to);
-      if (!targetUser || targetUser.role !== 'admin') {
-        return res.status(403).json({
+      if (!targetUser || targetUser.status !== 'active') {
+        return res.status(404).json({
           status: 'fail',
-          message: 'SuperAdmin can only assign tasks to Admin users'
+          message: 'Assigned user not found or inactive'
         });
       }
       taskDepartment = targetUser.department?._id || targetUser.department;
@@ -204,6 +205,19 @@ exports.createTask = async (req, res) => {
     await task.populate('created_by', 'name email');
     await task.populate('assigned_to', 'name email');
     await task.populate('department', 'name');
+
+    // Create notification for assigned user
+    if (task.assigned_to) {
+      await Notification.create({
+        recipient: task.assigned_to._id || task.assigned_to,
+        title: 'New Task Assigned',
+        message: `You have been assigned a new task: ${task.title}`,
+        type: 'task_assigned',
+        related_id: task._id,
+        related_model: 'Task',
+        scheduled_for: new Date(task.due_date || Date.now())
+      });
+    }
 
     // Log the action
     logAction(userId, 'task_created', {
@@ -271,6 +285,27 @@ exports.updateTask = async (req, res) => {
     await task.populate('created_by', 'name email');
     await task.populate('assigned_to', 'name email');
     await task.populate('department', 'name');
+
+    // Create notification for status changes - notify the creator (assigner) not the assignee
+    if (status) {
+      const statusMessages = {
+        'Open': 'Task has been reopened',
+        'In Progress': 'Task is now in progress',
+        'Done': 'Task has been completed'
+      };
+      
+      // Notify the creator (assigner) if they are different from the updater
+      if (task.created_by && (task.created_by._id || task.created_by).toString() !== userId.toString()) {
+        await Notification.create({
+          recipient: task.created_by._id || task.created_by,
+          title: `Task ${status}`,
+          message: `${statusMessages[status]}: ${task.title}`,
+          type: 'task_assigned',
+          related_id: task._id,
+          related_model: 'Task'
+        });
+      }
+    }
 
     // Log the action
     logAction(userId, 'task_updated', {

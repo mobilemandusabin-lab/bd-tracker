@@ -171,28 +171,32 @@ exports.getDepartmentUsersForTask = async (req, res) => {
       });
     }
 
-    let departmentId;
+    let query;
 
     if (userRole === 'super_admin') {
-      // SuperAdmin can specify department or get all users
-      departmentId = req.query.department_id;
+      // SuperAdmin can see all active users (admins need tasks assigned to them)
+      query = { status: 'active' };
+      // Optionally filter by department if provided
+      if (req.query.department_id) {
+        query.department = req.query.department_id;
+      }
     } else {
       // Admin can only get users from their department
-      departmentId = req.user.department?._id || req.user.department;
+      const departmentId = req.user.department?._id || req.user.department;
+      if (!departmentId) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Department not found'
+        });
+      }
+      query = {
+        department: departmentId,
+        status: 'active',
+        role: 'user' // Only regular users for task assignment
+      };
     }
 
-    if (!departmentId) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Department not found'
-      });
-    }
-
-    const users = await User.find({ 
-      department: departmentId,
-      status: 'active',
-      role: 'user' // Only regular users for task assignment
-    }).select('name email');
+    const users = await User.find(query).select('name email role');
 
     res.status(200).json({
       status: 'success',

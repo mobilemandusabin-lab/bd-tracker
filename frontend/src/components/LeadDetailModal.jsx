@@ -379,16 +379,16 @@ const LeadDetailModal = ({ isOpen, onClose, lead, token, user, onSuccess }) => {
                 </div>
 
                 <form onSubmit={handleSubmitActivity} className="space-y-4">
-                  <div className="relative group">
-                    <div className="absolute left-4 top-4 text-slate-400 group-focus-within:text-red-600 transition-colors">
-                      <MessageSquare size={16} className="sm:w-[18px] sm:h-[18px]" />
-                    </div>
-                    <textarea
-                      value={newActivity.description}
-                      onChange={(e) => setNewActivity({...newActivity, description: e.target.value})}
-                      placeholder="Leave a detailed comment about this call..."
-                      className="w-full pl-10 sm:pl-12 pr-4 py-3 sm:py-4 bg-slate-50 border border-slate-100 rounded-xl sm:rounded-2xl focus:ring-2 focus:ring-red-600 focus:bg-white focus:border-transparent outline-none transition-all font-bold text-xs sm:text-sm text-slate-800 min-h-[80px] sm:min-h-[100px] resize-none"
-                    />
+<div className="relative group">
+                      <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-red-600 transition-colors">
+                        <MessageSquare size={16} className="sm:w-[18px] sm:h-[18px]" />
+                      </div>
+                      <textarea
+                        value={newActivity.description}
+                        onChange={(e) => setNewActivity({...newActivity, description: e.target.value})}
+                        placeholder="Leave a detailed comment about this call..."
+                        className="w-full pl-10 sm:pl-12 pr-4 pt-4 pb-3 sm:pt-4 sm:pb-3 bg-slate-50 border border-slate-100 rounded-xl sm:rounded-2xl focus:ring-2 focus:ring-red-600 focus:bg-white focus:border-transparent outline-none transition-all font-bold text-xs sm:text-sm text-slate-800 min-h-[80px] sm:min-h-[100px] resize-none"
+                      />
                   </div>
 
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">

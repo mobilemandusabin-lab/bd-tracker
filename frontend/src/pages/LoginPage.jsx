@@ -66,7 +66,7 @@ const LoginPage = () => {
             <div className="space-y-2">
               <label className="text-sm font-bold text-slate-700 block">Email Address</label>
               <div className="relative group">
-                <Mail className="absolute left-4 top-3.5 text-slate-400 group-focus-within:text-red-600 transition-colors" size={20} />
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-red-600 transition-colors" size={20} />
                 <input 
                   type="email" 
                   value={email}
@@ -84,7 +84,7 @@ const LoginPage = () => {
                 <a href="#" className="text-xs font-bold text-red-600 hover:text-red-700 hover:underline">Forgot?</a>
               </div>
               <div className="relative group">
-                <Lock className="absolute left-4 top-3.5 text-slate-400 group-focus-within:text-red-600 transition-colors" size={20} />
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-red-600 transition-colors" size={20} />
                 <input 
                   type="password" 
                   value={password}

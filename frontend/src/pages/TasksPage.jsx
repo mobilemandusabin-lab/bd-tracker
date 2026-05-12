@@ -1,18 +1,33 @@
 import { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
+import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { fetchTasks, fetchAdminTasks, createTask, updateTask, deleteTask } from '../store/taskSlice';
-import { Plus, ClipboardList, Clock, CheckCircle, AlertCircle, Trash2, MessageSquare, Filter, X } from 'lucide-react';
+import { Plus, ClipboardList, Clock, CheckCircle, AlertCircle, Trash2, Filter, X } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { API_URL as BASE_URL } from '../config/api';
 
 const TasksPage = () => {
   const dispatch = useDispatch();
-  const { tasks, loading, error } = useSelector((state) => state.tasks);
+  const [searchParams] = useSearchParams();
+  const { tasks, error } = useSelector((state) => state.tasks);
   const { user, token } = useSelector((state) => state.auth);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [viewMode, setViewMode] = useState('all'); // 'all' or 'my' for admin
+  const [viewMode, setViewMode] = useState('all');
   const [selectedTask, setSelectedTask] = useState(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
+
+  // Handle taskId query param - open detail modal for the task
+  useEffect(() => {
+    const taskId = searchParams.get('taskId');
+    if (taskId && tasks.length > 0) {
+      const task = tasks.find(t => t._id === taskId);
+      if (task) {
+        setSelectedTask(task);
+        setShowDetailModal(true);
+      }
+    }
+  }, [searchParams, tasks]);
 
   useEffect(() => {
     if (user?.role === 'admin' || user?.role === 'super_admin') {
@@ -73,37 +88,29 @@ const TasksPage = () => {
     }
   };
 
-  const getStatusBadge = (status) => {
-    switch(status) {
-      case 'Open': return 'bg-amber-50 text-amber-600 border-amber-100';
-      case 'In Progress': return 'bg-blue-50 text-blue-600 border-blue-100';
-      case 'Done': return 'bg-emerald-50 text-emerald-600 border-emerald-100';
-      default: return 'bg-slate-50 text-slate-600 border-slate-100';
+  // Drag and drop state
+  const [dragOverColumn, setDragOverColumn] = useState(null);
+
+  // Drag and drop handlers
+  const handleDragOver = (e, status) => {
+    e.preventDefault();
+    setDragOverColumn(status);
+  };
+
+  const handleDragLeave = () => {
+    setDragOverColumn(null);
+  };
+
+  const handleDrop = async (e, newStatus) => {
+    e.preventDefault();
+    setDragOverColumn(null);
+    
+    const taskId = e.dataTransfer.getData('taskId');
+    const currentStatus = e.dataTransfer.getData('currentStatus');
+    
+    if (currentStatus !== newStatus) {
+      await handleStatusChange(taskId, newStatus);
     }
-  };
-
-  const getPriorityLabel = (priority) => {
-    switch(priority) {
-      case 1: return { label: 'Critical', color: 'text-rose-600' };
-      case 2: return { label: 'High', color: 'text-orange-600' };
-      case 3: return { label: 'Medium', color: 'text-amber-600' };
-      case 4: return { label: 'Low', color: 'text-blue-600' };
-      case 5: return { label: 'Minimal', color: 'text-slate-600' };
-      default: return { label: 'Medium', color: 'text-amber-600' };
-    }
-  };
-
-  const formatDate = (date) => {
-    if (!date) return '-';
-    return new Date(date).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric'
-    });
-  };
-
-  const isOverdue = (dueDate) => {
-    if (!dueDate) return false;
-    return new Date(dueDate) < new Date();
   };
 
   // Group tasks by status for Kanban view
@@ -124,6 +131,16 @@ const TasksPage = () => {
           onSubmit={handleCreateTask}
           userRole={user?.role}
           token={token}
+        />
+      )}
+      
+      {/* Task Detail Modal */}
+      {showDetailModal && selectedTask && (
+        <TaskDetailModal
+          task={selectedTask}
+          onClose={() => setShowDetailModal(false)}
+          onDelete={handleDelete}
+          canDelete={isAdmin || selectedTask.created_by?._id === user?._id}
         />
       )}
       
@@ -198,7 +215,15 @@ const TasksPage = () => {
       {/* Kanban Board */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-6">
         {/* Open Column */}
-        <div className="bg-slate-50 rounded-2xl p-4 lg:p-6">
+        <div 
+          className={cn(
+            "bg-slate-50 rounded-2xl p-4 lg:p-6 transition-all",
+            dragOverColumn === 'Open' && "ring-2 ring-indigo-500 bg-indigo-50/30"
+          )}
+          onDragOver={(e) => handleDragOver(e, 'Open')}
+          onDragLeave={handleDragLeave}
+          onDrop={(e) => handleDrop(e, 'Open')}
+        >
           <div className="flex items-center gap-2 mb-4">
             <div className="w-3 h-3 bg-amber-500 rounded-full" />
             <h2 className="font-black text-slate-900 text-sm">Open</h2>
@@ -215,7 +240,10 @@ const TasksPage = () => {
                 onDelete={handleDelete}
                 canEdit={isAdmin || task.assigned_to?._id === user?._id}
                 canDelete={isAdmin || task.created_by?._id === user?._id}
-                isAdmin={isAdmin}
+                onCardClick={(selectedTask) => {
+                  setSelectedTask(selectedTask);
+                  setShowDetailModal(true);
+                }}
               />
             ))}
             {openTasks.length === 0 && (
@@ -228,7 +256,15 @@ const TasksPage = () => {
         </div>
 
         {/* In Progress Column */}
-        <div className="bg-slate-50 rounded-2xl p-4 lg:p-6">
+        <div 
+          className={cn(
+            "bg-slate-50 rounded-2xl p-4 lg:p-6 transition-all",
+            dragOverColumn === 'In Progress' && "ring-2 ring-indigo-500 bg-indigo-50/30"
+          )}
+          onDragOver={(e) => handleDragOver(e, 'In Progress')}
+          onDragLeave={handleDragLeave}
+          onDrop={(e) => handleDrop(e, 'In Progress')}
+        >
           <div className="flex items-center gap-2 mb-4">
             <div className="w-3 h-3 bg-blue-500 rounded-full" />
             <h2 className="font-black text-slate-900 text-sm">In Progress</h2>
@@ -245,7 +281,10 @@ const TasksPage = () => {
                 onDelete={handleDelete}
                 canEdit={isAdmin || task.assigned_to?._id === user?._id}
                 canDelete={isAdmin || task.created_by?._id === user?._id}
-                isAdmin={isAdmin}
+                onCardClick={(selectedTask) => {
+                  setSelectedTask(selectedTask);
+                  setShowDetailModal(true);
+                }}
               />
             ))}
             {inProgressTasks.length === 0 && (
@@ -258,7 +297,15 @@ const TasksPage = () => {
         </div>
 
         {/* Done Column */}
-        <div className="bg-slate-50 rounded-2xl p-4 lg:p-6">
+        <div 
+          className={cn(
+            "bg-slate-50 rounded-2xl p-4 lg:p-6 transition-all",
+            dragOverColumn === 'Done' && "ring-2 ring-indigo-500 bg-indigo-50/30"
+          )}
+          onDragOver={(e) => handleDragOver(e, 'Done')}
+          onDragLeave={handleDragLeave}
+          onDrop={(e) => handleDrop(e, 'Done')}
+        >
           <div className="flex items-center gap-2 mb-4">
             <div className="w-3 h-3 bg-emerald-500 rounded-full" />
             <h2 className="font-black text-slate-900 text-sm">Done</h2>
@@ -275,7 +322,10 @@ const TasksPage = () => {
                 onDelete={handleDelete}
                 canEdit={isAdmin || task.assigned_to?._id === user?._id}
                 canDelete={isAdmin || task.created_by?._id === user?._id}
-                isAdmin={isAdmin}
+                onCardClick={(selectedTask) => {
+                  setSelectedTask(selectedTask);
+                  setShowDetailModal(true);
+                }}
               />
             ))}
             {doneTasks.length === 0 && (
@@ -292,7 +342,7 @@ const TasksPage = () => {
 };
 
 // Task Card Component
-const TaskCard = ({ task, onStatusChange, onDelete, canEdit, canDelete, isAdmin }) => {
+const TaskCard = ({ task, onStatusChange, onDelete, canEdit, canDelete, onCardClick }) => {
   const [showMenu, setShowMenu] = useState(false);
   
   const getPriorityLabel = (priority) => {
@@ -317,7 +367,17 @@ const TaskCard = ({ task, onStatusChange, onDelete, canEdit, canDelete, isAdmin 
   const isOverdue = task.due_date && new Date(task.due_date) < new Date() && task.status !== 'Done';
 
   return (
-    <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm hover:shadow-md transition-all relative">
+    <div 
+      className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm hover:shadow-md transition-all relative active:scale-95"
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData('taskId', task._id);
+        e.dataTransfer.setData('currentStatus', task.status);
+        e.currentTarget.classList.add('opacity-50');
+      }}
+      onDragEnd={(e) => e.currentTarget.classList.remove('opacity-50')}
+      onClick={() => onCardClick && onCardClick(task)}
+    >
       {/* Priority Badge */}
       <div className="flex items-center justify-between mb-2">
         <span className={cn("text-[9px] font-black uppercase px-2 py-0.5 rounded", getPriorityLabel(task.priority).color)}>
@@ -387,6 +447,38 @@ const TaskCard = ({ task, onStatusChange, onDelete, canEdit, canDelete, isAdmin 
           </span>
         )}
       </div>
+      
+      {/* Mobile Status Change Buttons */}
+      {canEdit && (
+        <div className="mt-3 pt-3 border-t border-slate-100 md:hidden">
+          <div className="grid grid-cols-3 gap-2">
+            {task.status !== 'Open' && (
+              <button
+                onClick={() => onStatusChange(task._id, 'Open')}
+                className="px-2 py-1.5 text-[10px] font-black uppercase bg-amber-50 text-amber-600 rounded-lg border border-amber-100"
+              >
+                Open
+              </button>
+            )}
+            {task.status !== 'In Progress' && (
+              <button
+                onClick={() => onStatusChange(task._id, 'In Progress')}
+                className="px-2 py-1.5 text-[10px] font-black uppercase bg-blue-50 text-blue-600 rounded-lg border border-blue-100"
+              >
+                Progress
+              </button>
+            )}
+            {task.status !== 'Done' && (
+              <button
+                onClick={() => onStatusChange(task._id, 'Done')}
+                className="px-2 py-1.5 text-[10px] font-black uppercase bg-emerald-50 text-emerald-600 rounded-lg border border-emerald-100"
+              >
+                Done
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -555,6 +647,138 @@ const TaskModal = ({ isOpen, onClose, onSubmit, userRole, token }) => {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+};
+
+// Task Detail Modal Component
+const TaskDetailModal = ({ task, onClose, onDelete, canDelete }) => {
+  const getStatusBadge = (status) => {
+    switch(status) {
+      case 'Open': return 'bg-amber-50 text-amber-600 border-amber-100';
+      case 'In Progress': return 'bg-blue-50 text-blue-600 border-blue-100';
+      case 'Done': return 'bg-emerald-50 text-emerald-600 border-emerald-100';
+      default: return 'bg-slate-50 text-slate-600 border-slate-100';
+    }
+  };
+
+  const getPriorityLabel = (priority) => {
+    switch(priority) {
+      case 1: return { label: 'Critical', color: 'text-rose-600' };
+      case 2: return { label: 'High', color: 'text-orange-600' };
+      case 3: return { label: 'Medium', color: 'text-amber-600' };
+      case 4: return { label: 'Low', color: 'text-blue-600' };
+      case 5: return { label: 'Minimal', color: 'text-slate-600' };
+      default: return { label: 'Medium', color: 'text-amber-600' };
+    }
+  };
+
+  const formatDate = (date) => {
+    if (!date) return '-';
+    return new Date(date).toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  };
+
+  const isOverdue = task.due_date && new Date(task.due_date) < new Date() && task.status !== 'Done';
+
+  return (
+    <div 
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div 
+        className="bg-white rounded-2xl w-full max-w-xs sm:max-w-md max-h-[85vh] sm:max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-4 sm:p-6 border-b border-slate-100">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base sm:text-lg font-black text-slate-900">Task Details</h2>
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              {canDelete && (
+                <button 
+                  onClick={() => onDelete(task._id)}
+                  className="p-1.5 sm:p-2 text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                  title="Delete task"
+                >
+                  <Trash2 size={16} />
+                </button>
+              )}
+              <button onClick={onClose} className="p-1.5 sm:p-2 hover:bg-slate-50 rounded-lg">
+                <X size={18} />
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        <div className="p-4 sm:p-6 space-y-3 sm:space-y-4">
+          <div>
+            <label className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest">Status</label>
+            <div className="mt-1">
+              <span className={cn("inline-block px-2.5 py-0.5 sm:px-3 sm:py-1 text-[9px] sm:text-xs font-black uppercase rounded-md sm:rounded-lg border", getStatusBadge(task.status))}>
+                {task.status}
+              </span>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest">Title</label>
+            <p className="text-slate-900 font-bold text-sm sm:text-base mt-1">{task.title}</p>
+          </div>
+
+          {task.description && (
+            <div>
+              <label className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest">Description</label>
+              <p className="text-slate-700 text-xs sm:text-sm mt-1 whitespace-pre-wrap">{task.description}</p>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
+            <div>
+              <label className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest">Priority</label>
+              <p className={cn("font-bold text-xs sm:text-sm mt-1", getPriorityLabel(task.priority).color)}>
+                {getPriorityLabel(task.priority).label}
+              </p>
+            </div>
+            
+            <div>
+              <label className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest">Due Date</label>
+              <p className={cn("font-medium text-xs sm:text-sm mt-1", isOverdue ? 'text-rose-600' : 'text-slate-700')}>
+                {isOverdue && 'Overdue - '}{formatDate(task.due_date)}
+              </p>
+            </div>
+          </div>
+
+          {task.assigned_to && (
+            <div>
+              <label className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest">Assigned To</label>
+              <p className="text-slate-700 text-xs sm:text-sm mt-1">{task.assigned_to.name || task.assigned_to.email}</p>
+            </div>
+          )}
+
+          {task.created_by && (
+            <div>
+              <label className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest">Created By</label>
+              <p className="text-slate-700 text-xs sm:text-sm mt-1">{task.created_by.name || task.created_by.email}</p>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
+            <div>
+              <label className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest">Created</label>
+              <p className="text-slate-700 text-xs sm:text-sm mt-1">{formatDate(task.created_at)}</p>
+            </div>
+            
+            <div>
+              <label className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest">Updated</label>
+              <p className="text-slate-700 text-xs sm:text-sm mt-1">{formatDate(task.updated_at)}</p>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
