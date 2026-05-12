@@ -4,7 +4,9 @@ const {
   getNepalcanOrders, 
   getNepalcanStats,
   fetchFromNepalcan,
-  getNepalcanOrderById
+  getNepalcanOrderById,
+  getLastSyncLog,
+  getSyncLogs
 } = require('../controllers/nepalcanOrderController');
 const { protect, restrictTo } = require('../middlewares/authMiddleware');
 
@@ -28,5 +30,11 @@ router.get('/order/:id', getNepalcanOrderById);
 
 // Fetch orders directly from Nepalcan API
 router.post('/fetch', fetchFromNepalcan);
+
+// Get last sync log
+router.get('/sync-log/last', getLastSyncLog);
+
+// Get recent sync logs
+router.get('/sync-logs', getSyncLogs);
 
 module.exports = router;

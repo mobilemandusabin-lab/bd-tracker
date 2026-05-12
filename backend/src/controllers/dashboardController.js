@@ -522,20 +522,32 @@ exports.bulkUploadLeads = async (req, res) => {
           normalizedData[key.trim().toLowerCase()] = leadData[key];
         });
 
-        // Prepare lead data
+        // Prepare lead data with proper handling of empty/undefined values
         const leadPayload = {
           business_name: normalizedData['vendor name'] || 'Unknown Vendor',
-          contact_person: normalizedData['contact name'] || normalizedData['email'] || 'Unknown Contact',
-          phone: normalizedData['phone'] || `Unknown_${Math.floor(Math.random() * 1000000)}`,
-          email: normalizedData['email'] || `bulk_${Date.now()}_${Math.floor(Math.random() * 1000)}@example.com`,
-          category: normalizedData['category'] || 'Other',
-          location: normalizedData['location'] || 'Unknown Location',
-          lead_status: normalizedData['status'] || 'Interested',
+          contact_person: normalizedData['contact name'] && normalizedData['contact name'].trim() !== '' 
+            ? normalizedData['contact name'] 
+            : 'TBD',
+          phone: normalizedData['phone'] && normalizedData['phone'].trim() !== '' 
+            ? normalizedData['phone'] 
+            : 'TBD',
+          email: normalizedData['email'] && normalizedData['email'].trim() !== '' 
+            ? normalizedData['email'] 
+            : 'TBD',
+          category: normalizedData['category'] && normalizedData['category'].trim() !== '' 
+            ? normalizedData['category'] 
+            : 'Other',
+          location: normalizedData['location'] && normalizedData['location'].trim() !== '' 
+            ? normalizedData['location'] 
+            : 'TBD',
+          lead_status: normalizedData['status'] && normalizedData['status'].trim() !== '' 
+            ? normalizedData['status'] 
+            : 'Interested',
           lead_source: 'Bulk Upload',
           assigned_user: assigned_user || req.user._id,
           assignment_status: 'accepted',
           creator_id: req.user._id,
-          notes: normalizedData['discussion details'] || normalizedData['remark'] || 'Bulk uploaded lead intelligence'
+          notes: normalizedData['discussion details'] || normalizedData['remark'] || normalizedData['notes'] || 'Bulk uploaded lead intelligence'
         };
 
         const newLead = await Lead.create(leadPayload);

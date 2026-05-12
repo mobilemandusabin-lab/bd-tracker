@@ -46,9 +46,24 @@ exports.createLead = async (req, res) => {
       leadData.email = 'TBD';
     }
 
-    // Validate phone number (must be 10 digits)
-    if (leadData.phone && !/^\d{10}$/.test(leadData.phone)) {
-      return res.status(400).json({ status: 'fail', message: 'Phone number must be exactly 10 digits' });
+    // Set default contact_person to TBD if not provided
+    if (!leadData.contact_person || leadData.contact_person.trim() === '') {
+      leadData.contact_person = 'TBD';
+    }
+    
+    // Set default phone to TBD if not provided
+    if (!leadData.phone || leadData.phone.trim() === '') {
+      leadData.phone = 'TBD';
+    }
+
+    // Set default category to Other if not provided
+    if (!leadData.category || leadData.category.trim() === '') {
+      leadData.category = 'Other';
+    }
+
+    // Set default location to TBD if not provided
+    if (!leadData.location || leadData.location.trim() === '') {
+      leadData.location = 'TBD';
     }
 
     const newLead = await Lead.create(leadData);    
@@ -376,7 +391,7 @@ exports.bulkUploadLeads = async (req, res) => {
           continue;
         }
 
-        // Check for duplicates (by phone)
+// Check for duplicates (by phone)
         const existingLead = await Lead.findOne({ phone: phone });
         if (existingLead) {
           results.skipped++;
@@ -389,20 +404,23 @@ exports.bulkUploadLeads = async (req, res) => {
         // Super admin assignments are auto-accepted, others depend on whether assigned to self
         const assignmentStatus = req.user.role === 'super_admin' || assignedUser.toString() === req.user._id.toString() ? 'accepted' : 'pending';
         
-const newLead = await Lead.create({
-           business_name: vendorName,
-           contact_person: vendorName, // Default to vendor name
-           phone: phone,
-           email: 'TBD', // To be filled by BD
-           category: 'General',
-           location: 'TBD', // To be filled by BD
-           lead_source: 'Bulk Upload',
-           assigned_user: assignedUser,
-           creator_id: req.user._id,
-           lead_status: 'New',
-           assignment_status: assignmentStatus,
-           notes: remarks || 'Bulk uploaded - pending details'
-         });
+        // Prepare lead data with proper handling of empty/undefined values
+        const leadPayload = {
+          business_name: vendorName,
+          contact_person: vendorName, // Default to vendor name as contact person
+          phone: phone,
+          email: 'TBD', // To be filled by BD
+          category: 'General',
+          location: 'TBD', // To be filled by BD
+          lead_source: 'Bulk Upload',
+          assigned_user: assignedUser,
+          creator_id: req.user._id,
+          lead_status: 'New',
+          assignment_status: assignmentStatus,
+          notes: remarks || 'Bulk uploaded - pending details'
+        };
+        
+        const newLead = await Lead.create(leadPayload);
 
         // Calculate lead score
         newLead.lead_score = newLead.calculateLeadScore();

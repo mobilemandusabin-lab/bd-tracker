@@ -7,6 +7,7 @@ connectDB();
 
 const app = require('./app');
 const { checkOverdueFollowups, checkEscalationTriggers } = require('./services/overdueChecker');
+const { syncNepalcanOrders, updateStaleOrders } = require('./services/nepalcanSyncService');
 
 const port = process.env.PORT || 5000;
 const server = app.listen(port, () => {
@@ -26,10 +27,26 @@ setInterval(async () => {
   }
 }, OVERDUE_CHECK_INTERVAL);
 
+// Run Nepalcan sync every 2 hours (7200000 ms)
+const NEPA_CAN_SYNC_INTERVAL = 2 * 60 * 60 * 1000; // 2 hours
+
+setInterval(async () => {
+  console.log('[Cron] Running Nepalcan order sync...');
+  const result = await syncNepalcanOrders();
+  console.log(`[Cron] Nepalcan sync result:`, result.message || result.error);
+  
+  // Update stale orders (orders not synced in 2+ hours)
+  const staleCount = await updateStaleOrders();
+  console.log(`[Cron] Found ${staleCount} stale orders to recheck`);
+}, NEPA_CAN_SYNC_INTERVAL);
+
 // Also run once on server start (after 30 seconds to let DB connect)
 setTimeout(async () => {
   console.log('[Cron] Initial overdue check...');
   await checkOverdueFollowups();
+  
+  console.log('[Cron] Initial Nepalcan sync...');
+  await syncNepalcanOrders();
 }, 30000);
 
 process.on('unhandledRejection', (err) => {

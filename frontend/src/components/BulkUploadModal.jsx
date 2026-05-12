@@ -158,9 +158,9 @@ const BulkUploadModal = ({ isOpen, onClose, token, onSuccess }) => {
                 <AlertCircle className="text-red-600 shrink-0 mt-1" size={20} />
                 <div>
                   <h4 className="text-sm font-black text-red-900 uppercase tracking-tight">Enterprise Ingestion Format</h4>
-                  <p className="text-xs font-bold text-red-700/70 mt-1 leading-relaxed">
-                    Excel must include: <span className="text-red-900">Vendor Name</span>, <span className="text-red-900">Email</span>, <span className="text-red-900">Phone</span>, and <span className="text-red-900">Remark</span>.
-                  </p>
+<p className="text-xs font-bold text-red-700/70 mt-1 leading-relaxed">
+                        Excel must include: <span className="text-red-900">Vendor Name</span> and <span className="text-red-900">Remark</span>. Optional fields: <span className="text-red-900">Contact Name, Phone, Email, Location, Category</span>.
+                      </p>
                 </div>
               </div>
 

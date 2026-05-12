@@ -197,49 +197,66 @@ const loadMoreLeads = useCallback(() => {
    }, [reduxLoadingMore, hasMore, currentPage, dispatch, activeTab, searchQuery]);
 
 // Infinite scroll for accepted, recent, and pending tabs
-     useEffect(() => {
-      if (activeTab === 'followup' || activeTab === 'database') return; // Don't apply infinite scroll to followup or database tabs
+      useEffect(() => {
+       if (activeTab === 'followup' || activeTab === 'database') return; // Don't apply infinite scroll to followup or database tabs
+       
+       let ticking = false;
+       
+       const handleScroll = () => {
+         if (ticking) return;
+         ticking = true;
+         
+         requestAnimationFrame(() => {
+           if (loading || reduxLoadingMore || !hasMore) {
+             ticking = false;
+             return;
+           }
+           
+           // Check window scroll for mobile - use larger threshold
+           const scrollTop = window.scrollY || document.documentElement.scrollTop;
+           const scrollHeight = Math.max(
+             document.documentElement.scrollHeight,
+             document.body.scrollHeight,
+             document.documentElement.offsetHeight,
+             document.body.offsetHeight
+           );
+           const clientHeight = Math.min(window.innerHeight, screen.height);
+           
+           // Use 300px threshold for mobile reliability
+           if (scrollHeight - scrollTop - clientHeight < 300) {
+             loadMoreLeads();
+           }
+           ticking = false;
+         });
+       };
       
-      const handleScroll = () => {
-       if (loading || reduxLoadingMore || !hasMore) return;
-       
-       // Check window scroll for mobile
-       const scrollTop = window.scrollY || document.documentElement.scrollTop;
-       const scrollHeight = document.documentElement.scrollHeight;
-       const clientHeight = window.innerHeight;
-       
-       if (scrollHeight - scrollTop - clientHeight < 200) {
-         loadMoreLeads();
-       }
-     };
-     
-     // For desktop, check container scroll
-     const container = leadsContainerRef.current;
-     const desktopScrollHandler = (e) => {
-       if (loading || reduxLoadingMore || !hasMore) return;
-       
-       const scrollTop = e.currentTarget.scrollTop;
-       const scrollHeight = e.currentTarget.scrollHeight;
-       const clientHeight = e.currentTarget.clientHeight;
-       
-       if (scrollHeight - scrollTop - clientHeight < 100) {
-         loadMoreLeads();
-       }
-     };
-     
-     // Add event listeners
-     window.addEventListener('scroll', handleScroll);
-     if (container) {
-       container.addEventListener('scroll', desktopScrollHandler);
-     }
-     
-     return () => {
-       window.removeEventListener('scroll', handleScroll);
-       if (container) {
-         container.removeEventListener('scroll', desktopScrollHandler);
-       }
-     };
-   }, [activeTab, loading, reduxLoadingMore, hasMore, loadMoreLeads]);
+      // For desktop, check container scroll
+      const container = leadsContainerRef.current;
+      const desktopScrollHandler = (e) => {
+        if (loading || reduxLoadingMore || !hasMore) return;
+        
+        const scrollTop = e.currentTarget.scrollTop;
+        const scrollHeight = e.currentTarget.scrollHeight;
+        const clientHeight = e.currentTarget.clientHeight;
+        
+        if (scrollHeight - scrollTop - clientHeight < 100) {
+          loadMoreLeads();
+        }
+      };
+      
+      // Add event listeners with passive option for mobile performance
+      window.addEventListener('scroll', handleScroll, { passive: true });
+      if (container) {
+        container.addEventListener('scroll', desktopScrollHandler);
+      }
+      
+      return () => {
+        window.removeEventListener('scroll', handleScroll);
+        if (container) {
+          container.removeEventListener('scroll', desktopScrollHandler);
+        }
+      };
+    }, [activeTab, loading, reduxLoadingMore, hasMore, loadMoreLeads]);
 
 // Fetch today's followups
    const fetchTodayFollowups = useCallback(async () => {
@@ -337,9 +354,14 @@ useEffect(() => {
     setIsActionModalOpen(true);
   };
 
-  // Handle phone call with follow-up check
-  const handleCall = async (lead) => {
+// Handle phone call with follow-up check - opens call and intelligence view
+   const handleCall = async (lead) => {
     try {
+      // Open the LeadDetailModal for call recording/intelligence logging
+      setSelectedLead(lead);
+      setIsDetailModalOpen(true);
+      
+      // Log the call
       const res = await axios.post(`${API_URL}/activities/log-call`, {
         lead_id: lead._id,
         description: 'Quick call from lead list'
@@ -366,6 +388,16 @@ useEffect(() => {
     } catch (err) {
       console.error('Error logging call:', err);
     }
+  };
+
+  // Handle phone call with tel: link - starts call then opens intelligence view
+   const handleCallWithTel = (lead) => {
+    const phone = lead.phone?.replace(/\D/g, '');
+    // Only open tel: link if phone is valid (10+ digits)
+    if (phone && phone.length >= 10) {
+      window.location.href = `tel:${lead.phone}`;
+    }
+    handleCall(lead);
   };
 
   // Handle follow-up decision after user confirmation
@@ -907,19 +939,19 @@ useEffect(() => {
                               title="Accept Assignment"
                             >
                               <CheckCircle size={14} />
-                            </button>
-                          )}
-                          <a 
-                            href={`tel:${lead.phone}`} 
-                            className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-all"
-                            title="Call Now"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              handleCall(lead);
-                            }}
-                          >
-                            <Phone size={14} />
-                          </a>
+</button>
+                           )}
+                           <a 
+                              href={`tel:${lead.phone}`} 
+                              className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-all"
+                              title="Call Now"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleCallWithTel(lead);
+                              }}
+                            >
+                              <Phone size={14} />
+                            </a>
                          <a 
                            href={`https://wa.me/${lead.phone.replace(/\D/g, '')}`}
                            target="_blank"
@@ -1028,12 +1060,12 @@ useEffect(() => {
                         </button>
                       )}
                       <button 
-                        onClick={() => handleCall(lead)}
-                        className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-all active:scale-95"
-                        title="Call Now"
-                      >
-                        <Phone size={16} />
-                      </button>
+                         onClick={() => handleCallWithTel(lead)}
+                         className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-all active:scale-95"
+                         title="Call Now"
+                       >
+                         <Phone size={16} />
+                       </button>
                       <a href={`https://wa.me/${lead.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" className="p-2 text-green-500 hover:bg-green-50 rounded-lg transition-all active:scale-95">
                         <MessageCircle size={16} />
                       </a>
@@ -1055,13 +1087,26 @@ useEffect(() => {
                  </div>
                </div>
              )}
-             {!hasMore && filteredLeads.length > 0 && !loading && (
-               <div className="p-4 text-center">
-                 <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">No more leads to load</span>
-               </div>
-             )}
-           </div>
-         ) : (
+{!hasMore && filteredLeads.length > 0 && !loading && (
+                <div className="p-4 text-center">
+                  <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">No more leads to load</span>
+                </div>
+              )}
+              
+              {/* Load More button for mobile */}
+{hasMore && !loading && filteredLeads.length > 0 && (
+                 <div className="p-4 text-center">
+                   <button
+                     onClick={loadMoreLeads}
+                     disabled={reduxLoadingMore}
+                     className="px-4 py-2 bg-red-600 text-white rounded-lg font-black text-[10px] uppercase tracking-widest hover:bg-red-700 disabled:opacity-50"
+                   >
+                     {reduxLoadingMore ? 'Loading...' : 'Load More Leads'}
+                   </button>
+                 </div>
+               )}
+             </div>
+          ) : (
           // Mobile List View for Followups
           <div className="lg:hidden divide-y divide-slate-50">
             {followupLoading ? (

@@ -8,12 +8,14 @@ const leadSchema = new mongoose.Schema({
   },
   contact_person: {
     type: String,
-    required: [true, 'Please provide contact person name'],
+    required: false,
+    default: 'TBD',
     trim: true
   },
   phone: {
     type: String,
-    required: [true, 'Please provide phone number']
+    required: false,
+    default: 'TBD'
   },
   email: {
     type: String,
@@ -24,11 +26,13 @@ const leadSchema = new mongoose.Schema({
   },
   category: {
     type: String,
-    required: [true, 'Please provide category']
+    required: false,
+    default: 'Other'
   },
   location: {
     type: String,
-    required: [true, 'Please provide location']
+    required: false,
+    default: 'TBD'
   },
   lead_source: {
     type: String,

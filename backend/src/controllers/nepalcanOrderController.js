@@ -1,4 +1,5 @@
 const NepalcanOrder = require('../models/NepalcanOrder');
+const NepalcanSyncLog = require('../models/NepalcanSyncLog');
 const axios = require('axios');
 
 const API_BASE = 'https://commerce.thecanbrand.com/api';
@@ -30,42 +31,118 @@ exports.syncNepalcanOrders = async (req, res) => {
         // Check if order already exists
         let existingOrder = await NepalcanOrder.findOne({ orderId });
         
+        // Build complete status history from API data
         const statusHistoryEntry = {
           status: orderData.orderStatus || 'Pending',
           timestamp: orderData.updatedAt ? new Date(orderData.updatedAt) : new Date()
         };
 
-        if (!existingOrder) {
-          // Create new order
-          const newOrder = new NepalcanOrder({
-            orderId,
-            nepalcanId: orderData._id,
-            customer: orderData.customer || 'Unknown',
-            vendor: orderData.vendor,
-            source: orderData.source,
-            orderStatus: orderData.orderStatus || 'Pending',
-            paymentStatus: orderData.paymentStatus,
-            paymentMethod: orderData.paymentMethod,
-            totalAmount: orderData.totalAmount || 0,
-            shippingAmount: orderData.shippingAmount || 0,
-            createdAt: orderData.createdAt ? new Date(orderData.createdAt) : new Date(),
-            updatedAt: orderData.updatedAt ? new Date(orderData.updatedAt) : new Date(),
-            statusHistory: [statusHistoryEntry],
-            rawData: orderData,
-            lastSyncedAt: new Date()
+        // Build historical status changes
+        const historicalStatuses = [];
+        
+        // If order has status history from API, use it
+        if (orderData.statusHistory && Array.isArray(orderData.statusHistory)) {
+          historicalStatuses.push(...orderData.statusHistory.map(h => ({
+            status: h.status,
+            timestamp: h.timestamp ? new Date(h.timestamp) : new Date()
+          })));
+        } else if (orderData.createdAt && orderData.updatedAt) {
+          // Infer intermediate statuses for complete tracking
+          const createdAt = new Date(orderData.createdAt);
+          const updatedAt = new Date(orderData.updatedAt);
+          
+          const currentStatus = orderData.orderStatus;
+          
+          // Always record Pending as starting point
+          historicalStatuses.push({
+            status: 'Pending',
+            timestamp: createdAt
           });
-
-          await newOrder.save();
-          results.created++;
-        } else {
-          // Check if status changed
-          const oldStatus = existingOrder.orderStatus;
-          const newStatus = orderData.orderStatus || oldStatus;
-
-          if (oldStatus !== newStatus) {
-            // Add new status to history
-            existingOrder.statusHistory.push(statusHistoryEntry);
+          
+          // If delivered, infer Processing at midpoint
+          if (currentStatus === 'Delivered') {
+            const midpoint = new Date((createdAt.getTime() + updatedAt.getTime()) / 2);
+            historicalStatuses.push({
+              status: 'Processing',
+              timestamp: midpoint
+            });
+            historicalStatuses.push({
+              status: 'Delivered',
+              timestamp: updatedAt
+            });
           }
+          // If shipped, infer Processing at 2/3 point
+          else if (currentStatus === 'Shipped') {
+            const twoThirds = new Date(createdAt.getTime() + (updatedAt.getTime() - createdAt.getTime()) * 2 / 3);
+            historicalStatuses.push({
+              status: 'Processing',
+              timestamp: twoThirds
+            });
+            historicalStatuses.push({
+              status: 'Shipped',
+              timestamp: updatedAt
+            });
+          }
+          // If processing, infer started at 1/3 point
+          else if (currentStatus === 'Processing') {
+            const oneThird = new Date(createdAt.getTime() + (updatedAt.getTime() - createdAt.getTime()) * 1 / 3);
+            historicalStatuses.push({
+              status: 'Processing',
+              timestamp: oneThird
+            });
+          }
+        }
+
+if (!existingOrder) {
+           // Create new order
+           // Build final history - include current entry only if not already covered by historical
+           let finalHistory = [];
+           if (historicalStatuses.length > 0) {
+             // Check if current status is already in historicalStatuses
+             const hasCurrent = historicalStatuses.some(h => h.status === (orderData.orderStatus || 'Pending'));
+             finalHistory = hasCurrent ? historicalStatuses : [...historicalStatuses, statusHistoryEntry];
+           } else {
+             finalHistory = [statusHistoryEntry];
+           }
+           
+           const newOrder = new NepalcanOrder({
+             orderId,
+             nepalcanId: orderData._id,
+             customer: orderData.customer || 'Unknown',
+             vendor: orderData.vendor,
+             source: orderData.source,
+             orderStatus: orderData.orderStatus || 'Pending',
+             paymentStatus: orderData.paymentStatus,
+             paymentMethod: orderData.paymentMethod,
+             totalAmount: orderData.totalAmount || 0,
+             shippingAmount: orderData.shippingAmount || 0,
+             createdAt: orderData.createdAt ? new Date(orderData.createdAt) : new Date(),
+             updatedAt: orderData.updatedAt ? new Date(orderData.updatedAt) : new Date(),
+             statusHistory: finalHistory,
+             rawData: orderData,
+             lastSyncedAt: new Date()
+           });
+
+           await newOrder.save();
+           results.created++;
+         } else {
+           // Check if status changed
+           const oldStatus = existingOrder.orderStatus;
+           const newStatus = orderData.orderStatus || oldStatus;
+
+           // Build final history - check if current status is already covered
+           let finalHistory;
+           if (historicalStatuses.length > 0) {
+             const hasCurrent = historicalStatuses.some(h => h.status === newStatus);
+             finalHistory = hasCurrent ? historicalStatuses : [...historicalStatuses, statusHistoryEntry];
+           } else {
+             finalHistory = [...existingOrder.statusHistory, statusHistoryEntry];
+           }
+           
+           // Remove duplicates and sort by timestamp
+           existingOrder.statusHistory = finalHistory
+             .filter((v, i, a) => a.findIndex(t => t.timestamp.getTime() === v.timestamp.getTime()) === i)
+             .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
           // Update order
           existingOrder.orderStatus = newStatus;
@@ -154,19 +231,40 @@ exports.getNepalcanStats = async (req, res) => {
       { $group: { _id: '$paymentStatus', count: { $sum: 1 } } }
     ]);
 
-    // Calculate average processing times
+    // Calculate average processing times - only orders from today with valid interval data
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
     const orders = await NepalcanOrder.find({
-      orderStatus: 'Delivered'
+      orderStatus: 'Delivered',
+      createdAt: { $gte: today, $lt: tomorrow }
     });
 
     let totalPendingToProcessing = 0;
     let totalProcessingToDelivered = 0;
     let totalPendingToDelivered = 0;
     let ordersWithFullHistory = 0;
+    let ordersWithNoIntervalData = 0;
 
     orders.forEach(order => {
       const times = order.getProcessingTimes();
       const fulfillmentTime = order.getTotalFulfillmentTime();
+
+      // Check if order has actual status interval data (not inferred)
+      // A valid interval exists if there are at least 2 status entries with different timestamps
+      const hasIntervalData = order.statusHistory.length >= 2 && 
+        order.statusHistory.some((entry, i) => {
+          if (i === 0) return false;
+          const prevEntry = order.statusHistory[i - 1];
+          return prevEntry.status !== entry.status;
+        });
+
+      if (!hasIntervalData) {
+        ordersWithNoIntervalData++;
+        return;
+      }
 
       if (times['Pending_to_Processing']) {
         totalPendingToProcessing += times['Pending_to_Processing'];
@@ -195,7 +293,8 @@ exports.getNepalcanStats = async (req, res) => {
           ? Math.round(totalPendingToDelivered / ordersWithFullHistory) 
           : 0
       },
-      ordersAnalyzed: ordersWithFullHistory
+      ordersAnalyzed: ordersWithFullHistory,
+      ordersWithNoIntervalData
     };
 
     res.json(stats);
@@ -209,18 +308,40 @@ exports.getNepalcanStats = async (req, res) => {
 // Get single order by ID with status history
 exports.getNepalcanOrderById = async (req, res) => {
   try {
-    const order = await NepalcanOrder.findOne({ 
-      $or: [
-        { orderId: req.params.id },
-        { _id: req.params.id }
-      ]
-    });
+    const { id } = req.params;
+    let query;
+    
+    // Check if id is a valid ObjectId (24 hex characters)
+    if (/^[0-9a-fA-F]{24}$/.test(id)) {
+      query = { $or: [{ orderId: id }, { _id: id }] };
+    } else {
+      query = { orderId: id };
+    }
+    
+    const order = await NepalcanOrder.findOne(query);
 
     if (!order) {
       return res.status(404).json({ message: 'Order not found' });
     }
 
-    res.json(order);
+    // Calculate time spent in each status
+    const statusDurations = {};
+    const history = order.statusHistory.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    
+    for (let i = 0; i < history.length - 1; i++) {
+      const current = history[i];
+      const next = history[i + 1];
+      const hours = Math.round((new Date(next.timestamp) - new Date(current.timestamp)) / (1000 * 60 * 60));
+      statusDurations[`${current.status}_to_${next.status}`] = hours;
+    }
+
+    const response = {
+      ...order.toObject(),
+      statusDurations,
+      noPreviousData: order.statusHistory.length <= 1
+    };
+
+    res.json(response);
   } catch (error) {
     console.error('Get order error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -277,5 +398,28 @@ exports.fetchFromNepalcan = async (req, res) => {
       message: 'Failed to fetch from Nepalcan', 
       error: error.response?.data?.message || error.message 
     });
+  }
+};
+
+// Get last sync log
+exports.getLastSyncLog = async (req, res) => {
+  try {
+    const lastLog = await NepalcanSyncLog.findOne().sort({ createdAt: -1 });
+    res.json(lastLog || { message: 'No sync logs found' });
+  } catch (error) {
+    console.error('Get sync log error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+// Get recent sync logs
+exports.getSyncLogs = async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+    const logs = await NepalcanSyncLog.find().sort({ createdAt: -1 }).limit(limit);
+    res.json(logs);
+  } catch (error) {
+    console.error('Get sync logs error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
