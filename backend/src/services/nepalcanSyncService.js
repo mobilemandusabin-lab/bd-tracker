@@ -271,24 +271,29 @@ const syncNepalcanOrders = async (token = null) => {
       } }
     ]);
     
-    for (const vendorData of deliveredOrdersAgg) {
-      const { _id: vendorName, deliveredCount, totalAmount, lastOrderDate } = vendorData;
-      if (!vendorName) continue;
-      
-      const updated = await Lead.findOneAndUpdate(
-        { type: 'vendor', business_name: { $regex: `^${vendorName}$`, $options: 'i' } },
-        { 
-          delivered_order_count: deliveredCount,
-          active_seller: deliveredCount > 0,
-          last_order_date: lastOrderDate
-        },
-        { new: true }
-      );
-      
-      if (updated) {
-        console.log(`[Nepalcan Sync] Updated lead ${vendorName}: ${deliveredCount} delivered orders`);
-      }
-    }
+for (const vendorData of deliveredOrdersAgg) {
+       const { _id: vendorName, deliveredCount, totalAmount, lastOrderDate } = vendorData;
+       if (!vendorName) continue;
+       
+       const updated = await Lead.findOneAndUpdate(
+         { type: 'vendor', business_name: { $regex: `^${vendorName}$`, $options: 'i' } },
+         { 
+           delivered_order_count: deliveredCount,
+           active_seller: deliveredCount > 0,
+           last_order_date: lastOrderDate,
+           lead_status: 'Activated',
+           verification_status: 'verified',
+           is_verified: true,
+           onboarding_stage: 'seller_activated',
+           activation_status: 'active'
+         },
+         { new: true }
+       );
+        
+       if (updated) {
+         console.log(`[Nepalcan Sync] Updated lead ${vendorName}: ${deliveredCount} delivered orders - Activated`);
+       }
+     }
   } catch (error) {
     errorMessage = error.response?.data?.message || error.message || 'Unknown error';
     apiResponse = {
@@ -554,19 +559,24 @@ const durationMs = Date.now() - startTime;
         } }
       ]);
       
-      for (const vendorData of deliveredOrdersAgg) {
-        const { _id: vendorName, deliveredCount, lastOrderDate } = vendorData;
-        if (!vendorName) continue;
-        
-        await Lead.findOneAndUpdate(
-          { type: 'vendor', business_name: { $regex: `^${vendorName}$`, $options: 'i' } },
-          { 
-            delivered_order_count: deliveredCount,
-            active_seller: deliveredCount > 0,
-            last_order_date: lastOrderDate
-          }
-        );
-      }
+for (const vendorData of deliveredOrdersAgg) {
+         const { _id: vendorName, deliveredCount, lastOrderDate } = vendorData;
+         if (!vendorName) continue;
+         
+         await Lead.findOneAndUpdate(
+           { type: 'vendor', business_name: { $regex: `^${vendorName}$`, $options: 'i' } },
+           { 
+             delivered_order_count: deliveredCount,
+             active_seller: deliveredCount > 0,
+             last_order_date: lastOrderDate,
+             lead_status: 'Activated',
+             verification_status: 'verified',
+             is_verified: true,
+             onboarding_stage: 'seller_activated',
+             activation_status: 'active'
+           }
+         );
+       }
 
       await NepalcanSyncLog.create({
        type: 'vendors',
