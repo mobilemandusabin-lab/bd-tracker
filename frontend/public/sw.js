@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bd-tracker-v1';
+const CACHE_NAME = 'bd-tracker-v2';
 const urlsToCache = [
   '/',
   '/index.html',
@@ -13,6 +13,11 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // Don't cache API requests - let them pass through to network
+  if (event.request.url.includes('/api/')) {
+    return;
+  }
+  
   event.respondWith(
     caches.match(event.request)
       .then((response) => {

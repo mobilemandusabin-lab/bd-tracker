@@ -1,5 +1,4 @@
 const Lead = require('../models/Lead');
-const Vendor = require('../models/Vendor');
 const Activity = require('../models/Activity');
 const Task = require('../models/Task');
 
@@ -14,7 +13,10 @@ exports.getStats = async (req, res) => {
       }
     ]);
 
-    const onboardingStats = await Vendor.aggregate([
+    const onboardingStats = await Lead.aggregate([
+      {
+        $match: { type: 'vendor' }
+      },
       {
         $group: {
           _id: '$onboarding_stage',

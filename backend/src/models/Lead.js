@@ -1,6 +1,11 @@
 const mongoose = require('mongoose');
 
 const leadSchema = new mongoose.Schema({
+  type: {
+    type: String,
+    enum: ['lead', 'vendor'],
+    default: 'lead'
+  },
   business_name: {
     type: String,
     required: [true, 'Please provide business name'],
@@ -64,9 +69,9 @@ const leadSchema = new mongoose.Schema({
   lead_status: {
     type: String,
     enum: [
-      'New', 'Contacted', 'Interested', 'Meeting Scheduled', 
-      'Negotiation', 'Document Pending', 'Verification', 
-      'Onboarding', 'Activated', 'Active Seller', 'Lost'
+      'New', 'Contacted', 'Interested', 'Meeting Scheduled',
+      'Negotiation', 'Document Pending', 'Verification',
+      'Onboarding', 'Activated', 'Active Seller', 'Lost', 'Self Registered', 'Nepalcan'
     ],
     default: 'New'
   },
@@ -100,6 +105,63 @@ const leadSchema = new mongoose.Schema({
   notes: {
     type: String,
     trim: true
+  },
+  nepalcanId: {
+    type: String,
+    unique: true,
+    sparse: true
+  },
+  is_verified: {
+    type: Boolean,
+    default: false
+  },
+  verification_status: {
+    type: String,
+    enum: ['pending', 'verified', 'rejected'],
+    default: 'pending'
+  },
+  document_status: {
+    type: String,
+    enum: ['pending', 'submitted', 'verified', 'rejected'],
+    default: 'pending'
+  },
+  onboarding_stage: {
+    type: String,
+    enum: [
+      'negotiation', 'documents_pending', 'documents_submitted', 'verification_pending',
+      'verified', 'account_created', 'product_upload_pending',
+      'product_review_pending', 'seller_activated'
+    ],
+    default: 'documents_pending'
+  },
+  onboarding_completion_percentage: {
+    type: Number,
+    default: 0
+  },
+  activation_status: {
+    type: String,
+    enum: ['inactive', 'active', 'dormant'],
+    default: 'inactive'
+  },
+  total_products_listed: {
+    type: Number,
+    default: 0
+  },
+  first_order_date: {
+    type: Date,
+    default: null
+  },
+  last_order_date: {
+    type: Date,
+    default: null
+  },
+  delivered_order_count: {
+    type: Number,
+    default: 0
+  },
+  active_seller: {
+    type: Boolean,
+    default: false
   },
   created_at: {
     type: Date,
@@ -144,7 +206,8 @@ leadSchema.methods.calculateLeadScore = function() {
     'Onboarding': 25,
     'Activated': 30,
     'Active Seller': 30,
-    'Lost': -20
+    'Lost': -20,
+    'Self Registered': 12
   };
   score += statusScores[this.lead_status] || 0;
 

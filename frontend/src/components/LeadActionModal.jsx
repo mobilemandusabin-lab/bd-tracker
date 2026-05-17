@@ -74,11 +74,17 @@ const LeadActionModal = ({ isOpen, onClose, lead, token, onSuccess }) => {
     }
   };
 
-  const statuses = [
-    'New', 'Contacted', 'Interested', 'Meeting Scheduled', 
-    'Negotiation', 'Document Pending', 'Verification', 
-    'Onboarding', 'Activated', 'Active Seller', 'Lost'
+  const leadStatuses = [
+    'New', 'Contacted', 'Interested', 'Meeting Scheduled'
   ];
+  
+  const vendorStatuses = [
+    'Negotiation', 'Document Pending', 'Verification', 
+    'Onboarding', 'Activated', 'Active Seller', 'Lost', 'Self Registered'
+  ];
+  
+  const isVendor = lead.type === 'vendor' || lead.lead_status === 'Negotiation' || vendorStatuses.includes(lead.lead_status);
+  const statuses = isVendor ? vendorStatuses : leadStatuses;
 
   const activityTypes = [
     { value: 'call', label: 'Phone Call' },

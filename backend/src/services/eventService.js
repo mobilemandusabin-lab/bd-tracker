@@ -1,8 +1,7 @@
 const EventEmitter = require('events');
-const Vendor = require('../models/Vendor');
+const Lead = require('../models/Lead');
 const AuditLog = require('../models/AuditLog');
 const Activity = require('../models/Activity');
-const ProductReadiness = require('../models/ProductReadiness');
 const Goal = require('../models/Goal');
 const Task = require('../models/Task');
 const User = require('../models/User');
@@ -45,42 +44,6 @@ const checkNegotiationStal = async (lead) => {
     }
   } catch (err) {
     console.error('[Auto Task] Error checking negotiation stal:', err.message);
-  }
-};
-
-// Rule 2: Vendor onboarding stuck → Create task for ops team
-const checkVendorOnboardingStal = async (vendor) => {
-  try {
-    const fourteenDaysAgo = new Date();
-    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
-    
-    if (vendor.onboarding_stage !== 'seller_activated' && vendor.updated_at < fourteenDaysAgo) {
-      // Find ops team members
-      const opsUsers = await User.find({ role: 'operations' });
-      
-      for (const opsUser of opsUsers) {
-        const existingTask = await Task.findOne({
-          title: { $regex: new RegExp(`vendor.*${vendor._id}.*onboarding.*stuck`, 'i') },
-          status: { $ne: 'Done' },
-          assigned_to: opsUser._id
-        });
-
-        if (!existingTask) {
-          await Task.create({
-            title: `Vendor Onboarding Stuck: ${vendor.lead_id?.business_name || 'Unknown'}`,
-            description: `Vendor has been stuck in ${vendor.onboarding_stage} for over 14 days.`,
-            status: 'Open',
-            priority: 2,
-            due_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
-            created_by: opsUser._id,
-            assigned_to: opsUser._id,
-            department: opsUser.department
-          });
-        }
-      }
-    }
-  } catch (err) {
-    console.error('[Auto Task] Error checking vendor onboarding stal:', err.message);
   }
 };
 
@@ -188,39 +151,16 @@ appEventEmitter.on('lead.status.changed', async ({ lead, user, previous_status }
     record_id: lead._id,
     previous_value: { lead_status: previous_status },
     updated_value: { lead_status: lead.lead_status },
-    ip_address: lead.ip // if provided
+    ip_address: lead.ip
   });
 
-  // 3. Handle specific status transitions
-  if (lead.lead_status === 'Onboarding') {
-    // Check if Vendor already exists
-    let vendor = await Vendor.findOne({ lead_id: lead._id });
-    if (!vendor) {
-      vendor = await Vendor.create({
-        lead_id: lead._id,
-        onboarding_stage: 'documents_pending'
-      });
-      // Also initialize product readiness
-      await ProductReadiness.create({
-        vendor_id: vendor._id
-      });
-    }
-  }
-
-  if (lead.lead_status === 'Activated') {
-    await Vendor.findOneAndUpdate(
-      { lead_id: lead._id },
-      { onboarding_stage: 'seller_activated', onboarding_completion_percentage: 100 }
-    );
-  }
-
-  // 4. Update goal progress for the assigned user
+  // 3. Update goal progress for the assigned user
   await updateGoalProgress(lead, user._id);
 
-  // 5. AUTO-TASK: Check if lead is stuck in Negotiation
+  // 4. AUTO-TASK: Check if lead is stuck in Negotiation
   await checkNegotiationStal(lead);
 
-  // 6. AUTO-TASK: Check high-value leads needing follow-up
+  // 5. AUTO-TASK: Check high-value leads needing follow-up
   await checkHighValueLeadFollowup(lead);
 });
 
@@ -241,33 +181,6 @@ appEventEmitter.on('activity.followup.created', async ({ activity, user }) => {
     record_id: activity._id,
     updated_value: activity
   });
-});
-
-// Vendor stage change handler
-appEventEmitter.on('vendor.stage.changed', async ({ vendor, user, previous_stage }) => {
-  await AuditLog.create({
-    user_id: user._id,
-    action_type: 'UPDATE',
-    module_name: 'Vendor',
-    record_id: vendor._id,
-    previous_value: { onboarding_stage: previous_stage },
-    updated_value: { onboarding_stage: vendor.onboarding_stage }
-  });
-
-  // If seller activated, update lead status
-  if (vendor.onboarding_stage === 'seller_activated') {
-    const Lead = require('../models/Lead');
-    const lead = await Lead.findById(vendor.lead_id);
-    await Lead.findByIdAndUpdate(vendor.lead_id, { lead_status: 'Activated' });
-    
-    // Also update goal progress when vendor becomes activated
-    if (lead) {
-      await updateGoalProgress(lead, user._id);
-    }
-  }
-
-  // AUTO-TASK: Check if vendor onboarding is stuck
-  await checkVendorOnboardingStal(vendor);
 });
 
 module.exports = appEventEmitter;

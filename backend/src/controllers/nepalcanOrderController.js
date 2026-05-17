@@ -232,7 +232,9 @@ exports.getNepalcanStats = async (req, res) => {
     ]);
 
     // Calculate average processing times - only orders from today with valid interval data
-    const today = new Date();
+    // Nepal timezone is UTC+5:45
+    const now = new Date();
+    const today = new Date(now);
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -268,13 +270,13 @@ exports.getNepalcanStats = async (req, res) => {
 
       if (times['Pending_to_Processing']) {
         totalPendingToProcessing += times['Pending_to_Processing'];
+        ordersWithFullHistory++;
       }
       if (times['Processing_to_Shipped']) {
         totalProcessingToDelivered += times['Processing_to_Shipped'];
       }
       if (fulfillmentTime) {
         totalPendingToDelivered += fulfillmentTime;
-        ordersWithFullHistory++;
       }
     });
 

@@ -32,6 +32,16 @@ const nepalcanOrderSchema = new mongoose.Schema({
   vendor: {
     type: String
   },
+  vendor_lead_id: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Lead',
+    default: null
+  },
+  vendor_id: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Vendor',
+    default: null
+  },
   source: {
     type: String
   },

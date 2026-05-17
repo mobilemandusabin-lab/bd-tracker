@@ -13,4 +13,16 @@ router.post('/login', nepalcanController.loginToNepalcan);
 // Get sales/orders data
 router.get('/sales', nepalcanController.getNepalcanSales);
 
+// Sync vendors from Nepalcan (uses configured credentials)
+router.post('/sync-vendors', nepalcanController.syncVendorsFromNepalcan);
+
+// Manual sync vendors
+router.post('/sync-vendors-manual', nepalcanController.syncVendorsManual);
+
+// Fetch vendors directly from Nepalcan API (requires token in body)
+router.post('/fetch-vendors', nepalcanController.fetchVendorsFromNepalcan);
+
+// Get vendor sync logs
+router.get('/vendor-sync-logs', nepalcanController.getVendorSyncLogs);
+
 module.exports = router;

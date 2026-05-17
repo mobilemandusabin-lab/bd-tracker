@@ -7,7 +7,6 @@ import Layout from './layouts/Layout';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import LeadsPage from './pages/LeadsPage';
-import OnboardingPage from './pages/OnboardingPage';
 import UsersPage from './pages/UsersPage';
 import DailyReportPage from './pages/DailyReportPage';
 import GoalsPage from './pages/GoalsPage';
@@ -15,6 +14,9 @@ import TasksPage from './pages/TasksPage';
 import TicketsPage from './pages/TicketsPage';
 import BDLeaderboardPage from './pages/BDLeaderboardPage';
 import NepalcanSalesPage from './pages/NepalcanSalesPage';
+import PipelineSettingsPage from './pages/PipelineSettingsPage';
+import VendorManagementPage from './pages/VendorManagementPage';
+import ActiveSellersPage from './pages/ActiveSellersPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import InstallPrompt from './components/InstallPrompt';
 
@@ -63,7 +65,16 @@ function App() {
           }>
             <Route index element={<DashboardPage />} />
             <Route path="leads" element={<LeadsPage />} />
-            <Route path="onboarding" element={<OnboardingPage />} />
+<Route path="vendors" element={
+               <ProtectedRoute roles={['super_admin', 'admin']}>
+                 <VendorManagementPage />
+               </ProtectedRoute>
+             } />
+             <Route path="active-sellers" element={
+               <ProtectedRoute roles={['super_admin', 'admin']}>
+                 <ActiveSellersPage />
+               </ProtectedRoute>
+             } />
             <Route path="goals" element={<GoalsPage />} />
             <Route path="users" element={
               <ProtectedRoute roles={['super_admin', 'admin']}>
@@ -77,13 +88,18 @@ function App() {
             } />
             <Route path="tasks" element={<TasksPage />} />
             <Route path="tickets" element={<TicketsPage />} />
-          <Route path="bd-leaderboard" element={<BDLeaderboardPage />} />
-          <Route path="nepalcan-sales" element={
-            <ProtectedRoute roles={['super_admin']}>
-              <NepalcanSalesPage />
-            </ProtectedRoute>
-          } />
-          <Route path="analytics" element={<div className="p-8 font-black uppercase tracking-widest text-slate-400">Analytics Module (Coming Soon)</div>} />
+<Route path="bd-leaderboard" element={<BDLeaderboardPage />} />
+<Route path="nepalcan-sales" element={
+                <ProtectedRoute roles={['super_admin']}>
+                  <NepalcanSalesPage />
+                </ProtectedRoute>
+              } />
+<Route path="settings/pipeline" element={
+                <ProtectedRoute roles={['super_admin']}>
+                  <PipelineSettingsPage />
+                </ProtectedRoute>
+              } />
+              <Route path="analytics" element={<div className="p-8 font-black uppercase tracking-widest text-slate-400">Analytics Module (Coming Soon)</div>} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

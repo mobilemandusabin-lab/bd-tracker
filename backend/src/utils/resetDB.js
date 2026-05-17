@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const Lead = require('../models/Lead');
-const Vendor = require('../models/Vendor');
+const { getVendorModel } = require('../models/Vendor');
 const Activity = require('../models/Activity');
 const Notification = require('../models/Notification');
 const Task = require('../models/Task');
@@ -15,11 +15,11 @@ const resetDB = async () => {
     await mongoose.connect(process.env.MONGODB_URI);
     console.log('Connected to MongoDB for database reset...');
 
-    // Clear collections
     console.log('Clearing Lead Repository...');
     await Lead.deleteMany({});
     
     console.log('Clearing Onboarded Vendors...');
+    const Vendor = await getVendorModel();
     await Vendor.deleteMany({});
     
     console.log('Clearing Activity Logs...');

@@ -21,6 +21,34 @@ export const fetchLeads = createAsyncThunk('leads/fetchAll', async (params = {},
   }
 });
 
+export const fetchVendorLeads = createAsyncThunk('leads/fetchVendorLeads', async (_, { getState, rejectWithValue }) => {
+  try {
+    const { token } = getState().auth;
+    const response = await axios.get(`${BASE_URL}/vendors/leads`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    return response.data;
+  } catch (err) {
+    return rejectWithValue(err.response?.data || err.message);
+  }
+});
+
+export const fetchActiveSellers = createAsyncThunk('leads/fetchActiveSellers', async (params = {}, { getState, rejectWithValue }) => {
+  try {
+    const { token } = getState().auth;
+    const { page = 1, limit = 0, ...otherParams } = params;
+    const queryParams = { page, limit, ...otherParams };
+    
+    const response = await axios.get(`${BASE_URL}/leads/active-sellers`, {
+      headers: { Authorization: `Bearer ${token}` },
+      params: queryParams
+    });
+    return response.data;
+  } catch (err) {
+    return rejectWithValue(err.response?.data || err.message);
+  }
+});
+
 const leadSlice = createSlice({
   name: 'leads',
   initialState: {
@@ -80,6 +108,55 @@ const leadSlice = createSlice({
         state.loading = false;
         state.loadingMore = false;
         state.error = action.payload?.message || 'Failed to fetch leads';
+      })
+      .addCase(fetchVendorLeads.pending, (state) => {
+        state.loading = true;
+      })
+      .addCase(fetchVendorLeads.fulfilled, (state, action) => {
+        state.loading = false;
+        state.items = action.payload.data.leads;
+        state.currentPage = 1;
+        state.hasMore = false;
+        state.pagination = null;
+      })
+      .addCase(fetchVendorLeads.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload?.message || 'Failed to fetch vendor leads';
+      })
+      .addCase(fetchActiveSellers.pending, (state, action) => {
+        const page = action.meta.arg?.page || 1;
+        if (page > 1 && state.items.length > 0) {
+          state.loadingMore = true;
+        } else {
+          state.loading = true;
+        }
+      })
+      .addCase(fetchActiveSellers.fulfilled, (state, action) => {
+        state.loading = false;
+        state.loadingMore = false;
+        const newSellers = action.payload.data.leads;
+        const pagination = action.payload.pagination;
+        
+        if (pagination && pagination.page > 1) {
+          state.items = [...state.items, ...newSellers];
+        } else {
+          state.items = newSellers;
+        }
+        
+        state.currentPage = pagination ? pagination.page : 1;
+        if (pagination && pagination.totalPages) {
+          state.hasMore = pagination.page < pagination.totalPages;
+        } else if (newSellers.length === 0 || newSellers.length < (pagination?.limit || newSellers.length)) {
+          state.hasMore = false;
+        } else {
+          state.hasMore = true;
+        }
+        state.pagination = pagination;
+      })
+      .addCase(fetchActiveSellers.rejected, (state, action) => {
+        state.loading = false;
+        state.loadingMore = false;
+        state.error = action.payload?.message || 'Failed to fetch active sellers';
       });
   }
 });

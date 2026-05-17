@@ -8,10 +8,12 @@ connectDB();
 const app = require('./app');
 const { checkOverdueFollowups, checkEscalationTriggers } = require('./services/overdueChecker');
 const { syncNepalcanOrders, updateStaleOrders } = require('./services/nepalcanSyncService');
+const seedPipelineStages = require('./services/pipelineStageSeeder');
 
 const port = process.env.PORT || 5000;
-const server = app.listen(port, () => {
+const server = app.listen(port, '0.0.0.0', async () => {
   console.log(`App running on port ${port}...`);
+  await seedPipelineStages();
 });
 
 // Run overdue check every 15 minutes (900000 ms)
@@ -22,12 +24,11 @@ setInterval(async () => {
   const overdueCount = await checkOverdueFollowups();
   if (overdueCount > 0) {
     console.log(`[Cron] Found and processed ${overdueCount} overdue follow-ups`);
-    // Also check escalation triggers
     await checkEscalationTriggers();
   }
 }, OVERDUE_CHECK_INTERVAL);
 
-// Run Nepalcan sync every 2 hours (7200000 ms)
+// Run Nepalcan order sync every 2 hours (7200000 ms)
 const NEPA_CAN_SYNC_INTERVAL = 2 * 60 * 60 * 1000; // 2 hours
 
 setInterval(async () => {
@@ -35,7 +36,6 @@ setInterval(async () => {
   const result = await syncNepalcanOrders();
   console.log(`[Cron] Nepalcan sync result:`, result.message || result.error);
   
-  // Update stale orders (orders not synced in 2+ hours)
   const staleCount = await updateStaleOrders();
   console.log(`[Cron] Found ${staleCount} stale orders to recheck`);
 }, NEPA_CAN_SYNC_INTERVAL);

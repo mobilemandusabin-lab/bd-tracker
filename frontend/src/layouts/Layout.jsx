@@ -3,23 +3,25 @@ import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { logout } from '../store/authSlice';
 import { 
-  LayoutDashboard, 
-  Users, 
-  UserCheck, 
-  ClipboardList, 
-  BarChart3, 
-  LogOut,
-  Bell,
-  ChevronRight,
-  ShieldCheck,
-  Settings,
-  PieChart,
-  Menu,
-  X,
-  Target,
-  MessageSquare,
-  ShoppingBag
-} from 'lucide-react';
+    LayoutDashboard, 
+    Users, 
+    UserCheck, 
+    ClipboardList, 
+    BarChart3, 
+    LogOut,
+    Bell,
+    ShieldCheck,
+    Settings,
+    PieChart,
+    Menu,
+    X,
+    Target,
+    MessageSquare,
+    ShoppingBag,
+    Cog,
+    Store,
+    Package
+    } from 'lucide-react';
 import { cn } from '../utils/cn';
 import NotificationBell from '../components/NotificationBell';
 
@@ -42,7 +44,6 @@ const SidebarLink = ({ to, icon: Icon, label, onClick }) => {
         <Icon size={20} className={cn(isActive ? "text-red-600" : "text-slate-400 group-hover:text-slate-600")} />
         <span className="font-bold text-sm">{label}</span>
       </div>
-      {isActive && <ChevronRight size={16} className="text-red-400" />}
     </Link>
   );
 };
@@ -122,19 +123,25 @@ const Layout = () => {
           <div className="px-4 py-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
             Main Menu
           </div>
-          <SidebarLink to="/" icon={LayoutDashboard} label="Dashboard" onClick={closeMobileMenu} />
-          <SidebarLink to="/leads" icon={Users} label="Lead Management" onClick={closeMobileMenu} />
-          <SidebarLink to="/onboarding" icon={UserCheck} label="Vendor Onboarding" onClick={closeMobileMenu} />
-          {(user?.role === 'super_admin' || user?.role === 'admin') && (
-            <SidebarLink to="/users" icon={Settings} label="Team Management" onClick={closeMobileMenu} />
-          )}
+<SidebarLink to="/" icon={LayoutDashboard} label="Dashboard" onClick={closeMobileMenu} />
+<SidebarLink to="/leads" icon={Users} label="Leads Management" onClick={closeMobileMenu} />
+{(user?.role === 'super_admin' || user?.role === 'admin') && (
+  <>
+    <SidebarLink to="/vendors" icon={Store} label="Vendor Management" onClick={closeMobileMenu} />
+    <SidebarLink to="/active-sellers" icon={Package} label="Active Sellers" onClick={closeMobileMenu} />
+  </>
+)}
+{(user?.role === 'super_admin' || user?.role === 'admin') && (
+  <SidebarLink to="/users" icon={Settings} label="Team Management" onClick={closeMobileMenu} />
+)}
+          <SidebarLink to="/goals" icon={Target} label="Monthly Goals" onClick={closeMobileMenu} />
           {user?.role === 'super_admin' && (
             <>
               <SidebarLink to="/daily-report" icon={PieChart} label="Daily Call Report" onClick={closeMobileMenu} />
               <SidebarLink to="/nepalcan-sales" icon={ShoppingBag} label="Nepalcan Sales" onClick={closeMobileMenu} />
+              <SidebarLink to="/settings/pipeline" icon={Cog} label="Pipeline Settings" onClick={closeMobileMenu} />
             </>
           )}
-          <SidebarLink to="/goals" icon={Target} label="Monthly Goals" onClick={closeMobileMenu} />
           <SidebarLink to="/tasks" icon={ClipboardList} label="Tasks" onClick={closeMobileMenu} />
           {(user?.role === 'admin' || user?.role === 'super_admin') && (
             <SidebarLink to="/tickets" icon={MessageSquare} label="Tickets" onClick={closeMobileMenu} />

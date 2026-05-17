@@ -38,6 +38,11 @@ router.post('/bulk-upload',
 
 router.get('/check-duplicity', leadController.checkDuplicity);
 router.patch('/:id/accept', leadController.acceptAssignment);
+router.get('/unassigned/nepalcan', authMiddleware.restrictTo('super_admin', 'admin'), leadController.getUnassignedNepalcanLeads);
+router.get('/category/:category', authMiddleware.restrictTo('super_admin', 'admin'), leadController.getLeadsByCategory);
+
+// Active sellers route - must come before /:id route
+router.get('/active-sellers', authMiddleware.restrictTo('super_admin', 'admin'), leadController.getActiveSellers);
 
 router.route('/:id')
   .get(leadController.getLead)

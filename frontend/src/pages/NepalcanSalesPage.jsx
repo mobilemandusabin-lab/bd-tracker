@@ -10,7 +10,7 @@ import {
   ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip 
 } from 'recharts';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
+const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
 const STATUS_COLORS = {
   'Pending': '#fbbf24',

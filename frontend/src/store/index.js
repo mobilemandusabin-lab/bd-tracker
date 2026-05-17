@@ -4,6 +4,7 @@ import leadReducer from './leadSlice';
 import goalReducer from './goalSlice';
 import taskReducer from './taskSlice';
 import ticketReducer from './ticketSlice';
+import vendorReducer from './vendorSlice';
 
 export const store = configureStore({
   reducer: {
@@ -11,6 +12,7 @@ export const store = configureStore({
     leads: leadReducer,
     goals: goalReducer,
     tasks: taskReducer,
-    tickets: ticketReducer
+    tickets: ticketReducer,
+    vendors: vendorReducer
   }
 });

@@ -3,7 +3,7 @@ const dotenv = require('dotenv');
 const User = require('../models/User');
 const Lead = require('../models/Lead');
 const Activity = require('../models/Activity');
-const Vendor = require('../models/Vendor');
+const { getVendorModel } = require('../models/Vendor');
 const Task = require('../models/Task');
 
 dotenv.config({ path: './.env' });
@@ -17,6 +17,7 @@ const seedData = async () => {
     await User.deleteMany({ email: { $ne: 'sabeen684@gmail.com' } });
     await Lead.deleteMany({});
     await Activity.deleteMany({});
+    const Vendor = await getVendorModel();
     await Vendor.deleteMany({});
     await Task.deleteMany({});
 
@@ -262,7 +263,6 @@ const seedData = async () => {
     ]);
 
     console.log('Creating Vendors...');
-    // Create Vendors from some leads
     await Vendor.create([
       {
         lead_id: leads[3]._id,
