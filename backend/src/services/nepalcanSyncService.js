@@ -394,7 +394,7 @@ const getTotalCount = (response) => {
  * - All vendors are stored directly in leads collection with type='vendor'
  * - Matching by nepalcanId, email, phone, or business_name
  * - Verified vendors: lead_status='Activated', verification_status='verified', onboarding_stage='seller_activated', activation_status='active'
- * - Unverified vendors: lead_status='Negotiation', verification_status='pending', onboarding_stage='negotiation', activation_status='inactive'
+ * - Unverified vendors: lead_status='Document Pending', verification_status='pending', onboarding_stage='document_pending', activation_status='inactive'
  */
 const syncNepalcanVendors = async (token = null, userId = null) => {
    const startTime = Date.now();
@@ -498,29 +498,29 @@ console.log(`[Nepalcan Vendor Sync] Total vendors to process: ${allVendors.lengt
           ]
         });
 
-        const leadData = {
-          business_name: name,
-          contact_person: name,
-          email: email || 'TBD',
-          phone: phone || 'TBD',
-          location: address || 'TBD',
-          lead_source: 'Nepalcan',
-          expected_product_count: productCountFromAPI,
-          nepalcanId: _id,
-          type: 'vendor',
-          is_verified: isVerified,
-          verification_status: isVerified ? 'verified' : 'pending',
-          onboarding_stage: isVerified ? 'seller_activated' : 'negotiation',
-          activation_status: isVerified ? 'active' : 'inactive',
-          lead_status: isVerified ? 'Activated' : 'Negotiation',
-          rawData: {
-            canId: canId?.canId,
-            slug,
-            createdAt,
-            updatedAt,
-            address
-          }
-        };
+const leadData = {
+           business_name: name,
+           contact_person: name,
+           email: email || 'TBD',
+           phone: phone || 'TBD',
+           location: address || 'TBD',
+           lead_source: 'Nepalcan',
+           expected_product_count: productCountFromAPI,
+           nepalcanId: _id,
+           type: 'vendor',
+           is_verified: isVerified,
+           verification_status: isVerified ? 'verified' : 'pending',
+           onboarding_stage: isVerified ? 'seller_activated' : 'document_pending',
+           activation_status: isVerified ? 'active' : 'inactive',
+           lead_status: isVerified ? 'Activated' : 'Document Pending',
+           rawData: {
+             canId: canId?.canId,
+             slug,
+             createdAt,
+             updatedAt,
+             address
+           }
+         };
 
         if (existingLead) {
           Object.assign(existingLead, leadData);
