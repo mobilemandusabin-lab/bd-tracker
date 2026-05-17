@@ -1,6 +1,11 @@
 const Lead = require('../models/Lead');
+const NepalcanOrder = require('../models/NepalcanOrder');
 const User = require('../models/User');
+const PipelineStage = require('../models/PipelineStage');
 const appEventEmitter = require('../services/eventService');
+
+const LEAD_STATUSES = ['New', 'Contacted', 'Interested', 'Meeting Scheduled'];
+const VENDOR_STATUSES = ['Negotiation', 'Document Pending', 'Verification', 'Onboarding', 'Activated', 'Active Seller', 'Lost', 'Self Registered'];
 
 exports.createLead = async (req, res) => {
   try {
@@ -156,6 +161,19 @@ exports.getAllLeads = async (req, res) => {
       query.lead_status = req.query.lead_status;
     }
 
+    // Filter by type field (lead or vendor) - supports vendor management
+    if (req.query.type === 'vendor') {
+      query.lead_status = { $in: VENDOR_STATUSES };
+    } else if (req.query.type === 'lead') {
+      query.lead_status = { $in: LEAD_STATUSES };
+    }
+
+    // Filter by category (leads or vendors) - super_admin only
+    if (req.query.category && req.user.role === 'super_admin') {
+      const allowedStatuses = req.query.category === 'vendors' ? VENDOR_STATUSES : LEAD_STATUSES;
+      query.lead_status = { $in: allowedStatuses };
+    }
+
     // Search functionality - search by business_name, contact_person, phone, email, location
     if (req.query.search) {
       const searchTerm = req.query.search.trim();
@@ -254,7 +272,7 @@ exports.updateLead = async (req, res) => {
       req.body.assigned_user = req.user._id;
     }
 
-    // Add logic for tracking conversion and drops
+    // Add logic for tracking activated leads
     if (req.body.lead_status === 'Activated' && previousStatus !== 'Activated') {
       req.body.converted_at = Date.now();
     } else if (req.body.lead_status === 'Lost' && previousStatus !== 'Lost') {
@@ -328,6 +346,74 @@ exports.updateLead = async (req, res) => {
   }
 };
 
+exports.getUnassignedNepalcanLeads = async (req, res) => {
+  try {
+    const query = {
+      assigned_user: null,
+      nepalcanId: { $exists: true, $ne: null }
+    };
+
+    const leads = await Lead.find(query)
+      .populate('assigned_user', 'name email role')
+      .populate('creator_id', 'name email role')
+      .sort({ created_at: -1 });
+
+    res.status(200).json({
+      status: 'success',
+      results: leads.length,
+      data: { leads }
+    });
+  } catch (err) {
+    res.status(400).json({ status: 'fail', message: err.message });
+  }
+};
+
+exports.getLeadsByCategory = async (req, res) => {
+  try {
+    const category = req.params.category; // 'leads' or 'vendors'
+    
+    if (!['leads', 'vendors'].includes(category)) {
+      return res.status(400).json({ status: 'fail', message: 'Invalid category. Use "leads" or "vendors"' });
+    }
+
+    // Get dynamic stages from database based on category
+    const stageCategory = category === 'vendors' ? 'vendor' : 'lead';
+    const stages = await PipelineStage.find({ category: stageCategory, isActive: true })
+      .sort('order')
+      .select('name');
+    
+    const allowedStatuses = stages.map(s => s.name);
+
+    // Only filter by assigned_user if specifically requested (for unassigned-vendors view)
+    const query = {
+      lead_status: { $in: allowedStatuses }
+    };
+
+    // Optional filter for unassigned leads only
+    if (req.query.unassigned === 'true') {
+      query.assigned_user = null;
+    }
+
+    // Role-based visibility
+    if (req.user.role !== 'super_admin' && req.user.role !== 'admin') {
+      query.assigned_user = req.user._id;
+    }
+
+    const leads = await Lead.find(query)
+      .populate('assigned_user', 'name email role')
+      .populate('creator_id', 'name email role')
+      .sort({ created_at: -1 });
+
+    res.status(200).json({
+      status: 'success',
+      results: leads.length,
+      data: { leads, category, type: category === 'vendors' ? 'Vendor' : 'Lead' }
+    });
+  } catch (err) {
+    res.status(400).json({ status: 'fail', message: err.message });
+  }
+};
+
 exports.deleteLead = async (req, res) => {
   try {
     const query = { _id: req.params.id };
@@ -340,6 +426,87 @@ exports.deleteLead = async (req, res) => {
     const lead = await Lead.findOneAndDelete(query);
     if (!lead) return res.status(404).json({ status: 'fail', message: 'No lead found or access denied' });
     res.status(204).json({ status: 'success', data: null });
+  } catch (err) {
+    res.status(400).json({ status: 'fail', message: err.message });
+  }
+};
+
+// Get Active Sellers - vendors with delivered orders from NepalcanOrder
+exports.getActiveSellers = async (req, res) => {
+  try {
+    // First, get unique vendor names from delivered orders
+    const vendorOrders = await NepalcanOrder.aggregate([
+      { $match: { orderStatus: 'Delivered' } },
+      { $group: { _id: '$vendor', orderCount: { $sum: 1 }, totalAmount: { $sum: '$totalAmount' }, lastOrderDate: { $max: '$updatedAt' } } },
+      { $sort: { orderCount: -1 } },
+      { $limit: 1000 }
+    ]);
+
+    // Find Lead records matching these vendor names
+    const vendorNames = vendorOrders.map(v => v._id).filter(Boolean);
+    const leadsMap = new Map();
+    
+    if (vendorNames.length > 0) {
+      const leads = await Lead.find({
+        type: 'vendor',
+        business_name: { $in: vendorNames }
+      })
+        .populate('assigned_user', 'name email role')
+        .populate('creator_id', 'name email role')
+        .sort({ last_order_date: -1, created_at: -1 });
+      
+      leads.forEach(lead => {
+        leadsMap.set(lead.business_name, lead);
+      });
+    }
+
+    // Build active sellers list - include vendors even if no matching lead
+    const activeSellers = vendorOrders.map(vendorData => {
+      const { _id: vendorName, orderCount, totalAmount, lastOrderDate } = vendorData;
+      const lead = leadsMap.get(vendorName);
+      
+      if (lead) {
+        return {
+          ...lead.toObject(),
+          delivered_order_count: orderCount,
+          total_revenue: totalAmount,
+          last_order_date: lastOrderDate,
+          total_products_listed: lead.total_products_listed || lead.expected_product_count || 0
+        };
+      }
+      
+      // No matching lead - create placeholder entry
+      return {
+        _id: `vendor-${vendorName}`,
+        business_name: vendorName,
+        contact_person: 'Not Found',
+        phone: 'Not Found',
+        email: 'Not Found',
+        location: 'Not Found',
+        lead_status: 'Active Seller',
+        type: 'vendor',
+        delivered_order_count: orderCount,
+        total_revenue: totalAmount,
+        last_order_date: lastOrderDate,
+        total_products_listed: 0,
+        expected_product_count: 0,
+        assigned_user: null,
+        creator_id: null,
+        notes: 'Vendor from Nepalcan orders - no matching lead record'
+      };
+    });
+
+    res.status(200).json({
+      status: 'success',
+      results: activeSellers.length,
+      data: { leads: activeSellers },
+      pagination: {
+        total: activeSellers.length,
+        page: 1,
+        limit: activeSellers.length,
+        totalPages: 1
+      }
+    });
   } catch (err) {
     res.status(400).json({ status: 'fail', message: err.message });
   }

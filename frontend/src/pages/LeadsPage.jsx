@@ -4,8 +4,8 @@ import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { motion, AnimatePresence } from 'framer-motion';
+import { Plus, Upload, X, Search, ChevronDown, Filter, Download, FileSpreadsheet, Loader2, Clock, CheckCircle, MapPin, Briefcase, CalendarCheck, Phone, User, AlertCircle, ExternalLink, Brain, MessageCircle, MoreVertical } from 'lucide-react';
 import { fetchLeads, resetLeads } from '../store/leadSlice';
-import { Plus, Search, MoreVertical, Phone, MapPin, ExternalLink, Clock, MessageCircle, Upload, Loader2, User, FileSpreadsheet, AlertCircle, Briefcase, X, CalendarCheck, Brain, CheckCircle } from 'lucide-react';
 import LeadModal from '../components/LeadModal';
 import LeadActionModal from '../components/LeadActionModal';
 import LeadDetailModal from '../components/LeadDetailModal';
@@ -23,8 +23,9 @@ const StatusBadge = ({ status }) => {
       case 'Interested': return 'bg-emerald-50 text-emerald-600 border-emerald-100';
       case 'Meeting Scheduled': return 'bg-amber-50 text-amber-600 border-amber-100';
       case 'Negotiation': return 'bg-orange-50 text-orange-600 border-orange-100';
-      case 'Document Pending': return 'bg-rose-50 text-rose-600 border-rose-100';
+      case 'Document Pending': return 'bg-amber-50 text-amber-600 border-amber-100';
       case 'Activated': return 'bg-red-600 text-white border-red-700';
+      case 'Self Registered': return 'bg-purple-50 text-purple-600 border-purple-100';
       default: return 'bg-slate-50 text-slate-600 border-slate-100';
     }
   };
@@ -74,25 +75,27 @@ const PriorityBadge = ({ priority, score }) => {
 };
 
 const LeadsPage = () => {
-  const dispatch = useDispatch();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const { items: allLeads, loading, loadingMore: reduxLoadingMore, hasMore, currentPage } = useSelector((state) => state.leads);
-  const { token, user } = useSelector((state) => state.auth);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedLead, setSelectedLead] = useState(null);
-  const [isActionModalOpen, setIsActionModalOpen] = useState(false);
-  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('accepted');
-  const [todayFollowups, setTodayFollowups] = useState([]);
-  const [pendingFollowups, setPendingFollowups] = useState([]);
-  const [followupLoading, setFollowupLoading] = useState(false);
-const [pipelineFilter, setPipelineFilter] = useState('all');
-   const [sortOption, setSortOption] = useState('newest');
-   const leadsContainerRef = useRef(null);
+   const dispatch = useDispatch();
+    const [searchParams, setSearchParams] = useSearchParams();
+const { items: allLeads, loading, loadingMore: reduxLoadingMore, hasMore, currentPage, pagination } = useSelector((state) => state.leads);
+    const { token, user } = useSelector((state) => state.auth);
+   const [searchTerm, setSearchTerm] = useState('');
+   const [searchQuery, setSearchQuery] = useState('');
+   const [isModalOpen, setIsModalOpen] = useState(false);
+   const [selectedLead, setSelectedLead] = useState(null);
+   const [isActionModalOpen, setIsActionModalOpen] = useState(false);
+   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+   const [activeTab, setActiveTab] = useState('accepted');
+const [todayFollowups, setTodayFollowups] = useState([]);
+    const [followupLoading, setFollowupLoading] = useState(false);
+   const [pipelineFilter, setPipelineFilter] = useState('all');
+    const [sortOption, setSortOption] = useState('newest');
+    const leadsContainerRef = useRef(null);
 
-  // Bulk Upload Modal states
+// Check if user is super admin
+    const isSuperAdmin = user?.role === 'super_admin';
+
+   // Bulk Upload Modal states
   const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
   const [bulkUsers, setBulkUsers] = useState([]);
   const [selectedBulkUser, setSelectedBulkUser] = useState('');
@@ -101,57 +104,54 @@ const [pipelineFilter, setPipelineFilter] = useState('all');
   const [bulkPreviewData, setBulkPreviewData] = useState([]);
   const [bulkUploadResults, setBulkUploadResults] = useState(null);
 
-  // Follow-up confirmation modal states
-  const [showFollowupConfirm, setShowFollowupConfirm] = useState(false);
-  const [followupToCancel, setFollowupToCancel] = useState(null);
-  const [followupInfo, setFollowupInfo] = useState(null);
+// Follow-up confirmation modal states
+   const [showFollowupConfirm, setShowFollowupConfirm] = useState(false);
+   const [followupInfo, setFollowupInfo] = useState(null);
 
 // Helper to refetch leads based on current tab context
 const refetchLeads = useCallback(() => {
-       const limit = 25; // 25 leads per batch for better performance
-       
-       // When searching, filter within the currently active tab
-       // When not searching, filter by current tab
-       if (searchQuery) {
-         if (activeTab === 'database') {
-           dispatch(fetchLeads({ page: 1, limit, search: searchQuery, all: 'true' }));
-         } else if (activeTab === 'pending') {
-           dispatch(fetchLeads({ assignment_status: 'pending', page: 1, limit: 10, search: searchQuery }));
-         } else if (activeTab === 'recent') {
-           // Recent shows both pending (newly assigned) and accepted leads
-           dispatch(fetchLeads({ recent: 'true', page: 1, limit, search: searchQuery }));
-         } else if (activeTab === 'accepted') {
-           dispatch(fetchLeads({ assignment_status: 'accepted', page: 1, limit, search: searchQuery }));
-         } else if (activeTab !== 'followup') {
-           dispatch(fetchLeads({ assignment_status: activeTab, page: 1, limit: 10, search: searchQuery }));
-         } else {
-           dispatch(fetchLeads({ page: 1, limit, search: searchQuery }));
-         }
-       } else if (activeTab === 'pending') {
-         dispatch(fetchLeads({ assignment_status: 'pending', page: 1, limit: 10 }));
-       } else if (activeTab === 'recent') {
-         // Recent shows both pending (newly assigned) and accepted leads for "recently added" view
-         dispatch(fetchLeads({ recent: 'true', page: 1, limit }));
-       } else if (activeTab === 'accepted') {
-         dispatch(fetchLeads({ assignment_status: 'accepted', page: 1, limit }));
-       } else if (activeTab !== 'followup' && activeTab !== 'database') {
-         dispatch(fetchLeads({ assignment_status: activeTab, page: 1, limit: 10 }));
-       }
-     }, [activeTab, dispatch, searchQuery]);
+        const limit = 25;
+        
+        if (searchQuery) {
+          if (activeTab === 'database') {
+            dispatch(fetchLeads({ page: 1, limit, search: searchQuery, all: 'true', type: 'lead' }));
+          } else if (activeTab === 'pending') {
+            dispatch(fetchLeads({ assignment_status: 'pending', page: 1, limit: 10, search: searchQuery, type: 'lead' }));
+          } else if (activeTab === 'recent') {
+            dispatch(fetchLeads({ recent: 'true', page: 1, limit, search: searchQuery, type: 'lead' }));
+          } else if (activeTab === 'accepted') {
+            dispatch(fetchLeads({ assignment_status: 'accepted', page: 1, limit, search: searchQuery, type: 'lead' }));
+          } else if (activeTab !== 'followup') {
+            dispatch(fetchLeads({ assignment_status: activeTab, page: 1, limit: 10, search: searchQuery, type: 'lead' }));
+          } else {
+            dispatch(fetchLeads({ page: 1, limit, search: searchQuery, type: 'lead' }));
+          }
+        } else if (activeTab === 'pending') {
+          dispatch(fetchLeads({ assignment_status: 'pending', page: 1, limit: 10, type: 'lead' }));
+        } else if (activeTab === 'recent') {
+          dispatch(fetchLeads({ recent: 'true', page: 1, limit, type: 'lead' }));
+        } else if (activeTab === 'accepted') {
+          dispatch(fetchLeads({ assignment_status: 'accepted', page: 1, limit, type: 'lead' }));
+        } else if (activeTab !== 'followup' && activeTab !== 'database') {
+          dispatch(fetchLeads({ assignment_status: activeTab, page: 1, limit: 10, type: 'lead' }));
+        } else {
+          dispatch(fetchLeads({ page: 1, limit, type: 'lead' }));
+        }
+      }, [activeTab, dispatch, searchQuery]);
 
 // Handle tab changes - reset search
-   useEffect(() => {
-     setSearchTerm('');
-     setSearchQuery('');
-     dispatch(resetLeads());
-   }, [activeTab, dispatch]);
+    useEffect(() => {
+      setSearchTerm('');
+      setSearchQuery('');
+      dispatch(resetLeads());
+    }, [activeTab, dispatch]);
 
-   // Initial fetch on mount
-   useEffect(() => {
-     refetchLeads();
-   }, []);
+    // Initial fetch on mount using refetchLeads
+    useEffect(() => {
+      refetchLeads();
+    }, [refetchLeads]);
 
-// Handle search button click - triggers API call
+    // Handle search button click - triggers API call
     const handleSearch = useCallback(() => {
       dispatch(resetLeads());
       setSearchQuery(searchTerm);
@@ -164,12 +164,12 @@ const refetchLeads = useCallback(() => {
       dispatch(resetLeads());
     }, [dispatch]);
 
-   // When searchQuery changes, fetch leads
-   useEffect(() => {
-     if (activeTab !== 'followup') {
+    // When searchQuery changes, fetch leads
+    useEffect(() => {
+      if (activeTab !== 'followup') {
        refetchLeads();
-     }
-   }, [searchQuery, activeTab, refetchLeads]);
+      }
+    }, [searchQuery, activeTab, refetchLeads]);
 
 const loadMoreLeads = useCallback(() => {
       if (reduxLoadingMore || !hasMore) return;
@@ -177,7 +177,7 @@ const loadMoreLeads = useCallback(() => {
       const limit = 25; // 25 leads per batch for better performance
       
       // Determine the correct parameters based on active tab
-      let params = { page: currentPage + 1, limit };
+      let params = { page: currentPage + 1, limit, type: 'lead' };
       if (searchQuery) {
         params.search = searchQuery;
       }
@@ -194,41 +194,41 @@ const loadMoreLeads = useCallback(() => {
       }
       
       dispatch(fetchLeads(params));
-   }, [reduxLoadingMore, hasMore, currentPage, dispatch, activeTab, searchQuery]);
+    }, [reduxLoadingMore, hasMore, currentPage, dispatch, activeTab, searchQuery]);
 
 // Infinite scroll for accepted, recent, and pending tabs
-      useEffect(() => {
-       if (activeTab === 'followup' || activeTab === 'database') return; // Don't apply infinite scroll to followup or database tabs
-       
-       let ticking = false;
-       
-       const handleScroll = () => {
-         if (ticking) return;
-         ticking = true;
-         
-         requestAnimationFrame(() => {
-           if (loading || reduxLoadingMore || !hasMore) {
-             ticking = false;
-             return;
-           }
-           
-           // Check window scroll for mobile - use larger threshold
-           const scrollTop = window.scrollY || document.documentElement.scrollTop;
-           const scrollHeight = Math.max(
-             document.documentElement.scrollHeight,
-             document.body.scrollHeight,
-             document.documentElement.offsetHeight,
-             document.body.offsetHeight
-           );
-           const clientHeight = Math.min(window.innerHeight, screen.height);
-           
-           // Use 300px threshold for mobile reliability
-           if (scrollHeight - scrollTop - clientHeight < 300) {
-             loadMoreLeads();
-           }
-           ticking = false;
-         });
-       };
+    useEffect(() => {
+      if (activeTab === 'followup' || activeTab === 'database') return; // Don't apply infinite scroll to followup or database tabs
+      
+      let ticking = false;
+      
+      const handleScroll = () => {
+        if (ticking) return;
+        ticking = true;
+        
+        requestAnimationFrame(() => {
+          if (loading || reduxLoadingMore || !hasMore) {
+            ticking = false;
+            return;
+          }
+          
+          // Check window scroll for mobile - use larger threshold
+          const scrollTop = window.scrollY || document.documentElement.scrollTop;
+          const scrollHeight = Math.max(
+            document.documentElement.scrollHeight,
+            document.body.scrollHeight,
+            document.documentElement.offsetHeight,
+            document.body.offsetHeight
+          );
+          const clientHeight = Math.min(window.innerHeight, screen.height);
+          
+          // Use 300px threshold for mobile reliability
+          if (scrollHeight - scrollTop - clientHeight < 300) {
+            loadMoreLeads();
+          }
+          ticking = false;
+        });
+      };
       
       // For desktop, check container scroll
       const container = leadsContainerRef.current;
@@ -424,33 +424,46 @@ useEffect(() => {
     }
   };
 
-// Select the appropriate leads based on active tab
-    const getActiveLeads = useCallback(() => {
-      if (activeTab === 'recent') {
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        return allLeads.filter(lead => {
-          const createdAt = new Date(lead.created_at);
-          return createdAt >= sevenDaysAgo;
-        }).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-      }
-      if (activeTab === 'followup') return allLeads;
-      if (activeTab === 'database') return allLeads;
-      return allLeads.filter(lead => lead.assignment_status === activeTab);
-    }, [activeTab, allLeads]);
+const getActiveLeads = useCallback(() => {
+        if (activeTab === 'recent') {
+          const sevenDaysAgo = new Date();
+          sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+          let filtered = allLeads.filter(lead => {
+            const createdAt = new Date(lead.created_at);
+            return createdAt >= sevenDaysAgo;
+          }).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+          if (!isSuperAdmin && activeTab === 'recent') {
+            filtered = filtered.filter(lead => lead.assigned_user && lead.assigned_user._id === user?._id);
+          }
+          return filtered;
+        }
+        if (activeTab === 'followup') {
+          return allLeads;
+        }
+        if (activeTab === 'database') return allLeads;
 
-   const filteredLeads = getActiveLeads().filter(lead => {
-      const matchesPipeline = pipelineFilter === 'all' || lead.lead_status === pipelineFilter;
-      
-      return matchesPipeline;
-    }).sort((a, b) => {
-    if (sortOption === 'newest') {
-      return new Date(b.created_at) - new Date(a.created_at);
-    } else if (sortOption === 'oldest') {
-      return new Date(a.created_at) - new Date(b.created_at);
-    }
-    return 0;
-  });
+        return allLeads.filter(lead => {
+          if (!isSuperAdmin && lead.assigned_user?._id !== user?._id) {
+            return false;
+          }
+          if (activeTab === 'accepted') {
+            return lead.assignment_status === 'accepted';
+          }
+          return lead.assignment_status === activeTab;
+        });
+       }, [activeTab, allLeads, isSuperAdmin, user]);
+
+const filteredLeads = getActiveLeads().filter(lead => {
+        const matchesPipeline = pipelineFilter === 'all' || lead.lead_status === pipelineFilter;
+        return matchesPipeline;
+       }).sort((a, b) => {
+      if (sortOption === 'newest') {
+        return new Date(b.created_at) - new Date(a.created_at);
+      } else if (sortOption === 'oldest') {
+        return new Date(a.created_at) - new Date(b.created_at);
+      }
+      return 0;
+    });
 
   // Bulk Upload Handlers
   const handleBulkFileChange = (e) => {
@@ -568,30 +581,30 @@ useEffect(() => {
         followupInfo={followupInfo}
       />
       
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 lg:gap-6">
-        <div>
-          <div className="flex items-center gap-2 mb-1 lg:mb-2">
-            <div className="h-1 w-6 lg:w-8 bg-red-600 rounded-full" />
-            <span className="text-[8px] lg:text-[10px] font-black text-red-600 uppercase tracking-[0.2em]">Growth Management</span>
+{/* Page Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 lg:gap-6">
+          <div>
+            <div className="flex items-center gap-2 mb-1 lg:mb-2">
+              <div className="h-1 w-6 lg:w-8 bg-red-600 rounded-full" />
+              <span className="text-[8px] lg:text-[10px] font-black text-red-600 uppercase tracking-[0.2em]">Lead Management</span>
+            </div>
+            <h1 className="text-2xl lg:text-4xl font-black text-slate-900 tracking-tight">Lead Repository</h1>
           </div>
-          <h1 className="text-2xl lg:text-4xl font-black text-slate-900 tracking-tight">Lead Repository</h1>
+          <button 
+            onClick={() => setIsModalOpen(true)}
+            className="flex items-center justify-center gap-2 px-6 lg:px-8 py-3 lg:py-4 bg-red-600 hover:bg-red-700 text-white rounded-xl lg:rounded-2xl font-black text-[10px] lg:text-xs uppercase tracking-widest shadow-xl shadow-red-100 transition-all active:scale-95 w-full sm:w-auto"
+          >
+            <Plus size={18} />
+            <span>Capture New Lead</span>
+          </button>
+          <button 
+            onClick={() => setIsBulkUploadOpen(true)}
+            className="flex items-center justify-center gap-2 px-6 lg:px-8 py-3 lg:py-4 bg-white border-2 border-red-600 text-red-600 hover:bg-red-50 rounded-xl lg:rounded-2xl font-black text-[10px] lg:text-xs uppercase tracking-widest shadow-sm transition-all active:scale-95 w-full sm:w-auto"
+          >
+            <Upload size={18} />
+            <span>Bulk Upload</span>
+          </button>
         </div>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="flex items-center justify-center gap-2 px-6 lg:px-8 py-3 lg:py-4 bg-red-600 hover:bg-red-700 text-white rounded-xl lg:rounded-2xl font-black text-[10px] lg:text-xs uppercase tracking-widest shadow-xl shadow-red-100 transition-all active:scale-95 w-full sm:w-auto"
-        >
-          <Plus size={18} />
-          <span>Capture New Lead</span>
-        </button>
-        <button 
-          onClick={() => setIsBulkUploadOpen(true)}
-          className="flex items-center justify-center gap-2 px-6 lg:px-8 py-3 lg:py-4 bg-white border-2 border-red-600 text-red-600 hover:bg-red-50 rounded-xl lg:rounded-2xl font-black text-[10px] lg:text-xs uppercase tracking-widest shadow-sm transition-all active:scale-95 w-full sm:w-auto"
-        >
-          <Upload size={18} />
-          <span>Bulk Upload</span>
-        </button>
-      </div>
 
       {/* Tabs and Filters */}
       <div className="space-y-4">
@@ -686,38 +699,38 @@ useEffect(() => {
                   Search
                 </button>
             </div>
-            <div className="md:col-span-12 lg:col-span-6">
-              <div className="space-y-2">
+<div className="md:col-span-12 lg:col-span-6">
+               <div className="space-y-2">
+<div className="flex items-center gap-2">
+                    <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">Pipeline</label>
+                    <select 
+                      value={pipelineFilter}
+                     onChange={(e) => setPipelineFilter(e.target.value)}
+                     className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-red-600 font-bold text-sm"
+                   >
+                     <option value="all">All Stages</option>
+                     <option value="New">New</option>
+                     <option value="Contacted">Contacted</option>
+                     <option value="Interested">Interested</option>
+                     <option value="Meeting Scheduled">Meeting Scheduled</option>
+                     <option value="Negotiation">Negotiation</option>
+                     <option value="Lost">Lost</option>
+                     <option value="Self Registered">Self Registered</option>
+                   </select>
+                 </div>
                 <div className="flex items-center gap-2">
-                  <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">Pipeline</label>
+                  <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">Sort By</label>
                   <select 
-                    value={pipelineFilter}
-                   onChange={(e) => setPipelineFilter(e.target.value)}
-                   className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-red-600 font-bold text-sm"
-                 >
-                   <option value="all">All Stages</option>
-                   <option value="New">New</option>
-                   <option value="Contacted">Contacted</option>
-                   <option value="Interested">Interested</option>
-                   <option value="Meeting Scheduled">Meeting Scheduled</option>
-                   <option value="Negotiation">Negotiation</option>
-                   <option value="Document Pending">Document Pending</option>
-                   <option value="Activated">Activated</option>
-                 </select>
-               </div>
-               <div className="flex items-center gap-2">
-                 <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">Sort By</label>
-                 <select 
-                   value={sortOption}
-                   onChange={(e) => setSortOption(e.target.value)}
-                   className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-red-600 font-bold text-sm"
-                 >
-                   <option value="newest">Newest First</option>
-                   <option value="oldest">Oldest First</option>
-                 </select>
-               </div>
-             </div>
-           </div>
+                    value={sortOption}
+                    onChange={(e) => setSortOption(e.target.value)}
+                    className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-red-600 font-bold text-sm"
+                  >
+                    <option value="newest">Newest First</option>
+                    <option value="oldest">Oldest First</option>
+                  </select>
+                </div>
+              </div>
+            </div>
          </div>
       </div>
 
@@ -845,8 +858,8 @@ useEffect(() => {
                  <tr className="bg-slate-50/50 border-b border-slate-100">
                    <th className="w-[18%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Enterprise</th>
                    <th className="w-[13%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Key Contact</th>
-                   <th className="w-[9%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Category</th>
-                   <th className="w-[9%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Priority</th>
+<th className="w-[12%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Category</th>
+                    <th className="w-[12%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Priority</th>
                    <th className="w-[12%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Pipeline</th>
                    <th className="w-[11%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Manager</th>
                    <th className="w-[11%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Intelligence</th>
@@ -892,15 +905,15 @@ useEffect(() => {
                         <a href={`tel:${lead.phone}`} className="text-[9px] font-black text-slate-400 hover:text-red-600 transition-colors uppercase">{lead.phone}</a>
                       </div>
                     </td>
-                    <td className="px-6 py-3">
-                      <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">{lead.category}</span>
-                    </td>
-                    <td className="px-6 py-3">
-                      <PriorityBadge priority={lead.priority} score={lead.lead_score} />
-                    </td>
-                    <td className="px-6 py-3">
-                      <StatusBadge status={lead.lead_status} />
-                    </td>
+<td className="px-6 py-3">
+                        <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">{lead.category}</span>
+                      </td>
+                     <td className="px-6 py-3">
+                       <PriorityBadge priority={lead.priority} score={lead.lead_score} />
+                     </td>
+<td className="px-6 py-3">
+                       <StatusBadge status={lead.lead_status} />
+                     </td>
                     <td className="px-6 py-3">
                       <div className="flex items-center gap-2">
                         <div className="w-6 h-6 bg-slate-900 rounded-lg flex items-center justify-center text-[8px] font-black text-white">
@@ -924,23 +937,23 @@ useEffect(() => {
                         <div className="flex items-center justify-end gap-1">
                           {lead.assignment_status === 'pending' && (
                             <button
-                              onClick={async () => {
-                                try {
-                                  const res = await axios.patch(`${API_URL}/leads/${lead._id}/accept`, {}, {
-                                    headers: { Authorization: `Bearer ${token}` }
-                                  });
-                                  toast.success('Assignment accepted');
-                                  refetchLeads();
-                                } catch (err) {
-                                  toast.error(err.response?.data?.message || 'Failed to accept');
-                                }
-                              }}
-                              className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
-                              title="Accept Assignment"
-                            >
-                              <CheckCircle size={14} />
-</button>
-                           )}
+onClick={async () => {
+                                 try {
+                                   await axios.patch(`${API_URL}/leads/${lead._id}/accept`, {}, {
+                                     headers: { Authorization: `Bearer ${token}` }
+                                   });
+                                   toast.success('Assignment accepted');
+                                   refetchLeads();
+                                 } catch (err) {
+                                   toast.error(err.response?.data?.message || 'Failed to accept');
+                                 }
+                               }}
+                               className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+                               title="Accept Assignment"
+                             >
+                               <CheckCircle size={14} />
+                             </button>
+                            )}
                            <a 
                               href={`tel:${lead.phone}`} 
                               className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-all"
@@ -1021,44 +1034,44 @@ useEffect(() => {
                       <span className="truncate">{lead.location}</span>
                     </div>
                   </div>
-                  <div className="ml-2 shrink-0">
-                    <StatusBadge status={lead.lead_status} />
-                  </div>
+<div className="ml-2 shrink-0">
+                      <StatusBadge status={lead.lead_status} />
+                    </div>
                 </div>
                 
-                <div className="flex items-center gap-2 mb-3">
-                  <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center text-[10px] font-black text-white shrink-0">
-                    {lead.assigned_user?.name ? lead.assigned_user.name[0] : 'U'}
+<div className="flex items-center gap-2 mb-3">
+                   <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center text-[10px] font-black text-white shrink-0">
+                     {lead.assigned_user?.name ? lead.assigned_user.name[0] : 'U'}
+                   </div>
+                   <div className="min-w-0 flex-1">
+                     <div className="text-sm font-bold text-slate-700 truncate">{lead.contact_person}</div>
+                     <div className="text-[10px] font-black text-slate-400">{lead.phone}</div>
+                   </div>
+<span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded-md shrink-0">{lead.category}</span>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-bold text-slate-700 truncate">{lead.contact_person}</div>
-                    <div className="text-[10px] font-black text-slate-400">{lead.phone}</div>
-                  </div>
-                  <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded-md shrink-0">{lead.category}</span>
-                </div>
-
-<div className="flex items-center justify-between pt-2 border-t border-slate-50">
-                    <PriorityBadge priority={lead.priority} score={lead.lead_score} />
-                    <div className="flex items-center gap-1">
-                      {lead.assignment_status === 'pending' && (
-                        <button 
-                          onClick={async () => {
-                            try {
-                              const res = await axios.patch(`${API_URL}/leads/${lead._id}/accept`, {}, {
-                                headers: { Authorization: `Bearer ${token}` }
-                              });
-                              toast.success('Assignment accepted');
-                              refetchLeads();
-                            } catch (err) {
-                              toast.error(err.response?.data?.message || 'Failed to accept');
-                            }
-                          }}
-                          className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all active:scale-95"
-                          title="Accept Assignment"
-                        >
-                          <CheckCircle size={16} />
-                        </button>
-                      )}
+                  
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-50">
+                     <PriorityBadge priority={lead.priority} score={lead.lead_score} />
+<div className="flex items-center gap-1">
+                       {lead.assignment_status === 'pending' && (
+                         <button 
+                           onClick={async () => {
+                              try {
+                                await axios.patch(`${API_URL}/leads/${lead._id}/accept`, {}, {
+                                  headers: { Authorization: `Bearer ${token}` }
+                                });
+                                toast.success('Assignment accepted');
+                                refetchLeads();
+                              } catch (err) {
+                                toast.error(err.response?.data?.message || 'Failed to accept');
+                              }
+                            }}
+                           className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all active:scale-95"
+                           title="Accept Assignment"
+                         >
+                           <CheckCircle size={16} />
+                         </button>
+                       )}
                       <button 
                          onClick={() => handleCallWithTel(lead)}
                          className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-all active:scale-95"
@@ -1178,14 +1191,14 @@ useEffect(() => {
 
         {/* Footer Info */}
         <div className="px-6 lg:px-8 py-4 bg-slate-50/30 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <span className="text-[9px] lg:text-[10px] font-black text-slate-400 uppercase tracking-widest text-center sm:text-left">
-            {activeTab === 'followup' 
-              ? `Showing ${todayFollowups.length} follow-ups scheduled for today`
-              : activeTab === 'database'
-                ? `Showing ${filteredLeads.length} database search results`
-                : `Showing ${filteredLeads.length} of ${allLeads.length} records`
-            }
-          </span>
+<span className="text-[9px] lg:text-[10px] font-black text-slate-400 uppercase tracking-widest text-center sm:text-left">
+  {activeTab === 'followup' 
+    ? `Showing ${todayFollowups.length} follow-ups scheduled for today`
+    : activeTab === 'database'
+      ? `Showing ${filteredLeads.length} database search results`
+      : `Showing ${filteredLeads.length} of ${pagination?.total || allLeads.length} records`
+  }
+</span>
           <div className="flex items-center gap-2 w-full sm:w-auto justify-center">
             <button className="flex-1 sm:flex-none px-4 py-2 text-[9px] lg:text-[10px] font-black text-slate-400 hover:text-red-600 border border-slate-200 rounded-lg uppercase tracking-widest disabled:opacity-50">Prev</button>
             <button className="flex-1 sm:flex-none px-4 py-2 text-[9px] lg:text-[10px] font-black text-red-600 border border-red-100 rounded-lg uppercase tracking-widest">Next</button>
