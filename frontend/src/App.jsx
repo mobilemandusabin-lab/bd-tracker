@@ -65,11 +65,7 @@ function App() {
           }>
             <Route index element={<DashboardPage />} />
             <Route path="leads" element={<LeadsPage />} />
-<Route path="vendors" element={
-               <ProtectedRoute roles={['super_admin', 'admin']}>
-                 <VendorManagementPage />
-               </ProtectedRoute>
-             } />
+<Route path="vendors" element={<VendorManagementPage />} />
              <Route path="active-sellers" element={
                <ProtectedRoute roles={['super_admin', 'admin']}>
                  <ActiveSellersPage />

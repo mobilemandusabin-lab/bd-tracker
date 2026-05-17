@@ -125,12 +125,8 @@ const Layout = () => {
           </div>
 <SidebarLink to="/" icon={LayoutDashboard} label="Dashboard" onClick={closeMobileMenu} />
 <SidebarLink to="/leads" icon={Users} label="Leads Management" onClick={closeMobileMenu} />
-{(user?.role === 'super_admin' || user?.role === 'admin') && (
-  <>
-    <SidebarLink to="/vendors" icon={Store} label="Vendor Management" onClick={closeMobileMenu} />
-    <SidebarLink to="/active-sellers" icon={Package} label="Active Sellers" onClick={closeMobileMenu} />
-  </>
-)}
+<SidebarLink to="/vendors" icon={Store} label="Vendor Management" onClick={closeMobileMenu} />
+<SidebarLink to="/active-sellers" icon={Package} label="Active Sellers" onClick={closeMobileMenu} />
 {(user?.role === 'super_admin' || user?.role === 'admin') && (
   <SidebarLink to="/users" icon={Settings} label="Team Management" onClick={closeMobileMenu} />
 )}
