@@ -140,9 +140,12 @@ exports.getAllLeads = async (req, res) => {
     // Database search mode (all=true with search) allows searching entire database for all users
     const isGlobalSearch = req.query.all === 'true' && req.query.search;
     
-    // Super admin sees all leads by default, other users see only their assigned leads
-    // Database search bypasses all user filtering for all users
-    if (!isGlobalSearch && user.role !== 'super_admin') {
+    // Filter by type to determine visibility rules
+    const isVendorView = req.query.type === 'vendor';
+    
+    // Super admin sees all leads/vendors by default
+    // Regular users see only their assigned leads, but all vendors
+    if (user.role !== 'super_admin' && !(isGlobalSearch || isVendorView)) {
       query.assigned_user = user._id;
     }
 
