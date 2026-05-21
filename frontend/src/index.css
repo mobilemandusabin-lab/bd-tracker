@@ -1,58 +1,16 @@
 @import "tailwindcss";
 
 @theme {
-  --color-primary: #dc2626; /* red-600 */
-  --color-primary-dark: #991b1b; /* red-800 */
+  --color-primary: #dc2626;
+  --color-primary-dark: #991b1b;
   --color-secondary: #ffffff;
   --color-accent: #ef4444;
   --font-sans: Inter, system-ui, sans-serif;
 }
 
-@layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --primary: 0 84.2% 56.9%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 222.2 47.4% 97.1%;
-    --secondary-foreground: 222.2 84% 4.9%;
-    --muted: 220 14.3% 95.9%;
-    --muted-foreground: 220 8.9% 46.1%;
-    --accent: 220 14.3% 95.9%;
-    --accent-foreground: 222.2 84% 4.9%;
-    --destructive: 0 84.2% 60%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 214 32.1% 91.2%;
-    --input: 214 32.1% 91.2%;
-    --ring: 222.2 84% 4.9%;
-  }
-
-  .dark {
-    --background: 222.2 47.4% 11.2%;
-    --foreground: 0 0% 100%;
-    --card: 222.2 47.4% 11.2%;
-    --card-foreground: 0 0% 100%;
-    --primary: 0 0% 100%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 222.2 39.4% 15.1%;
-    --secondary-foreground: 0 0% 100%;
-    --muted: 222.2 39.4% 15.1%;
-    --muted-foreground: 220 8.9% 66.1%;
-    --accent: 222.2 39.4% 15.1%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 217.3 33.3% 25.1%;
-    --input: 217.3 33.3% 25.1%;
-    --ring: 217.3 33.3% 25.1%;
-  }
-}
-
 :root {
   background-color: #ffffff;
-  color: #1f2937;
+  color: #0f172a;
   --font-family: 'Inter', system-ui, -apple-system, sans-serif;
 }
 
@@ -62,26 +20,78 @@ body {
   font-family: var(--font-family);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background: #fafafa;
 }
 
-/* Custom Red Button */
-.btn-red {
-  @apply bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-2xl shadow-xl shadow-red-100 hover:shadow-red-200 transition-all transform hover:-translate-y-0.5 active:scale-95;
+/* Selection */
+::selection {
+  background: #fecaca;
+  color: #991b1b;
 }
 
-/* Card Style */
-.card {
-  @apply bg-white border border-slate-100 rounded-[2rem] shadow-sm hover:shadow-lg transition-all duration-300;
+/* Focus rings */
+*:focus-visible {
+  outline: 2px solid #dc2626;
+  outline-offset: 2px;
+  border-radius: 8px;
 }
 
-/* Scrollbar styling */
+/* Scrollbar */
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
-  @apply bg-transparent;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  @apply bg-slate-200 rounded-full hover:bg-slate-300 transition-colors;
+  background: #e2e8f0;
+  border-radius: 100px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #cbd5e1;
 }
 
+/* Red utility classes */
+.btn-red {
+  @apply bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg shadow-red-200 hover:shadow-xl hover:shadow-red-300 transition-all active:scale-[0.98];
+}
+
+.btn-white {
+  @apply bg-white border border-slate-200 text-slate-700 font-bold py-3 px-6 rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all;
+}
+
+.card {
+  @apply bg-white border border-slate-100 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200;
+}
+
+.card-flat {
+  @apply bg-white border border-slate-100 rounded-2xl;
+}
+
+/* Hero header pattern */
+.hero-pattern {
+  background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+}
+
+/* Input styles — :where() gives 0 specificity so Tailwind utilities always override */
+:where(input[type="text"]),
+:where(input[type="email"]),
+:where(input[type="password"]),
+:where(input[type="number"]),
+:where(input[type="tel"]),
+:where(input[type="date"]),
+:where(input[type="time"]),
+:where(textarea),
+:where(select) {
+  @apply bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-800 transition-all;
+}
+:where(input):focus,
+:where(textarea):focus,
+:where(select):focus {
+  @apply bg-white border-red-300 ring-2 ring-red-100 outline-none;
+}
+:where(input)::placeholder,
+:where(textarea)::placeholder {
+  @apply text-slate-400;
+}

@@ -4,6 +4,17 @@ const axios = require('axios');
 
 const API_BASE = 'https://commerce.thecanbrand.com/api';
 
+// Compute total processing duration in hours from statusHistory
+function computeProcessingDuration(statusHistory) {
+  if (!statusHistory || statusHistory.length < 2) return null;
+  const sorted = [...statusHistory].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+  const first = new Date(sorted[0].timestamp);
+  const last = new Date(sorted[sorted.length - 1].timestamp);
+  const diffMs = last - first;
+  if (diffMs <= 0) return 0;
+  return Math.round(diffMs / (1000 * 60 * 60));
+}
+
 // Sync orders from Nepalcan API to database
 exports.syncNepalcanOrders = async (req, res) => {
   try {
@@ -30,10 +41,21 @@ exports.syncNepalcanOrders = async (req, res) => {
 
         // Check if order already exists
         let existingOrder = await NepalcanOrder.findOne({ orderId });
-        
+
+        // Check marketplaceProcesses for "returned" status — overrides main orderStatus
+        let effectiveStatus = orderData.orderStatus || 'Pending';
+        if (orderData.marketplaceProcesses && Array.isArray(orderData.marketplaceProcesses)) {
+          const hasReturned = orderData.marketplaceProcesses.some(
+            p => p.process && p.process.toLowerCase() === 'returned'
+          );
+          if (hasReturned) {
+            effectiveStatus = 'Returned';
+          }
+        }
+
         // Build complete status history from API data
         const statusHistoryEntry = {
-          status: orderData.orderStatus || 'Pending',
+          status: effectiveStatus,
           timestamp: orderData.updatedAt ? new Date(orderData.updatedAt) : new Date()
         };
 
@@ -51,7 +73,7 @@ exports.syncNepalcanOrders = async (req, res) => {
           const createdAt = new Date(orderData.createdAt);
           const updatedAt = new Date(orderData.updatedAt);
           
-          const currentStatus = orderData.orderStatus;
+          const currentStatus = effectiveStatus;
           
           // Always record Pending as starting point
           historicalStatuses.push({
@@ -99,7 +121,7 @@ if (!existingOrder) {
            let finalHistory = [];
            if (historicalStatuses.length > 0) {
              // Check if current status is already in historicalStatuses
-             const hasCurrent = historicalStatuses.some(h => h.status === (orderData.orderStatus || 'Pending'));
+             const hasCurrent = historicalStatuses.some(h => h.status === effectiveStatus);
              finalHistory = hasCurrent ? historicalStatuses : [...historicalStatuses, statusHistoryEntry];
            } else {
              finalHistory = [statusHistoryEntry];
@@ -111,7 +133,7 @@ if (!existingOrder) {
              customer: orderData.customer || 'Unknown',
              vendor: orderData.vendor,
              source: orderData.source,
-             orderStatus: orderData.orderStatus || 'Pending',
+             orderStatus: effectiveStatus,
              paymentStatus: orderData.paymentStatus,
              paymentMethod: orderData.paymentMethod,
              totalAmount: orderData.totalAmount || 0,
@@ -120,7 +142,8 @@ if (!existingOrder) {
              updatedAt: orderData.updatedAt ? new Date(orderData.updatedAt) : new Date(),
              statusHistory: finalHistory,
              rawData: orderData,
-             lastSyncedAt: new Date()
+             lastSyncedAt: new Date(),
+             processingDurationHours: computeProcessingDuration(finalHistory)
            });
 
            await newOrder.save();
@@ -128,7 +151,7 @@ if (!existingOrder) {
          } else {
            // Check if status changed
            const oldStatus = existingOrder.orderStatus;
-           const newStatus = orderData.orderStatus || oldStatus;
+           const newStatus = effectiveStatus;
 
            // Build final history - check if current status is already covered
            let finalHistory;
@@ -151,6 +174,7 @@ if (!existingOrder) {
           existingOrder.updatedAt = orderData.updatedAt ? new Date(orderData.updatedAt) : new Date();
           existingOrder.rawData = orderData;
           existingOrder.lastSyncedAt = new Date();
+          existingOrder.processingDurationHours = computeProcessingDuration(existingOrder.statusHistory);
 
           await existingOrder.save();
           results.updated++;
@@ -202,8 +226,17 @@ exports.getNepalcanOrders = async (req, res) => {
 
     const total = await NepalcanOrder.countDocuments(query);
 
+    // Add processingDurationHours to each order (use denormalized field or compute on-the-fly)
+    const ordersWithDuration = orders.map(order => {
+      const obj = order.toObject();
+      if (obj.processingDurationHours === null || obj.processingDurationHours === undefined) {
+        obj.processingDurationHours = computeProcessingDuration(obj.statusHistory);
+      }
+      return obj;
+    });
+
     res.json({
-      orders,
+      orders: ordersWithDuration,
       pagination: {
         total,
         page: parseInt(page),
@@ -231,36 +264,28 @@ exports.getNepalcanStats = async (req, res) => {
       { $group: { _id: '$paymentStatus', count: { $sum: 1 } } }
     ]);
 
-    // Calculate average processing times - only orders from today with valid interval data
-    // Nepal timezone is UTC+5:45
-    const now = new Date();
-    const today = new Date(now);
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    // Calculate average processing times from orders since 2026-04-24 with valid status history
+    const allOrders = await NepalcanOrder.find({
+      'statusHistory.1': { $exists: true },  // at least 2 status entries
+      createdAt: { $gte: new Date('2026-04-24') }
+    }).select('statusHistory orderStatus').lean();
 
-    const orders = await NepalcanOrder.find({
-      orderStatus: 'Delivered',
-      createdAt: { $gte: today, $lt: tomorrow }
-    });
-
-    let totalPendingToProcessing = 0;
-    let totalProcessingToDelivered = 0;
-    let totalPendingToDelivered = 0;
-    let ordersWithFullHistory = 0;
+    let totals = {};
+    let counts = {};
     let ordersWithNoIntervalData = 0;
+    let totalFulfillmentHours = 0;
+    let fulfilledCount = 0;
 
-    orders.forEach(order => {
-      const times = order.getProcessingTimes();
-      const fulfillmentTime = order.getTotalFulfillmentTime();
+    allOrders.forEach(order => {
+      const history = (order.statusHistory || []).sort((a, b) =>
+        new Date(a.timestamp) - new Date(b.timestamp)
+      );
 
-      // Check if order has actual status interval data (not inferred)
-      // A valid interval exists if there are at least 2 status entries with different timestamps
-      const hasIntervalData = order.statusHistory.length >= 2 && 
-        order.statusHistory.some((entry, i) => {
+      // Check if order has actual status interval data
+      const hasIntervalData = history.length >= 2 &&
+        history.some((entry, i) => {
           if (i === 0) return false;
-          const prevEntry = order.statusHistory[i - 1];
-          return prevEntry.status !== entry.status;
+          return history[i - 1].status !== entry.status;
         });
 
       if (!hasIntervalData) {
@@ -268,34 +293,51 @@ exports.getNepalcanStats = async (req, res) => {
         return;
       }
 
-      if (times['Pending_to_Processing']) {
-        totalPendingToProcessing += times['Pending_to_Processing'];
-        ordersWithFullHistory++;
+      // Compute each transition pair
+      for (let i = 0; i < history.length - 1; i++) {
+        const from = history[i].status;
+        const to = history[i + 1].status;
+        const hours = Math.round(
+          (new Date(history[i + 1].timestamp) - new Date(history[i].timestamp)) / (1000 * 60 * 60)
+        );
+        const key = `${from}_to_${to}`;
+        totals[key] = (totals[key] || 0) + hours;
+        counts[key] = (counts[key] || 0) + 1;
       }
-      if (times['Processing_to_Shipped']) {
-        totalProcessingToDelivered += times['Processing_to_Shipped'];
-      }
-      if (fulfillmentTime) {
-        totalPendingToDelivered += fulfillmentTime;
+
+      // Compute total fulfillment (first Pending to first Delivered)
+      if (order.orderStatus === 'Delivered') {
+        const pending = history.find(h => h.status === 'Pending');
+        const delivered = history.find(h => h.status === 'Delivered');
+        if (pending && delivered) {
+          totalFulfillmentHours += Math.round(
+            (new Date(delivered.timestamp) - new Date(pending.timestamp)) / (1000 * 60 * 60)
+          );
+          fulfilledCount++;
+        }
       }
     });
+
+    // Build averages for all transition pairs
+    const averages = {};
+    for (const key in totals) {
+      averages[key] = Math.round(totals[key] / counts[key]);
+    }
+
+    const ordersAnalyzed = allOrders.length - ordersWithNoIntervalData;
 
     const stats = {
       totalOrders,
       statusCounts: statusCounts.map(s => ({ status: s._id, count: s.count })),
       paymentStatusCounts: paymentStatusCounts.map(s => ({ status: s._id, count: s.count })),
       averages: {
-        pendingToProcessing: ordersWithFullHistory > 0 
-          ? Math.round(totalPendingToProcessing / ordersWithFullHistory) 
-          : 0,
-        processingToDelivered: ordersWithFullHistory > 0 
-          ? Math.round(totalProcessingToDelivered / ordersWithFullHistory) 
-          : 0,
-        totalFulfillment: ordersWithFullHistory > 0 
-          ? Math.round(totalPendingToDelivered / ordersWithFullHistory) 
-          : 0
+        ...averages,
+        // Legacy fields for backward compatibility
+        pendingToProcessing: averages['Pending_to_Processing'] || 0,
+        processingToDelivered: averages['Processing_to_Shipped'] || averages['Processing_to_Delivered'] || 0,
+        totalFulfillment: fulfilledCount > 0 ? Math.round(totalFulfillmentHours / fulfilledCount) : 0
       },
-      ordersAnalyzed: ordersWithFullHistory,
+      ordersAnalyzed,
       ordersWithNoIntervalData
     };
 
@@ -423,5 +465,568 @@ exports.getSyncLogs = async (req, res) => {
   } catch (error) {
     console.error('Get sync logs error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+// Manually check delivered orders for returns via logistics API
+exports.checkReturnedOrders = async (req, res) => {
+  try {
+    const { checkAndUpdateReturnedOrders } = require('../services/nepalcanSyncService');
+    const updated = await checkAndUpdateReturnedOrders();
+    res.json({
+      message: updated > 0 ? `Updated ${updated} returned orders` : 'No new returned orders found',
+      updated
+    });
+  } catch (error) {
+    console.error('Check returned orders error:', error);
+    res.status(500).json({ message: 'Failed to check returned orders', error: error.message });
+  }
+};
+
+// Get order tracking details from external logistics API
+exports.getOrderTracking = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const response = await axios.get(
+      `https://can-logistic-prod-84pie.ondigitalocean.app/api/public/marketplace-tracker/${orderId}`
+    );
+    const trackingData = response.data;
+
+    // Check marketplaceProcesses for "returned" status and update order if found
+    if (trackingData?.marketplaceProcesses && Array.isArray(trackingData.marketplaceProcesses)) {
+      const hasReturned = trackingData.marketplaceProcesses.some(
+        p => p.process && p.process.toLowerCase() === 'returned'
+      );
+      if (hasReturned) {
+        const order = await NepalcanOrder.findOne({ orderId });
+        if (order && order.orderStatus !== 'Returned') {
+          order.orderStatus = 'Returned';
+          order.statusHistory.push({ status: 'Returned', timestamp: new Date() });
+          await order.save();
+        }
+      }
+    }
+
+    res.json(trackingData);
+  } catch (error) {
+    console.error('Get order tracking error:', error);
+    const status = error.response?.status || 500;
+    res.status(status).json({
+      message: 'Failed to fetch order tracking data',
+      error: error.response?.data?.message || error.message
+    });
+  }
+};
+
+// Get comprehensive analytics for Nepalcan orders
+exports.getNepalcanAnalytics = async (req, res) => {
+  try {
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now);
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+
+    const processingThreshold = new Date(now);
+    processingThreshold.setDate(processingThreshold.getDate() - 3);
+    const shippedThreshold = new Date(now);
+    shippedThreshold.setDate(shippedThreshold.getDate() - 5);
+
+    const [
+      revenueTrend,
+      vendorPerformance,
+      customerOrders,
+      ordersAtRisk,
+      returnAnalysis,
+      currentMonth,
+      lastMonth,
+      dayOfWeek,
+      paymentMethods,
+      vendorProcessingTimeRaw,
+      processingTimeDistribution,
+      hourlyPattern,
+      vendorGrowthTrend,
+      statusFlow,
+      deliveryZones
+    ] = await Promise.all([
+      // 1. Revenue Trend (daily, last 30 days)
+      NepalcanOrder.aggregate([
+        { $match: { createdAt: { $gte: thirtyDaysAgo } } },
+        { $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+          revenue: { $sum: '$totalAmount' },
+          orders: { $sum: 1 }
+        }},
+        { $sort: { _id: 1 } },
+        { $project: { date: '$_id', revenue: 1, orders: 1, _id: 0 } }
+      ]),
+
+      // 2. Vendor Performance (top 15 by revenue)
+      NepalcanOrder.aggregate([
+        { $group: {
+          _id: '$vendor',
+          totalOrders: { $sum: 1 },
+          totalRevenue: { $sum: '$totalAmount' },
+          deliveredCount: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, 1, 0] } },
+          returnedCount: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Returned'] }, 1, 0] } },
+          avgAmount: { $avg: '$totalAmount' }
+        }},
+        { $sort: { totalRevenue: -1 } },
+        { $limit: 15 },
+        { $project: {
+          vendor: { $ifNull: ['$_id', 'Unknown'] },
+          totalOrders: 1, totalRevenue: 1, deliveredCount: 1, returnedCount: 1,
+          avgAmount: { $round: ['$avgAmount', 0] },
+          returnRate: {
+            $cond: [
+              { $gt: ['$totalOrders', 0] },
+              { $round: [{ $multiply: [{ $divide: ['$returnedCount', '$totalOrders'] }, 100] }, 1] },
+              0
+            ]
+          },
+          _id: 0
+        }}
+      ]),
+
+      // 3. Customer orders grouped (for retention calculation)
+      NepalcanOrder.aggregate([
+        { $group: { _id: '$customer', orderCount: { $sum: 1 }, totalSpent: { $sum: '$totalAmount' } } }
+      ]),
+
+      // 4. Orders at Risk (stuck Processing 3+ days or Shipped 5+ days)
+      NepalcanOrder.find({
+        $or: [
+          { orderStatus: 'Processing', updatedAt: { $lte: processingThreshold } },
+          { orderStatus: 'Shipped', updatedAt: { $lte: shippedThreshold } }
+        ]
+      }).select('orderId customer vendor orderStatus totalAmount updatedAt').sort('updatedAt').limit(20).lean(),
+
+      // 5. Return Analysis by vendor
+      NepalcanOrder.aggregate([
+        { $match: { orderStatus: 'Returned' } },
+        { $group: {
+          _id: '$vendor',
+          returnCount: { $sum: 1 },
+          totalReturnedAmount: { $sum: '$totalAmount' }
+        }},
+        { $sort: { returnCount: -1 } },
+        { $project: { vendor: { $ifNull: ['$_id', 'Unknown'] }, returnCount: 1, totalReturnedAmount: 1, _id: 0 } }
+      ]),
+
+      // 6. Current month stats
+      NepalcanOrder.aggregate([
+        { $match: { createdAt: { $gte: startOfMonth } } },
+        { $group: {
+          _id: null,
+          orderCount: { $sum: 1 },
+          revenue: { $sum: '$totalAmount' },
+          deliveredCount: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, 1, 0] } },
+          returnedCount: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Returned'] }, 1, 0] } },
+          customers: { $addToSet: '$customer' }
+        }},
+        { $project: { orderCount: 1, revenue: 1, deliveredCount: 1, returnedCount: 1, uniqueCustomers: { $size: '$customers' }, _id: 0 } }
+      ]),
+
+      // 7. Last month stats
+      NepalcanOrder.aggregate([
+        { $match: { createdAt: { $gte: startOfLastMonth, $lt: startOfMonth } } },
+        { $group: {
+          _id: null,
+          orderCount: { $sum: 1 },
+          revenue: { $sum: '$totalAmount' },
+          deliveredCount: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, 1, 0] } },
+          returnedCount: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Returned'] }, 1, 0] } },
+          customers: { $addToSet: '$customer' }
+        }},
+        { $project: { orderCount: 1, revenue: 1, deliveredCount: 1, returnedCount: 1, uniqueCustomers: { $size: '$customers' }, _id: 0 } }
+      ]),
+
+      // 8. Day-of-Week pattern
+      NepalcanOrder.aggregate([
+        { $group: {
+          _id: { $dayOfWeek: '$createdAt' },
+          orders: { $sum: 1 },
+          revenue: { $sum: '$totalAmount' }
+        }},
+        { $sort: { _id: 1 } }
+      ]),
+
+      // 9. Payment Method breakdown
+      NepalcanOrder.aggregate([
+        { $group: {
+          _id: { $ifNull: ['$paymentMethod', 'Unknown'] },
+          count: { $sum: 1 },
+          revenue: { $sum: '$totalAmount' }
+        }},
+        { $sort: { count: -1 } },
+        { $project: { method: '$_id', count: 1, revenue: 1, _id: 0 } }
+      ]),
+
+      // 10. Vendor Processing Time Performance
+      NepalcanOrder.aggregate([
+        { $match: { orderStatus: 'Delivered', 'statusHistory.1': { $exists: true } } },
+        { $unwind: '$statusHistory' },
+        { $sort: { 'statusHistory.timestamp': 1 } },
+        { $group: {
+          _id: { vendor: '$vendor', orderId: '$orderId', status: '$statusHistory.status' },
+          firstTimestamp: { $first: '$statusHistory.timestamp' },
+          vendor: { $first: '$vendor' },
+          orderId: { $first: '$orderId' }
+        }},
+        { $group: {
+          _id: '$vendor',
+          orders: { $push: { orderId: '$orderId', status: '$_id.status', timestamp: '$firstTimestamp' } }
+        }},
+        { $project: {
+          vendor: '$_id',
+          orders: 1,
+          _id: 0
+        }}
+      ]),
+
+      // 11. Processing Time Distribution (buckets)
+      NepalcanOrder.aggregate([
+        { $match: { processingDurationHours: { $ne: null, $gt: 0, $lt: 720 } } },
+        { $bucket: {
+          groupBy: '$processingDurationHours',
+          boundaries: [0, 1, 6, 24, 72, 168, 720],
+          default: '720+',
+          output: { count: { $sum: 1 }, orders: { $push: { orderId: '$orderId', vendor: '$vendor', hours: '$processingDurationHours' } } }
+        }}
+      ]),
+
+      // 12. Hourly Order Pattern
+      NepalcanOrder.aggregate([
+        { $group: {
+          _id: { $hour: '$createdAt' },
+          orders: { $sum: 1 },
+          revenue: { $sum: '$totalAmount' }
+        }},
+        { $sort: { _id: 1 } }
+      ]),
+
+      // 13. Vendor Growth Trend (monthly per vendor, last 6 months)
+      NepalcanOrder.aggregate([
+        { $match: { createdAt: { $gte: new Date(now.getFullYear(), now.getMonth() - 5, 1) } } },
+        { $group: {
+          _id: { vendor: '$vendor', year: { $year: '$createdAt' }, month: { $month: '$createdAt' } },
+          orders: { $sum: 1 },
+          revenue: { $sum: '$totalAmount' }
+        }},
+        { $sort: { '_id.year': 1, '_id.month': 1 } },
+        { $project: {
+          vendor: '$_id.vendor',
+          year: '$_id.year',
+          month: '$_id.month',
+          orders: 1,
+          revenue: 1,
+          _id: 0
+        }}
+      ]),
+
+      // 14. Status Flow (count transitions from statusHistory)
+      NepalcanOrder.aggregate([
+        { $unwind: '$statusHistory' },
+        { $sort: { 'statusHistory.timestamp': 1 } },
+        { $group: {
+          _id: '$orderId',
+          statuses: { $push: '$statusHistory.status' }
+        }},
+        { $project: {
+          transitions: {
+            $map: {
+              input: { $range: [0, { $subtract: [{ $size: '$statuses' }, 1] }] },
+              as: 'i',
+              in: {
+                from: { $arrayElemAt: ['$statuses', '$$i'] },
+                to: { $arrayElemAt: ['$statuses', { $add: ['$$i', 1] }] }
+              }
+            }
+          }
+        }},
+        { $unwind: '$transitions' },
+        { $group: {
+          _id: { from: '$transitions.from', to: '$transitions.to' },
+          count: { $sum: 1 }
+        }},
+        { $sort: { count: -1 } },
+        { $project: { from: '$_id.from', to: '$_id.to', count: 1, _id: 0 } }
+      ]),
+
+      // 15. Delivery Zone / Shipping Address breakdown
+      NepalcanOrder.aggregate([
+        { $match: { 'rawData.shippingAddress': { $exists: true } } },
+        { $group: {
+          _id: { $ifNull: ['$rawData.shippingAddress.city', '$rawData.shippingAddress.district', 'Unknown'] },
+          orders: { $sum: 1 },
+          revenue: { $sum: '$totalAmount' }
+        }},
+        { $sort: { orders: -1 } },
+        { $limit: 15 },
+        { $project: { zone: '$_id', orders: 1, revenue: 1, _id: 0 } }
+      ])
+    ]);
+
+    // Compute customer retention
+    const totalCustomers = customerOrders.length;
+    const repeatCustomers = customerOrders.filter(c => c.orderCount > 1).length;
+    const newCustomers = customerOrders.filter(c => c.orderCount === 1).length;
+    const repeatRate = totalCustomers > 0 ? Math.round((repeatCustomers / totalCustomers) * 100) : 0;
+    const avgOrdersPerCustomer = totalCustomers > 0 ? Math.round((customerOrders.reduce((s, c) => s + c.orderCount, 0) / totalCustomers) * 10) / 10 : 0;
+
+    // Day-of-week labels
+    const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const dayOfWeekData = dayLabels.map((label, i) => {
+      const entry = dayOfWeek.find(d => d._id === i + 1);
+      return { day: label, orders: entry?.orders || 0, revenue: entry?.revenue || 0 };
+    });
+
+    // Process vendor processing time data
+    const vendorProcessingTime = vendorProcessingTimeRaw.map(vendor => {
+      const orders = vendor.orders || [];
+      const orderMap = {};
+
+      // Group by orderId
+      orders.forEach(entry => {
+        if (!orderMap[entry.orderId]) orderMap[entry.orderId] = {};
+        orderMap[entry.orderId][entry.status] = new Date(entry.timestamp);
+      });
+
+      // Calculate processing time for each order
+      const processingTimes = [];
+      const fulfillmentTimes = [];
+
+      Object.values(orderMap).forEach(statusMap => {
+        // Processing time: Pending -> Processing
+        if (statusMap.Pending && statusMap.Processing) {
+          const hours = (statusMap.Processing - statusMap.Pending) / (1000 * 60 * 60);
+          if (hours >= 0 && hours < 720) processingTimes.push(hours); // Cap at 30 days
+        }
+        // Fulfillment time: Pending -> Delivered
+        if (statusMap.Pending && statusMap.Delivered) {
+          const hours = (statusMap.Delivered - statusMap.Pending) / (1000 * 60 * 60);
+          if (hours >= 0 && hours < 720) fulfillmentTimes.push(hours);
+        }
+      });
+
+      const avgProcessingHours = processingTimes.length > 0
+        ? Math.round(processingTimes.reduce((s, t) => s + t, 0) / processingTimes.length)
+        : null;
+      const avgFulfillmentHours = fulfillmentTimes.length > 0
+        ? Math.round(fulfillmentTimes.reduce((s, t) => s + t, 0) / fulfillmentTimes.length)
+        : null;
+
+      return {
+        vendor: vendor.vendor,
+        avgProcessingHours,
+        avgFulfillmentHours,
+        ordersWithProcessingData: processingTimes.length,
+        ordersWithFulfillmentData: fulfillmentTimes.length
+      };
+    }).filter(v => v.avgProcessingHours !== null || v.avgFulfillmentHours !== null);
+
+    // Sort by processing time (best first, then worst first)
+    const bestVendors = [...vendorProcessingTime]
+      .filter(v => v.avgProcessingHours !== null)
+      .sort((a, b) => a.avgProcessingHours - b.avgProcessingHours)
+      .slice(0, 5);
+
+    const worstVendors = [...vendorProcessingTime]
+      .filter(v => v.avgProcessingHours !== null)
+      .sort((a, b) => b.avgProcessingHours - a.avgProcessingHours)
+      .slice(0, 5);
+
+    const bestFulfillment = [...vendorProcessingTime]
+      .filter(v => v.avgFulfillmentHours !== null)
+      .sort((a, b) => a.avgFulfillmentHours - b.avgFulfillmentHours)
+      .slice(0, 5);
+
+    const worstFulfillment = [...vendorProcessingTime]
+      .filter(v => v.avgFulfillmentHours !== null)
+      .sort((a, b) => b.avgFulfillmentHours - a.avgFulfillmentHours)
+      .slice(0, 5);
+
+    // Monthly comparison with % change
+    const cm = currentMonth[0] || { orderCount: 0, revenue: 0, deliveredCount: 0, returnedCount: 0, uniqueCustomers: 0 };
+    const lm = lastMonth[0] || { orderCount: 0, revenue: 0, deliveredCount: 0, returnedCount: 0, uniqueCustomers: 0 };
+    const pctChange = (curr, prev) => prev > 0 ? Math.round(((curr - prev) / prev) * 100) : curr > 0 ? 100 : 0;
+
+    // Format processing time distribution
+    const processingTimeBuckets = [
+      { label: '< 1h', min: 0, max: 1 },
+      { label: '1-6h', min: 1, max: 6 },
+      { label: '6-24h', min: 6, max: 24 },
+      { label: '1-3d', min: 24, max: 72 },
+      { label: '3-7d', min: 72, max: 168 },
+      { label: '7d+', min: 168, max: 720 }
+    ];
+    const processingTimeDist = processingTimeBuckets.map(bucket => {
+      const found = processingTimeDistribution.find(b => b._id === bucket.min);
+      return { label: bucket.label, count: found?.count || 0 };
+    });
+
+    // Format hourly pattern
+    const hourlyData = Array.from({ length: 24 }, (_, i) => {
+      const entry = hourlyPattern.find(h => h._id === i);
+      return { hour: i, label: `${String(i).padStart(2, '0')}:00`, orders: entry?.orders || 0, revenue: entry?.revenue || 0 };
+    });
+
+    // Format vendor growth trend
+    const vendorGrowth = {};
+    vendorGrowthTrend.forEach(entry => {
+      if (!vendorGrowth[entry.vendor]) vendorGrowth[entry.vendor] = [];
+      vendorGrowth[entry.vendor].push({ year: entry.year, month: entry.month, orders: entry.orders, revenue: entry.revenue });
+    });
+    // Get top 5 vendors by total orders in the period
+    const topVendorNames = Object.entries(vendorGrowth)
+      .map(([vendor, months]) => ({ vendor, total: months.reduce((s, m) => s + m.orders, 0) }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 5)
+      .map(v => v.vendor);
+    const vendorGrowthData = topVendorNames.map(vendor => ({
+      vendor,
+      months: vendorGrowth[vendor] || []
+    }));
+
+    // Customer LTV
+    const customerLTV = customerOrders
+      .sort((a, b) => b.totalSpent - a.totalSpent)
+      .slice(0, 20)
+      .map(c => ({ customer: c._id, orderCount: c.orderCount, totalSpent: Math.round(c.totalSpent) }));
+
+    // Return rate vs processing time scatter data
+    const scatterData = vendorPerformance.map(v => {
+      const pt = vendorProcessingTime.find(p => p.vendor === v.vendor);
+      return {
+        vendor: v.vendor,
+        returnRate: v.returnRate,
+        avgProcessingHours: pt?.avgProcessingHours || null,
+        totalOrders: v.totalOrders,
+        totalRevenue: v.totalRevenue
+      };
+    }).filter(d => d.avgProcessingHours !== null);
+
+    res.json({
+      revenueTrend,
+      vendorPerformance,
+      customerRetention: { totalCustomers, repeatCustomers, newCustomers, repeatRate, avgOrdersPerCustomer },
+      ordersAtRisk,
+      returnAnalysis,
+      monthlyComparison: {
+        current: cm,
+        last: lm,
+        changes: {
+          orders: pctChange(cm.orderCount, lm.orderCount),
+          revenue: pctChange(cm.revenue, lm.revenue),
+          delivered: pctChange(cm.deliveredCount, lm.deliveredCount),
+          returns: pctChange(cm.returnedCount, lm.returnedCount)
+        }
+      },
+      dayOfWeek: dayOfWeekData,
+      paymentMethods,
+      vendorProcessingTime: {
+        bestProcessing: bestVendors,
+        worstProcessing: worstVendors,
+        bestFulfillment,
+        worstFulfillment
+      },
+      processingTimeDistribution: processingTimeDist,
+      hourlyPattern: hourlyData,
+      vendorGrowthTrend: vendorGrowthData,
+      statusFlow,
+      deliveryZones,
+      customerLTV,
+      returnVsProcessing: scatterData
+    });
+  } catch (error) {
+    console.error('Get Nepalcan analytics error:', error);
+    res.status(500).json({ message: 'Failed to fetch analytics data', error: error.message });
+  }
+};
+
+// Get monthly aggregated data for all months
+exports.getMonthlyData = async (req, res) => {
+  try {
+    const monthlyData = await NepalcanOrder.aggregate([
+      {
+        $group: {
+          _id: {
+            year: { $year: '$createdAt' },
+            month: { $month: '$createdAt' }
+          },
+          totalOrders: { $sum: 1 },
+          totalRevenue: { $sum: '$totalAmount' },
+          avgOrderValue: { $avg: '$totalAmount' },
+          deliveredOrders: {
+            $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, 1, 0] }
+          },
+          deliveredRevenue: {
+            $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, '$totalAmount', 0] }
+          },
+          returnedOrders: {
+            $sum: { $cond: [{ $eq: ['$orderStatus', 'Returned'] }, 1, 0] }
+          },
+          returnedRevenue: {
+            $sum: { $cond: [{ $eq: ['$orderStatus', 'Returned'] }, '$totalAmount', 0] }
+          },
+          cancelledOrders: {
+            $sum: { $cond: [{ $eq: ['$orderStatus', 'Cancelled'] }, 1, 0] }
+          },
+          pendingOrders: {
+            $sum: { $cond: [{ $eq: ['$orderStatus', 'Pending'] }, 1, 0] }
+          },
+          processingOrders: {
+            $sum: { $cond: [{ $eq: ['$orderStatus', 'Processing'] }, 1, 0] }
+          },
+          shippedOrders: {
+            $sum: { $cond: [{ $eq: ['$orderStatus', 'Shipped'] }, 1, 0] }
+          },
+          uniqueVendors: { $addToSet: '$vendor' },
+          uniqueCustomers: { $addToSet: '$customer' },
+          uniquePaymentMethods: { $addToSet: { $ifNull: ['$paymentMethod', 'Unknown'] } }
+        }
+      },
+      { $sort: { '_id.year': -1, '_id.month': -1 } },
+      {
+        $project: {
+          _id: 0,
+          year: '$_id.year',
+          month: '$_id.month',
+          totalOrders: 1,
+          totalRevenue: 1,
+          avgOrderValue: { $round: ['$avgOrderValue', 0] },
+          deliveredOrders: 1,
+          deliveredRevenue: 1,
+          returnedOrders: 1,
+          returnedRevenue: 1,
+          cancelledOrders: 1,
+          pendingOrders: 1,
+          processingOrders: 1,
+          shippedOrders: 1,
+          uniqueVendors: { $size: '$uniqueVendors' },
+          uniqueCustomers: { $size: '$uniqueCustomers' },
+          returnRate: {
+            $cond: [
+              { $gt: ['$totalOrders', 0] },
+              { $round: [{ $multiply: [{ $divide: ['$returnedOrders', '$totalOrders'] }, 100] }, 1] },
+              0
+            ]
+          },
+          deliveryRate: {
+            $cond: [
+              { $gt: ['$totalOrders', 0] },
+              { $round: [{ $multiply: [{ $divide: ['$deliveredOrders', '$totalOrders'] }, 100] }, 1] },
+              0
+            ]
+          }
+        }
+      }
+    ]);
+
+    res.json({ months: monthlyData });
+  } catch (error) {
+    console.error('Get monthly data error:', error);
+    res.status(500).json({ message: 'Failed to fetch monthly data', error: error.message });
   }
 };

@@ -24,7 +24,8 @@ exports.createUser = async (req, res) => {
       email: req.body.email,
       password: req.body.password,
       role: req.body.role || 'user',
-      status: req.body.status || 'active'
+      status: req.body.status || 'active',
+      team: req.body.team || null
     });
 
     newUser.password = undefined;
@@ -62,6 +63,7 @@ exports.updateUser = async (req, res) => {
     if (req.body.role) user.role = req.body.role;
     if (req.body.status) user.status = req.body.status;
     if (req.body.password) user.password = req.body.password;
+    if (req.body.team !== undefined) user.team = req.body.team || null;
 
     await user.save();
 

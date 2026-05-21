@@ -17,6 +17,9 @@ const departmentRoutes = require('./routes/departmentRoutes');
 const nepalcanRoutes = require('./routes/nepalcanRoutes');
 const nepalcanOrderRoutes = require('./routes/nepalcanOrderRoutes');
 const pipelineStageRoutes = require('./routes/pipelineStageRoutes');
+const vendorSnapshotRoutes = require('./routes/vendorSnapshotRoutes');
+const deliveryZoneRoutes = require('./routes/deliveryZoneRoutes');
+const extensionRoutes = require('./routes/extensionRoutes');
 
 const app = express();
 
@@ -57,6 +60,25 @@ app.use('/api/v1/departments', departmentRoutes);
 app.use('/api/v1/nepalcan', nepalcanRoutes);
 app.use('/api/v1/nepalcan-orders', nepalcanOrderRoutes);
 app.use('/api/v1/settings/pipeline', pipelineStageRoutes);
+app.use('/api/v1/vendor-snapshots', vendorSnapshotRoutes);
+app.use('/api/v1/delivery-zones', deliveryZoneRoutes);
+app.use('/api/v1/extension', extensionRoutes);
+
+// Vercel cron endpoint — no auth required, protected by CRON_SECRET
+app.get('/api/cron/sync', async (req, res) => {
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret && req.headers.authorization !== `Bearer ${cronSecret}`) {
+    return res.status(401).json({ status: 'fail', message: 'Unauthorized' });
+  }
+  try {
+    const { runFullSync } = require('./services/unifiedSyncService');
+    const log = await runFullSync('cron');
+    res.status(200).json({ status: 'success', data: log });
+  } catch (err) {
+    console.error('[Cron] Full sync failed:', err);
+    res.status(500).json({ status: 'fail', message: err.message });
+  }
+});
 
 // Serve Static Frontend in Production
 if (process.env.NODE_ENV === 'production') {

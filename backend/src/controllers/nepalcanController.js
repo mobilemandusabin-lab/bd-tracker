@@ -4,6 +4,35 @@ const NepalcanSyncLog = require('../models/NepalcanSyncLog');
 
 const NEPLCCAN_API_BASE = 'https://commerce.thecanbrand.com/api';
 
+// Sync all Nepalcan data (orders + vendors) - super admin only
+exports.syncAllNepalcanData = async (req, res) => {
+  try {
+    const { syncAllNepalcanData } = require('../services/nepalcanSyncService');
+    
+    console.log('[Full Sync Controller] Starting full sync...');
+    const result = await syncAllNepalcanData(req.user?._id);
+    console.log('[Full Sync Controller] Complete:', result);
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Full sync completed',
+      data: {
+        success: result.success,
+        orders: result.orders.synced,
+        vendors: result.vendors.synced,
+        durationMs: result.durationMs
+      }
+    });
+  } catch (err) {
+    console.error('[Full Sync Controller] Error:', err);
+    res.status(err.response?.status || 500).json({
+      status: 'fail',
+      message: err.response?.data?.message || err.message || 'Failed to sync all Nepalcan data',
+      error: err.message
+    });
+  }
+};
+
 // Login to Nepalcan.com and get token
 exports.loginToNepalcan = async (req, res) => {
   try {
@@ -222,6 +251,24 @@ exports.fetchVendorsFromNepalcan = async (req, res) => {
       message: err.response?.data?.message || 'Failed to fetch vendors from Nepalcan',
       error: err.message,
       details: err.response?.data
+    });
+  }
+};
+
+// Sync service branches for all vendors
+exports.syncServiceBranches = async (req, res) => {
+  try {
+    const { syncServiceBranches } = require('../services/nepalcanSyncService');
+    const result = await syncServiceBranches();
+    res.status(200).json({
+      status: 'success',
+      data: result
+    });
+  } catch (err) {
+    res.status(500).json({
+      status: 'fail',
+      message: 'Failed to sync service branches',
+      error: err.message
     });
   }
 };

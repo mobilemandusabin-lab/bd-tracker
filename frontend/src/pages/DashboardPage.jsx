@@ -2,25 +2,32 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { useSelector } from 'react-redux';
-import { 
-  Users, 
-  UserCheck, 
-  ClipboardList, 
-  Clock, 
+import {
+  Users,
+  UserCheck,
+  ClipboardList,
+  Clock,
   TrendingUp,
-  AlertCircle,
   ArrowUpRight,
   Target,
-  Trophy,
-  ShoppingBag
+  ShoppingBag,
+  RefreshCw,
+  Calendar,
+  BarChart3,
+  Shield,
+  CheckCircle2,
+  XCircle,
+  ChevronDown,
+  ChevronUp,
+  Loader2
 } from 'lucide-react';
-import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
   ResponsiveContainer,
   Cell,
   PieChart,
@@ -28,34 +35,58 @@ import {
   AreaChart,
   Area
 } from 'recharts';
+import { API_URL } from '../config/api';
 
-const StatCard = ({ title, value, icon: Icon, colorClass, trend }) => (
-  <div className="bg-white p-4 lg:p-6 rounded-2xl lg:rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all group">
-    <div className="flex items-center justify-between mb-2 lg:mb-4">
-      <div className={`p-2 lg:p-3 rounded-xl lg:rounded-2xl ${colorClass} transition-transform group-hover:scale-110`}>
-        <Icon size={20} className="lg:w-6 lg:h-6" />
-      </div>
-      {trend && (
-        <div className="flex flex-col items-end">
-          <span className="text-[8px] lg:text-[10px] font-black text-emerald-600 uppercase tracking-widest flex items-center gap-0.5">
+const CustomTooltip = ({ active, payload, label }) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="bg-slate-900 text-white px-4 py-3 rounded-xl shadow-2xl border border-slate-700">
+      <p className="font-bold text-xs mb-1 uppercase tracking-wider">{label}</p>
+      {payload.map((p, i) => (
+        <p key={i} className="text-xs text-slate-300">
+          <span className="inline-block w-2 h-2 rounded-full mr-2" style={{ background: p.color || p.fill }} />
+          {p.name}: <span className="font-bold text-white">{p.value?.toLocaleString()}</span>
+        </p>
+      ))}
+    </div>
+  );
+};
+
+const StatCard = ({ title, value, icon: Icon, trend, color }) => {
+  const colorMap = {
+    red: { bg: 'bg-red-50', text: 'text-red-600', icon: 'bg-red-600', border: 'border-red-100' },
+    emerald: { bg: 'bg-emerald-50', text: 'text-emerald-600', icon: 'bg-emerald-600', border: 'border-emerald-100' },
+    blue: { bg: 'bg-blue-50', text: 'text-blue-600', icon: 'bg-blue-600', border: 'border-blue-100' },
+    amber: { bg: 'bg-amber-50', text: 'text-amber-600', icon: 'bg-amber-600', border: 'border-amber-100' },
+  };
+  const c = colorMap[color] || colorMap.red;
+
+  return (
+    <div className={`bg-white p-4 lg:p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all duration-200 group`}>
+      <div className="flex items-center justify-between mb-3">
+        <div className={`p-2.5 ${c.icon} rounded-xl shadow-lg group-hover:scale-110 transition-transform duration-200`}>
+          <Icon size={18} className="text-white" />
+        </div>
+        {trend && (
+          <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-0.5">
             <ArrowUpRight size={10} /> {trend}
           </span>
-          <span className="text-[7px] lg:text-[9px] text-slate-400 font-bold">vs last month</span>
-        </div>
-      )}
+        )}
+      </div>
+      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{title}</p>
+      <h3 className="text-2xl lg:text-3xl font-black text-slate-900 mt-1">{value}</h3>
     </div>
-    <div>
-      <p className="text-[10px] lg:text-xs font-black text-slate-400 uppercase tracking-widest">{title}</p>
-      <h3 className="text-xl lg:text-3xl font-black text-slate-900 mt-1">{value}</h3>
-    </div>
-  </div>
-);
-
-import { API_URL } from '../config/api';
+  );
+};
 
 const DashboardPage = () => {
   const [stats, setStats] = useState(null);
-  const { token } = useSelector((state) => state.auth);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
+  const [showSyncLog, setShowSyncLog] = useState(false);
+  const [syncLogs, setSyncLogs] = useState([]);
+  const [loadingLogs, setLoadingLogs] = useState(false);
+  const { token, user } = useSelector((state) => state.auth);
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -71,81 +102,188 @@ const DashboardPage = () => {
     fetchStats();
   }, [token]);
 
+  const handleFullSync = async () => {
+    if (!window.confirm('Run full system sync? This includes Nepalcan orders, vendors, service branches, return checks, and vendor snapshots.')) return;
+
+    setSyncing(true);
+    setSyncResult(null);
+
+    try {
+      const res = await axios.post(`${API_URL}/dashboard/sync-all`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setSyncResult(res.data.data);
+      fetchSyncLogs();
+    } catch (err) {
+      setSyncResult({ success: false, errorMessage: err.response?.data?.message || err.message });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const fetchSyncLogs = async () => {
+    setLoadingLogs(true);
+    try {
+      const res = await axios.get(`${API_URL}/dashboard/sync-logs?limit=5`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setSyncLogs(res.data.data);
+    } catch (err) {
+      console.error('Failed to fetch sync logs:', err);
+    } finally {
+      setLoadingLogs(false);
+    }
+  };
+
   if (!stats) return (
-    <div className="flex flex-col items-center justify-center h-full space-y-4">
-      <div className="w-12 h-12 border-4 border-red-600 border-t-transparent rounded-full animate-spin" />
-      <p className="text-sm font-bold text-slate-500 animate-pulse uppercase tracking-widest">Synchronizing Data...</p>
+    <div className="flex flex-col items-center justify-center h-[60vh] space-y-4">
+      <div className="relative w-16 h-16">
+        <div className="absolute inset-0 border-4 border-red-100 rounded-full" />
+        <div className="absolute inset-0 border-4 border-red-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+      <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Loading Dashboard</p>
     </div>
   );
 
   const RED_GRADIENT = ['#dc2626', '#ef4444', '#f87171', '#fca5a5', '#fecaca', '#fee2e2'];
 
   return (
-    <div className="space-y-6 lg:space-y-10 max-w-[1600px] mx-auto">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 lg:gap-6">
-        <div>
-          <div className="flex items-center gap-2 mb-1 lg:mb-2">
-            <div className="h-1 w-6 lg:w-8 bg-red-600 rounded-full" />
-            <span className="text-[8px] lg:text-[10px] font-black text-red-600 uppercase tracking-[0.2em]">Real-time Intelligence</span>
+    <div className="space-y-6 lg:space-y-8 max-w-[1600px] mx-auto">
+      {/* Hero Header */}
+      <div className="relative overflow-hidden bg-gradient-to-br from-red-600 via-red-700 to-red-800 rounded-2xl lg:rounded-3xl p-6 lg:p-8">
+        <div className="absolute inset-0 hero-pattern opacity-30" />
+        <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2" />
+        <div className="absolute bottom-0 left-0 w-48 h-48 bg-white/5 rounded-full translate-y-1/2 -translate-x-1/2" />
+
+        <div className="relative flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-8 h-1 bg-white/40 rounded-full" />
+              <span className="text-[10px] font-bold text-white/70 uppercase tracking-widest">Real-time Intelligence</span>
+            </div>
+            <h1 className="text-2xl lg:text-4xl font-black text-white tracking-tight">Executive Dashboard</h1>
+            <p className="text-sm text-white/60 mt-1 font-medium">
+              <Calendar size={14} className="inline mr-1" />
+              {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+            </p>
           </div>
-          <h1 className="text-2xl lg:text-4xl font-black text-slate-900 tracking-tight">Executive Dashboard</h1>
-        </div>
-        <div className="flex items-center gap-2 lg:gap-3">
-          <Link 
-            to="/bd-leaderboard" 
-            className="flex-1 lg:flex-none px-3 lg:px-5 py-2 lg:py-2.5 bg-yellow-50 text-yellow-700 border border-yellow-200 rounded-xl text-[10px] lg:text-xs font-black uppercase tracking-widest hover:bg-yellow-100 transition-all flex items-center justify-center gap-2 shadow-sm whitespace-nowrap"
-          >
-            <Trophy size={14} /> <span className="hidden lg:inline">BD Leaderboard</span>
-          </Link>
-          {stats.__userRole === 'super_admin' && (
-            <Link 
-              to="/nepalcan-sales" 
-              className="flex-1 lg:flex-none px-3 lg:px-5 py-2 lg:py-2.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-xl text-[10px] lg:text-xs font-black uppercase tracking-widest hover:bg-blue-100 transition-all flex items-center justify-center gap-2 shadow-sm whitespace-nowrap"
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              to="/analytics"
+              className="flex items-center gap-2 px-4 py-2.5 bg-white/10 backdrop-blur-sm text-white border border-white/20 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-white/20 transition-all"
             >
-              <ShoppingBag size={14} /> <span className="hidden lg:inline">Nepalcan Sales</span>
+              <BarChart3 size={14} /> Analytics
             </Link>
-          )}
-          <button className="flex-1 lg:flex-none px-3 lg:px-5 py-2 lg:py-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl text-[10px] lg:text-xs font-black uppercase tracking-widest hover:bg-slate-50 transition-all flex items-center justify-center gap-2 shadow-sm whitespace-nowrap">
-            <Clock size={14} /> {new Date().toLocaleDateString()}
-          </button>
-          <button className="flex-1 lg:flex-none px-3 lg:px-5 py-2 lg:py-2.5 bg-red-600 text-white rounded-xl text-[10px] lg:text-xs font-black uppercase tracking-widest hover:bg-red-700 transition-all shadow-lg shadow-red-100 flex items-center justify-center gap-2 whitespace-nowrap">
-            <Target size={14} /> Monthly Goals
-          </button>
+            {stats.__userRole === 'super_admin' && (
+              <>
+                <Link
+                  to="/nepalcan-sales"
+                  className="flex items-center gap-2 px-4 py-2.5 bg-white/10 backdrop-blur-sm text-white border border-white/20 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-white/20 transition-all"
+                >
+                  <ShoppingBag size={14} /> Sales
+                </Link>
+                <button
+                  onClick={handleFullSync}
+                  disabled={syncing}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-white text-red-700 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-red-50 transition-all shadow-lg disabled:opacity-50"
+                >
+                  {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                  {syncing ? 'Syncing...' : 'Sync All'}
+                </button>
+                <button
+                  onClick={() => { setShowSyncLog(!showSyncLog); if (!showSyncLog) fetchSyncLogs(); }}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-white/10 backdrop-blur-sm text-white border border-white/20 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-white/20 transition-all"
+                >
+                  {showSyncLog ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  Log
+                </button>
+              </>
+            )}
+          </div>
         </div>
+        {syncResult && (
+          <div className="relative mt-4 px-4 py-3 bg-white/10 backdrop-blur-sm rounded-xl space-y-2">
+            <div className="flex items-center gap-2">
+              {syncResult.success ? <CheckCircle2 size={14} className="text-emerald-300" /> : <XCircle size={14} className="text-red-300" />}
+              <p className="text-xs font-bold text-white">
+                {syncResult.success ? 'Sync completed successfully' : 'Sync completed with errors'}
+                {syncResult.durationMs && ` (${(syncResult.durationMs / 1000).toFixed(1)}s)`}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3 text-[10px] font-bold text-white/80">
+              {syncResult.tasks?.nepalcanOrders?.ran && (
+                <span>Orders: {syncResult.tasks.nepalcanOrders.ordersSynced ?? '-'}</span>
+              )}
+              {syncResult.tasks?.vendorSync?.ran && (
+                <span>Vendors: {syncResult.tasks.vendorSync.vendorsSynced ?? '-'}</span>
+              )}
+              {syncResult.tasks?.returnedCheck?.ran && (
+                <span>Returns: {syncResult.tasks.returnedCheck.ordersUpdated ?? 0}</span>
+              )}
+              {syncResult.tasks?.vendorSnapshots?.ran && (
+                <span>Snapshots: {syncResult.tasks.vendorSnapshots.snapshotsTaken ?? 0}</span>
+              )}
+            </div>
+          </div>
+        )}
+        {showSyncLog && syncLogs.length > 0 && (
+          <div className="relative mt-3 bg-white/10 backdrop-blur-sm rounded-xl overflow-hidden">
+            <div className="px-4 py-2 border-b border-white/10">
+              <p className="text-[10px] font-bold text-white/70 uppercase tracking-wider">Recent Sync History</p>
+            </div>
+            <div className="max-h-48 overflow-y-auto">
+              {syncLogs.map((log, i) => (
+                <div key={log._id || i} className="px-4 py-2 border-b border-white/5 last:border-0 hover:bg-white/5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      {log.success ? <CheckCircle2 size={10} className="text-emerald-300" /> : <XCircle size={10} className="text-red-300" />}
+                      <span className="text-[10px] font-bold text-white">
+                        {log.triggeredBy === 'manual' ? 'Manual' : log.triggeredBy === 'cron' ? 'Scheduled' : 'Startup'}
+                        {log.userId?.name && ` by ${log.userId.name}`}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-white/50">
+                      {new Date(log.createdAt).toLocaleString()} · {(log.durationMs / 1000).toFixed(1)}s
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6">
-        <StatCard title="Total Intelligence" value={stats.summary.totalLeads} icon={Users} colorClass="bg-red-50 text-red-600" trend="12.5%" />
-        <StatCard title="Onboarded Scale" value={stats.summary.activeSellers} icon={UserCheck} colorClass="bg-emerald-50 text-emerald-600" trend="8.2%" />
-        <StatCard title="Field Operations" value={stats.summary.pendingTasks} icon={ClipboardList} colorClass="bg-blue-50 text-blue-600" trend="24.1%" />
-        <StatCard title="Pending Review" value={stats.summary.pendingFollowups} icon={Clock} colorClass="bg-amber-50 text-amber-600" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-5">
+        <StatCard title="Total Leads" value={stats.summary.totalLeads} icon={Users} color="red" trend="12.5%" />
+        <StatCard title="Active Sellers" value={stats.summary.activeSellers} icon={UserCheck} color="emerald" trend="8.2%" />
+        <StatCard title="Pending Tasks" value={stats.summary.pendingTasks} icon={ClipboardList} color="blue" trend="24.1%" />
+        <StatCard title="Pending Follow-ups" value={stats.summary.pendingFollowups} icon={Clock} color="amber" />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className="lg:col-span-8 bg-white p-4 lg:p-8 rounded-2xl lg:rounded-[2.5rem] border border-slate-100 shadow-sm">
-          <div className="flex items-center justify-between mb-6 lg:mb-10">
+      {/* Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        {/* Bar Chart */}
+        <div className="lg:col-span-8 bg-white p-5 lg:p-7 rounded-2xl border border-slate-100 shadow-sm">
+          <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
-              <div className="w-1.5 h-6 bg-red-600 rounded-full" />
-              <h3 className="text-lg lg:text-xl font-black text-slate-900">Intelligence Pipeline Velocity</h3>
+              <div className="w-1 h-6 bg-red-600 rounded-full" />
+              <h3 className="text-base font-black text-slate-900">Lead Pipeline</h3>
             </div>
-            <select className="bg-slate-50 border-none rounded-xl text-[10px] font-black uppercase px-4 py-2 outline-none focus:ring-2 focus:ring-red-100">
+            <select className="bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold px-3 py-2 outline-none focus:ring-2 focus:ring-red-100">
               <option>Last 30 Days</option>
               <option>Last 90 Days</option>
             </select>
           </div>
-          <div className="h-[250px] lg:h-[350px] w-full">
+          <div className="h-[250px] lg:h-[320px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={stats.leadStats}>
+              <BarChart data={stats.leadStats} barSize={36}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="_id" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 800, fill: '#64748b'}} dy={10} />
-                <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 800, fill: '#64748b'}} />
-                <Tooltip 
-                  cursor={{fill: '#f8fafc'}}
-                  contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '12px'}}
-                  labelStyle={{fontWeight: 900, marginBottom: '4px', color: '#0f172a', fontSize: '10px', textTransform: 'uppercase'}}
-                />
-                <Bar dataKey="count" radius={[8, 8, 0, 0]} barSize={40}>
+                <XAxis dataKey="_id" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 700, fill: '#64748b'}} dy={8} />
+                <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 700, fill: '#64748b'}} />
+                <Tooltip content={<CustomTooltip />} cursor={{fill: 'rgba(220,38,38,0.04)'}} />
+                <Bar dataKey="count" name="Leads" radius={[8, 8, 0, 0]}>
                   {stats.leadStats.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={RED_GRADIENT[index % RED_GRADIENT.length]} />
                   ))}
@@ -155,19 +293,20 @@ const DashboardPage = () => {
           </div>
         </div>
 
-        <div className="lg:col-span-4 bg-slate-900 p-4 lg:p-8 rounded-2xl lg:rounded-[2.5rem] shadow-2xl shadow-slate-200">
-          <div className="flex items-center gap-3 mb-6 lg:mb-10">
-            <div className="w-1.5 h-6 bg-red-600 rounded-full" />
-            <h3 className="text-lg lg:text-xl font-black text-white">Segment Distribution</h3>
+        {/* Pie Chart */}
+        <div className="lg:col-span-4 bg-white p-5 lg:p-7 rounded-2xl border border-slate-100 shadow-sm">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-1 h-6 bg-red-600 rounded-full" />
+            <h3 className="text-base font-black text-slate-900">Segments</h3>
           </div>
-          <div className="h-[250px] lg:h-[300px] w-full">
+          <div className="h-[200px] lg:h-[240px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
                   data={stats.onboardingStats}
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={8}
+                  innerRadius={55}
+                  outerRadius={75}
+                  paddingAngle={6}
                   dataKey="count"
                   nameKey="_id"
                 >
@@ -175,20 +314,18 @@ const DashboardPage = () => {
                     <Cell key={`cell-${index}`} fill={RED_GRADIENT[index % RED_GRADIENT.length]} />
                   ))}
                 </Pie>
-                <Tooltip 
-                  contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '12px'}}
-                />
+                <Tooltip content={<CustomTooltip />} />
               </PieChart>
             </ResponsiveContainer>
           </div>
-          <div className="mt-6 lg:mt-8 space-y-3">
-            {stats.onboardingStats.slice(0, 4).map((cat, idx) => (
+          <div className="mt-4 space-y-2.5">
+            {stats.onboardingStats.slice(0, 5).map((cat, idx) => (
               <div key={cat._id} className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full" style={{backgroundColor: RED_GRADIENT[idx % RED_GRADIENT.length]}} />
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{cat._id}</span>
+                  <div className="w-2.5 h-2.5 rounded-full" style={{backgroundColor: RED_GRADIENT[idx % RED_GRADIENT.length]}} />
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{cat._id}</span>
                 </div>
-                <span className="text-xs font-black text-white">{cat.count}</span>
+                <span className="text-xs font-black text-slate-900">{cat.count}</span>
               </div>
             ))}
           </div>

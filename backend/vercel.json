@@ -8,8 +8,18 @@
   ],
   "routes": [
     {
+      "src": "/api/cron/sync",
+      "dest": "src/server.js"
+    },
+    {
       "src": "/(.*)",
       "dest": "src/server.js"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/sync",
+      "schedule": "0 */2 * * *"
     }
   ]
 }

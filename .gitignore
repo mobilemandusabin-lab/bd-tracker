@@ -1,0 +1,5 @@
+.kilo/
+node_modules/
+.env
+.env.local
+CODEBASE_REFERENCE.md

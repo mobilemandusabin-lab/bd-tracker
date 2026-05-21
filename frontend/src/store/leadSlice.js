@@ -58,7 +58,9 @@ const leadSlice = createSlice({
     error: null,
     pagination: null,
     currentPage: 1,
-    hasMore: true
+    hasMore: true,
+    totalRevenue: 0,
+    totalOrders: 0
   },
   reducers: {
     resetLeads: (state) => {
@@ -66,6 +68,8 @@ const leadSlice = createSlice({
       state.currentPage = 1;
       state.hasMore = true;
       state.pagination = null;
+      state.totalRevenue = 0;
+      state.totalOrders = 0;
     }
   },
   extraReducers: (builder) => {
@@ -136,13 +140,17 @@ const leadSlice = createSlice({
         state.loadingMore = false;
         const newSellers = action.payload.data.leads;
         const pagination = action.payload.pagination;
-        
+
         if (pagination && pagination.page > 1) {
           state.items = [...state.items, ...newSellers];
         } else {
           state.items = newSellers;
         }
-        
+
+        // Store totals from API (fresh from NepalcanOrder aggregation)
+        state.totalRevenue = action.payload.data.totalRevenue || 0;
+        state.totalOrders = action.payload.data.totalOrders || 0;
+
         state.currentPage = pagination ? pagination.page : 1;
         if (pagination && pagination.totalPages) {
           state.hasMore = pagination.page < pagination.totalPages;

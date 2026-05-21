@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const nepalcanSyncLogSchema = new mongoose.Schema({
   type: {
     type: String,
-    enum: ['orders', 'vendors'],
+    enum: ['orders', 'vendors', 'full'],
     default: 'orders'
   },
   success: {

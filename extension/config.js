@@ -1,0 +1,30 @@
+// BD Tracker API Configuration
+const CONFIG = {
+  API_BASE_URL: 'https://bd-tracker-81oo.vercel.app/api/v1',
+  HEARTBEAT_INTERVAL: 5 * 60 * 1000, // 5 minutes
+  VERSION_CHECK_INTERVAL: 60 * 60 * 1000, // 1 hour
+  API_PATTERNS: {
+    LISTING: {
+      method: 'POST',
+      pattern: '/api/vendor/products',
+      event_type: 'listing_created'
+    },
+    PRODUCT_UPDATE: {
+      method: 'PUT',
+      pattern: '/api/vendor/products/',
+      event_type: 'product_updated'
+    },
+    QC_APPROVE: {
+      method: 'POST',
+      pattern: '/api/quality-check/products/',
+      suffix: '/approve',
+      event_type: 'qc_approved'
+    },
+    QC_REJECT: {
+      method: 'POST',
+      pattern: '/api/quality-check/products/',
+      suffix: '/reject',
+      event_type: 'qc_rejected'
+    }
+  }
+};

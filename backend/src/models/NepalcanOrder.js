@@ -4,7 +4,7 @@ const statusHistorySchema = new mongoose.Schema({
   status: {
     type: String,
     required: true,
-    enum: ['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled']
+    enum: ['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled', 'Returned']
   },
   timestamp: {
     type: Date,
@@ -47,7 +47,7 @@ const nepalcanOrderSchema = new mongoose.Schema({
   },
   orderStatus: {
     type: String,
-    enum: ['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'],
+    enum: ['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled', 'Returned'],
     default: 'Pending'
   },
   paymentStatus: {
@@ -81,6 +81,11 @@ const nepalcanOrderSchema = new mongoose.Schema({
   lastSyncedAt: {
     type: Date,
     default: Date.now
+  },
+  // Pre-computed total processing duration in hours (first status to last status)
+  processingDurationHours: {
+    type: Number,
+    default: null
   }
 }, {
   timestamps: true

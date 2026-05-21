@@ -25,4 +25,10 @@ router.post('/fetch-vendors', nepalcanController.fetchVendorsFromNepalcan);
 // Get vendor sync logs
 router.get('/vendor-sync-logs', nepalcanController.getVendorSyncLogs);
 
+// Full sync - sync both orders and vendors
+router.post('/sync-all', nepalcanController.syncAllNepalcanData);
+
+// Sync service branches for all vendors
+router.post('/sync-service-branches', nepalcanController.syncServiceBranches);
+
 module.exports = router;

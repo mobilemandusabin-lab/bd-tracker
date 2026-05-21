@@ -308,6 +308,20 @@ exports.getTodayFollowups = async (req, res) => {
       }
     }
 
+    // Filter by lead type if requested (e.g., ?type=vendor)
+    const { type } = req.query;
+    if (type && ['lead', 'vendor'].includes(type)) {
+      const typeLeads = await Lead.find({ type }).select('_id');
+      const typeLeadIds = typeLeads.map(l => l._id);
+      if (query.lead_id) {
+        // Intersect with existing lead_id filter
+        const existingIds = query.lead_id.$in || [];
+        query.lead_id = { $in: existingIds.filter(id => typeLeadIds.some(tid => tid.equals(id))) };
+      } else {
+        query.lead_id = { $in: typeLeadIds };
+      }
+    }
+
     const activities = await Activity.find(query)
       .populate({
         path: 'lead_id',

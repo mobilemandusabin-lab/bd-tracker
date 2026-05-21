@@ -1,33 +1,35 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Plus, Search, X, ExternalLink, MoreVertical, MapPin, Briefcase, Phone, MessageCircle, RefreshCw, History, ShieldCheck, AlertCircle } from 'lucide-react';
+import axios from 'axios';
+import { Plus, Search, X, ExternalLink, MoreVertical, MapPin, Phone, MessageCircle, RefreshCw, History, ShieldCheck, AlertCircle, Store, Clock, CheckCircle, CalendarCheck, UserMinus } from 'lucide-react';
 import { fetchVendors, resetVendors } from '../store/vendorSlice';
+import { fetchActiveSellers } from '../store/leadSlice';
 import VendorModal from '../components/VendorModal';
 import VendorDetailModal from '../components/VendorDetailModal';
 import LeadActionModal from '../components/LeadActionModal';
 import { cn } from '../utils/cn';
+import { API_URL } from '../config/api';
 
 const StatusBadge = ({ status }) => {
   const getColors = (s) => {
     switch(s) {
-      case 'New': return 'bg-blue-50 text-blue-600 border-blue-100';
-      case 'Contacted': return 'bg-indigo-50 text-indigo-600 border-indigo-100';
-      case 'Interested': return 'bg-emerald-50 text-emerald-600 border-indigo-100';
-      case 'Meeting Scheduled': return 'bg-amber-50 text-amber-600 border-amber-100';
-      case 'Negotiation': return 'bg-orange-50 text-orange-600 border-orange-100';
-      case 'Document Pending': return 'bg-amber-50 text-amber-600 border-amber-100';
+      case 'New': return 'bg-blue-50 text-blue-700 border-blue-200';
+      case 'Contacted': return 'bg-indigo-50 text-indigo-700 border-indigo-200';
+      case 'Interested': return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+      case 'Meeting Scheduled': return 'bg-amber-50 text-amber-700 border-amber-200';
+      case 'Negotiation': return 'bg-orange-50 text-orange-700 border-orange-200';
+      case 'Document Pending': return 'bg-amber-50 text-amber-700 border-amber-200';
       case 'Activated': return 'bg-red-600 text-white border-red-700';
-      case 'Self Registered': return 'bg-purple-50 text-purple-600 border-purple-100';
+      case 'Self Registered': return 'bg-purple-50 text-purple-700 border-purple-200';
       case 'Active Seller': return 'bg-emerald-600 text-white border-emerald-700';
       case 'Lost': return 'bg-slate-600 text-white border-slate-700';
-      case 'Verification': return 'bg-purple-50 text-purple-600 border-purple-100';
-      case 'Onboarding': return 'bg-blue-50 text-blue-600 border-blue-100';
-      default: return 'bg-slate-50 text-slate-600 border-slate-100';
+      case 'Verification': return 'bg-purple-50 text-purple-700 border-purple-200';
+      case 'Onboarding': return 'bg-blue-50 text-blue-700 border-blue-200';
+      default: return 'bg-slate-50 text-slate-600 border-slate-200';
     }
   };
-
   return (
-    <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border ${getColors(status)}`}>
+    <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border ${getColors(status)}`}>
       {status}
     </span>
   );
@@ -36,6 +38,7 @@ const StatusBadge = ({ status }) => {
 const VendorManagementPage = () => {
   const dispatch = useDispatch();
   const { items: allVendors, loading, loadingMore: reduxLoadingMore, hasMore, currentPage, pagination } = useSelector((state) => state.vendors);
+  const { items: activeSellerItems, loading: activeSellersLoading, pagination: activeSellersPagination } = useSelector((state) => state.leads);
   const { token, user } = useSelector((state) => state.auth);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -44,58 +47,124 @@ const VendorManagementPage = () => {
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [isActionModalOpen, setIsActionModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('all');
-  const [pipelineFilter, setPipelineFilter] = useState('all');
   const [sortOption, setSortOption] = useState('newest');
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
   const [syncHistory, setSyncHistory] = useState([]);
   const [showSyncHistory, setShowSyncHistory] = useState(false);
+  const [todayFollowups, setTodayFollowups] = useState([]);
+  const [followupLoading, setFollowupLoading] = useState(false);
   const vendorsContainerRef = useRef(null);
+  const desktopSentinelRef = useRef(null);
+  const mobileSentinelRef = useRef(null);
+
+  // Build API params based on active tab
+  const buildParams = useCallback((page = 1, limit = 25) => {
+    const params = { page, limit, type: 'vendor' };
+    if (searchQuery) params.search = searchQuery;
+
+    switch (activeTab) {
+      case 'verified':
+        params.verification_status = 'verified';
+        break;
+      case 'pending':
+        params.verification_status = 'pending';
+        break;
+      case 'lost':
+        params.lead_status = 'Lost';
+        break;
+      case 'unassigned':
+        params.unassigned = 'true';
+        break;
+      case 'all':
+      default:
+        break;
+    }
+    return params;
+  }, [activeTab, searchQuery]);
 
   const refetchVendors = useCallback(() => {
-    const limit = 25;
-    const params = { page: 1, limit, type: 'vendor' };
-    if (searchQuery) {
-      params.search = searchQuery;
+    dispatch(resetVendors());
+    if (activeTab === 'active') {
+      dispatch(fetchActiveSellers({ page: 1, limit: 25, search: searchQuery }));
+    } else {
+      dispatch(fetchVendors(buildParams(1, 25)));
     }
-    if (pipelineFilter !== 'all') {
-      params.lead_status = pipelineFilter;
-    }
-    dispatch(fetchVendors(params));
-  }, [dispatch, searchQuery, pipelineFilter]);
+  }, [dispatch, activeTab, buildParams, searchQuery]);
 
+  // Refetch when tab changes
   useEffect(() => {
     setSearchTerm('');
     setSearchQuery('');
     dispatch(resetVendors());
+    if (activeTab === 'active') {
+      dispatch(fetchActiveSellers({ page: 1, limit: 25 }));
+    } else {
+      dispatch(fetchVendors(buildParams(1, 25)));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, dispatch]);
 
-  useEffect(() => {
-    refetchVendors();
-  }, [refetchVendors]);
-
   const handleSearch = useCallback(() => {
-    dispatch(resetVendors());
     setSearchQuery(searchTerm);
-  }, [dispatch, searchTerm]);
+    dispatch(resetVendors());
+    if (activeTab === 'active') {
+      dispatch(fetchActiveSellers({ page: 1, limit: 25, search: searchTerm }));
+    } else {
+      const params = buildParams(1, 25);
+      if (searchTerm) params.search = searchTerm;
+      dispatch(fetchVendors(params));
+    }
+  }, [dispatch, searchTerm, buildParams, activeTab]);
 
   const handleClearSearch = useCallback(() => {
     setSearchTerm('');
     setSearchQuery('');
     dispatch(resetVendors());
-  }, [dispatch]);
+    if (activeTab === 'active') {
+      dispatch(fetchActiveSellers({ page: 1, limit: 25 }));
+    } else {
+      dispatch(fetchVendors(buildParams(1, 25)));
+    }
+  }, [dispatch, buildParams, activeTab]);
+
+  // Fetch today's vendor follow-ups
+  const fetchTodayFollowups = useCallback(async () => {
+    if (!user || !token) return;
+    setFollowupLoading(true);
+    try {
+      const params = user.role === 'super_admin' ? { type: 'vendor' } : { userId: user._id, type: 'vendor' };
+      const res = await axios.get(`${API_URL}/activities/today`, {
+        params,
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setTodayFollowups(res.data.data?.followUps || []);
+    } catch (err) {
+      console.error('Error fetching vendor followups:', err);
+    } finally {
+      setFollowupLoading(false);
+    }
+  }, [token, user]);
+
+  useEffect(() => {
+    if (user && token && activeTab === 'followup') {
+      fetchTodayFollowups();
+    }
+  }, [activeTab, fetchTodayFollowups, user, token]);
+
+  // Check if a vendor has upcoming follow-ups
+  const hasUpcomingFollowup = useCallback((vendorId) => {
+    return todayFollowups.some(f => f._id === vendorId);
+  }, [todayFollowups]);
 
   const handleSync = async () => {
     try {
       setSyncing(true);
       setSyncResult(null);
-      const API_BASE = import.meta.env.VITE_API_URL || 'http://192.168.25.149:5000/api/v1';
+      const API_BASE = import.meta.env.VITE_API_URL || '/api/v1';
       const res = await fetch(`${API_BASE}/nepalcan/sync-vendors-manual`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        }
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
       });
       const json = await res.json();
       if (json.status === 'success') {
@@ -114,586 +183,437 @@ const VendorManagementPage = () => {
 
   const fetchSyncHistory = async () => {
     try {
-      const API_BASE = import.meta.env.VITE_API_URL || 'http://192.168.25.149:5000/api/v1';
-      const res = await fetch(`${API_BASE}/nepalcan/vendor-sync-logs`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const API_BASE = import.meta.env.VITE_API_URL || '/api/v1';
+      const res = await fetch(`${API_BASE}/nepalcan/vendor-sync-logs`, { headers: { 'Authorization': `Bearer ${token}` } });
       const json = await res.json();
-      if (json.status === 'success') {
-        setSyncHistory(json.data.logs);
-      }
-    } catch (err) {
-      console.error('Failed to fetch sync history:', err);
-    }
+      if (json.status === 'success') setSyncHistory(json.data.logs);
+    } catch (err) { console.error('Failed to fetch sync history:', err); }
   };
-
-  useEffect(() => {
-    if (searchQuery) {
-      refetchVendors();
-    }
-  }, [searchQuery, refetchVendors]);
 
   const loadMoreVendors = useCallback(() => {
     if (reduxLoadingMore || !hasMore) return;
-
-    const limit = 25;
-    let params = { page: currentPage + 1, limit, type: 'vendor' };
-    if (searchQuery) {
-      params.search = searchQuery;
+    if (activeTab === 'active') {
+      dispatch(fetchActiveSellers({ page: currentPage + 1, limit: 25, search: searchQuery }));
+    } else {
+      dispatch(fetchVendors(buildParams(currentPage + 1, 25)));
     }
-    if (pipelineFilter !== 'all') {
-      params.lead_status = pipelineFilter;
-    }
-    dispatch(fetchVendors(params));
-  }, [reduxLoadingMore, hasMore, currentPage, dispatch, searchQuery, pipelineFilter]);
+  }, [reduxLoadingMore, hasMore, currentPage, dispatch, buildParams, activeTab, searchQuery]);
 
+  // Use correct data source based on active tab
+  const displayVendors = activeTab === 'active' ? activeSellerItems : allVendors;
+  const isLoading = activeTab === 'active' ? activeSellersLoading : loading;
+
+  // Infinite scroll — two observers: desktop (overflow container) + mobile (viewport)
   useEffect(() => {
-    if (activeTab === 'all') {
-      let ticking = false;
-
-      const handleScroll = () => {
-        if (ticking) return;
-        ticking = true;
-
-        requestAnimationFrame(() => {
-          if (loading || reduxLoadingMore || !hasMore) {
-            ticking = false;
-            return;
-          }
-
-          const scrollTop = window.scrollY || document.documentElement.scrollTop;
-          const scrollHeight = Math.max(
-            document.documentElement.scrollHeight,
-            document.body.scrollHeight,
-            document.documentElement.offsetHeight,
-            document.body.offsetHeight
-          );
-          const clientHeight = Math.min(window.innerHeight, screen.height);
-
-          if (scrollHeight - scrollTop - clientHeight < 300) {
-            loadMoreVendors();
-          }
-          ticking = false;
-        });
-      };
-
-      const container = vendorsContainerRef.current;
-      const desktopScrollHandler = (e) => {
-        if (loading || reduxLoadingMore || !hasMore) return;
-
-        const scrollTop = e.currentTarget.scrollTop;
-        const scrollHeight = e.currentTarget.scrollHeight;
-        const clientHeight = e.currentTarget.clientHeight;
-
-        if (scrollHeight - scrollTop - clientHeight < 100) {
-          loadMoreVendors();
-        }
-      };
-
-      window.addEventListener('scroll', handleScroll, { passive: true });
-      if (container) {
-        container.addEventListener('scroll', desktopScrollHandler);
-      }
-
-      return () => {
-        window.removeEventListener('scroll', handleScroll);
-        if (container) {
-          container.removeEventListener('scroll', desktopScrollHandler);
-        }
-      };
+    const trigger = () => { if (!isLoading && !reduxLoadingMore && hasMore) loadMoreVendors(); };
+    const observers = [];
+    const desktopSentinel = desktopSentinelRef.current;
+    const mobileSentinel = mobileSentinelRef.current;
+    const scrollContainer = vendorsContainerRef.current;
+    if (desktopSentinel && scrollContainer) {
+      const obs = new IntersectionObserver((entries) => { if (entries[0].isIntersecting) trigger(); }, { root: scrollContainer, rootMargin: '200px' });
+      obs.observe(desktopSentinel);
+      observers.push(obs);
     }
-  }, [activeTab, loading, reduxLoadingMore, hasMore, loadMoreVendors]);
-
-  const handleDetail = (vendor) => {
-    setSelectedVendor(vendor);
-    setIsDetailModalOpen(true);
-  };
-
-  const handleAction = (vendor) => {
-    setSelectedVendor(vendor);
-    setIsActionModalOpen(true);
-  };
-
-  const filteredVendors = allVendors.filter(vendor => {
-    const matchesPipeline = pipelineFilter === 'all' || vendor.lead_status === pipelineFilter;
-    const matchesTab = activeTab === 'all' ||
-      (activeTab === 'verified' && vendor.verification_status === 'verified') ||
-      (activeTab === 'pending' && vendor.lead_status === 'Negotiation') ||
-      (activeTab === 'lost' && vendor.lead_status === 'Lost');
-    return matchesPipeline && matchesTab;
-  }).sort((a, b) => {
-    if (sortOption === 'newest') {
-      return new Date(b.created_at) - new Date(a.created_at);
-    } else if (sortOption === 'oldest') {
-      return new Date(a.created_at) - new Date(b.created_at);
+    if (mobileSentinel) {
+      const obs = new IntersectionObserver((entries) => { if (entries[0].isIntersecting) trigger(); }, { root: null, rootMargin: '200px' });
+      obs.observe(mobileSentinel);
+      observers.push(obs);
     }
+    return () => observers.forEach(o => o.disconnect());
+  }, [isLoading, reduxLoadingMore, hasMore, loadMoreVendors]);
+
+  const handleDetail = async (vendor) => {
+    // If this is a follow-up item (enriched), fetch the full vendor
+    if (vendor.activity_id && !vendor.business_name?.includes(vendor.lead_status)) {
+      try {
+        const API_BASE = import.meta.env.VITE_API_URL || '/api/v1';
+        const res = await fetch(`${API_BASE}/leads/${vendor._id}`, { headers: { 'Authorization': `Bearer ${token}` } });
+        const json = await res.json();
+        if (json.data?.lead) {
+          setSelectedVendor(json.data.lead);
+          setIsDetailModalOpen(true);
+          return;
+        }
+      } catch (err) { /* fall through */ }
+    }
+    setSelectedVendor(vendor); setIsDetailModalOpen(true);
+  };
+  const handleAction = (vendor) => { setSelectedVendor(vendor); setIsActionModalOpen(true); };
+
+  // Sort client-side (server returns sorted by created_at desc)
+  const sortedVendors = [...displayVendors].sort((a, b) => {
+    if (sortOption === 'newest') return new Date(b.created_at) - new Date(a.created_at);
+    if (sortOption === 'oldest') return new Date(a.created_at) - new Date(b.created_at);
     return 0;
   });
 
+  const tabs = [
+    { key: 'all', label: 'All Vendors' },
+    { key: 'unassigned', label: 'Unassigned', icon: <UserMinus size={13} /> },
+    { key: 'verified', label: 'Verified', icon: <ShieldCheck size={13} /> },
+    { key: 'pending', label: 'Pending', icon: <AlertCircle size={13} /> },
+    { key: 'active', label: 'Active Sellers', icon: <Store size={13} /> },
+    { key: 'followup', label: 'Follow-ups', icon: <Clock size={13} /> },
+    { key: 'lost', label: 'Lost', icon: <X size={13} /> },
+  ];
+
+  // Filter and map follow-ups for display
+  const filteredFollowups = (todayFollowups || []).map(f => ({
+    ...f,
+    display_business_name: f.business_name || 'Unknown Enterprise',
+    display_location: f.location || 'N/A',
+    display_contact_person: f.contact_person || 'N/A',
+    display_phone: f.phone || 'N/A',
+    display_message: f.message || f.description || 'No notes available',
+    display_category: f.category || 'N/A',
+    display_status: f.lead_status || 'New',
+    display_manager_name: f.manager?.name || 'Unassigned',
+    display_time: f.scheduled_time || f.follow_up_time,
+    display_scheduled_for: f.scheduled_for || f.follow_up_date,
+    display_activity_id: f.activity_id || f._id
+  })).filter(f =>
+    !searchTerm ||
+    (f.display_business_name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+    (f.display_contact_person?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+    (f.display_phone?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+    (f.display_message?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+    (f.display_category?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+    (f.display_manager_name?.toLowerCase() || '').includes(searchTerm.toLowerCase())
+  );
+
   return (
-    <div className="space-y-4 lg:space-y-8 max-w-[1600px] mx-auto">
-      <VendorModal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        onSuccess={refetchVendors}
-        token={token}
-      />
-<VendorDetailModal
-         isOpen={isDetailModalOpen}
-         onClose={() => { setIsDetailModalOpen(false); setSelectedVendor(null); }}
-         vendor={selectedVendor}
-         token={token}
-         user={user}
-         onSuccess={refetchVendors}
-       />
-        <LeadActionModal
-          isOpen={isActionModalOpen}
-          onClose={() => { setIsActionModalOpen(false); setSelectedVendor(null); }}
-          lead={selectedVendor}
-          token={token}
-          onSuccess={refetchVendors}
-        />
+    <div className="space-y-4 lg:space-y-6 max-w-[1600px] mx-auto">
+      <VendorModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSuccess={refetchVendors} token={token} />
+      <VendorDetailModal isOpen={isDetailModalOpen} onClose={() => { setIsDetailModalOpen(false); setSelectedVendor(null); }} vendor={selectedVendor} token={token} user={user} onSuccess={refetchVendors} />
+      <LeadActionModal isOpen={isActionModalOpen} onClose={() => { setIsActionModalOpen(false); setSelectedVendor(null); }} lead={selectedVendor} token={token} onSuccess={refetchVendors} />
 
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 lg:gap-6">
-        <div>
-          <div className="flex items-center gap-2 mb-1 lg:mb-2">
-            <div className="h-1 w-6 lg:w-8 bg-red-600 rounded-full" />
-            <span className="text-[8px] lg:text-[10px] font-black text-red-600 uppercase tracking-[0.2em]">Vendor Management</span>
-          </div>
-          <h1 className="text-2xl lg:text-4xl font-black text-slate-900 tracking-tight">Vendor Repository</h1>
-        </div>
-<button
-           onClick={() => setIsModalOpen(true)}
-           className="flex items-center justify-center gap-2 px-6 lg:px-8 py-3 lg:py-4 bg-red-600 hover:bg-red-700 text-white rounded-xl lg:rounded-2xl font-black text-[10px] lg:text-xs uppercase tracking-widest shadow-xl shadow-red-100 transition-all active:scale-95 w-full sm:w-auto"
-         >
-           <Plus size={18} />
-           <span>Add New Vendor</span>
-         </button>
-<button
-            onClick={handleSync}
-            disabled={syncing}
-            className="flex items-center justify-center gap-2 px-6 lg:px-8 py-3 lg:py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl lg:rounded-2xl font-black text-[10px] lg:text-xs uppercase tracking-widest shadow-xl shadow-blue-100 transition-all active:scale-95 w-full sm:w-auto disabled:opacity-50"
-          >
-            <RefreshCw size={18} className={syncing ? 'animate-spin' : ''} />
-            <span>{syncing ? 'Syncing...' : 'Sync from Nepalcan'}</span>
-          </button>
-          <button
-            onClick={() => { fetchSyncHistory(); setShowSyncHistory(true); }}
-            className="flex items-center justify-center gap-2 px-4 lg:px-6 py-2 lg:py-3 bg-white hover:bg-slate-50 text-slate-700 rounded-xl lg:rounded-2xl font-black text-[9px] lg:text-[10px] uppercase tracking-widest border border-slate-200 shadow-sm transition-all"
-          >
-            <History size={14} />
-            <span>Sync History</span>
-          </button>
-          {syncResult && (
-            <div className={cn(
-              "px-3 py-2 rounded-lg text-xs font-bold",
-              syncResult.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-            )}>
-              {syncResult.type === 'success' 
-                ? `Synced: ${syncResult.created} created, ${syncResult.updated} updated`
-                : `Error: ${syncResult.message}`
-              }
+      {/* Hero Header */}
+      <div className="relative overflow-hidden bg-gradient-to-br from-red-600 to-red-800 rounded-2xl p-6 lg:p-8">
+        <div className="absolute inset-0 hero-pattern opacity-30" />
+        <div className="absolute -top-10 -right-10 w-40 h-40 bg-white/10 rounded-full blur-2xl" />
+        <div className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <div className="h-1 w-6 bg-white/60 rounded-full" />
+              <span className="text-[10px] font-bold text-white/80 uppercase tracking-widest">Vendor Management</span>
             </div>
-          )}
-      </div>
-
-{/* Tabs and Filters */}
-       <div className="space-y-4">
-         <div className="flex items-center gap-2 lg:gap-4 border-b border-slate-100 pb-px overflow-x-auto no-scrollbar">
-           <button
-             onClick={() => setActiveTab('all')}
-             className={cn(
-               "px-4 lg:px-6 py-3 text-[10px] lg:text-xs font-black uppercase tracking-widest transition-all relative whitespace-nowrap",
-               activeTab === 'all' ? "text-red-600" : "text-slate-400 hover:text-slate-600"
-             )}
-           >
-             All Vendors
-             {activeTab === 'all' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-red-600 rounded-t-full" />}
-           </button>
-           <button
-             onClick={() => setActiveTab('verified')}
-             className={cn(
-               "px-4 lg:px-6 py-3 text-[10px] lg:text-xs font-black uppercase tracking-widest transition-all relative whitespace-nowrap",
-               activeTab === 'verified' ? "text-red-600" : "text-slate-400 hover:text-slate-600"
-             )}
-           >
-             <ShieldCheck size={14} className="inline mr-1" />
-             Verified
-             {activeTab === 'verified' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-red-600 rounded-t-full" />}
-           </button>
-           <button
-             onClick={() => setActiveTab('pending')}
-             className={cn(
-               "px-4 lg:px-6 py-3 text-[10px] lg:text-xs font-black uppercase tracking-widest transition-all relative whitespace-nowrap",
-               activeTab === 'pending' ? "text-red-600" : "text-slate-400 hover:text-slate-600"
-             )}
-           >
-             <AlertCircle size={14} className="inline mr-1" />
-             Pending
-             {activeTab === 'pending' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-red-600 rounded-t-full" />}
-           </button>
-           <button
-             onClick={() => setActiveTab('lost')}
-             className={cn(
-               "px-4 lg:px-6 py-3 text-[10px] lg:text-xs font-black uppercase tracking-widest transition-all relative whitespace-nowrap",
-               activeTab === 'lost' ? "text-red-600" : "text-slate-400 hover:text-slate-600"
-             )}
-           >
-             <X size={14} className="inline mr-1" />
-             Lost
-             {activeTab === 'lost' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-red-600 rounded-t-full" />}
-           </button>
-         </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-3 lg:gap-4">
-          <div className="md:col-span-12 lg:col-span-6 relative group">
-            <Search className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-red-600 transition-colors" size={16} />
-            <input
-              type="text"
-              placeholder="Search by business name, contact, phone or email..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-              className="w-full pl-10 sm:pl-12 pr-24 py-2.5 sm:py-3 lg:py-4 bg-white border border-slate-200 rounded-xl lg:rounded-2xl focus:ring-2 focus:ring-red-600 focus:border-transparent outline-none transition-all font-bold text-xs sm:text-sm text-slate-800 shadow-sm"
-            />
-            {searchTerm && (
-              <button
-                onClick={handleClearSearch}
-                className="absolute right-24 top-1/2 -translate-y-1/2 p-0.5 sm:p-1 text-slate-400 hover:text-red-600 transition-colors"
-                title="Clear search"
-              >
-                <X size={14} className="sm:w-4 sm:h-4" />
-              </button>
-            )}
-            <button
-              onClick={handleSearch}
-              disabled={loading}
-              className="absolute right-1.5 sm:right-2 top-1/2 -translate-y-1/2 px-3 sm:px-4 py-1 sm:py-1.5 bg-red-600 text-white rounded-lg font-black text-[9px] sm:text-[10px] uppercase tracking-widest hover:bg-red-700 transition-all disabled:opacity-50"
-            >
-              Search
+            <h1 className="text-2xl lg:text-3xl font-black text-white tracking-tight">Vendor Repository</h1>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2 px-5 py-2.5 bg-white text-red-700 rounded-xl font-bold text-xs uppercase tracking-wider hover:bg-red-50 transition-all shadow-lg">
+              <Plus size={16} /> Add Vendor
+            </button>
+            <button onClick={handleSync} disabled={syncing} className="flex items-center gap-2 px-5 py-2.5 bg-white/15 text-white border border-white/25 rounded-xl font-bold text-xs uppercase tracking-wider hover:bg-white/25 transition-all disabled:opacity-50 backdrop-blur-sm">
+              <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} /> {syncing ? 'Syncing...' : 'Sync Nepalcan'}
+            </button>
+            <button onClick={() => { fetchSyncHistory(); setShowSyncHistory(true); }} className="flex items-center gap-2 px-4 py-2.5 bg-white/10 text-white/90 border border-white/20 rounded-xl font-bold text-[10px] uppercase tracking-wider hover:bg-white/20 transition-all backdrop-blur-sm">
+              <History size={14} /> History
             </button>
           </div>
-          <div className="md:col-span-12 lg:col-span-6">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">Pipeline</label>
-                <select
-                  value={pipelineFilter}
-                  onChange={(e) => setPipelineFilter(e.target.value)}
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-red-600 font-bold text-sm"
-                >
-                  <option value="all">All Stages</option>
-                  <option value="New">New</option>
-                  <option value="Contacted">Contacted</option>
-                  <option value="Interested">Interested</option>
-                  <option value="Negotiation">Negotiation</option>
-                  <option value="Document Pending">Document Pending</option>
-                  <option value="Verification">Verification</option>
-                  <option value="Onboarding">Onboarding</option>
-                  <option value="Activated">Activated</option>
-                  <option value="Active Seller">Active Seller</option>
-                  <option value="Lost">Lost</option>
-                </select>
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">Sort By</label>
-                <select
-                  value={sortOption}
-                  onChange={(e) => setSortOption(e.target.value)}
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-red-600 font-bold text-sm"
-                >
-                  <option value="newest">Newest First</option>
-                  <option value="oldest">Oldest First</option>
-                </select>
-              </div>
-            </div>
-          </div>
         </div>
+        {syncResult && (
+          <div className={cn("mt-3 px-4 py-2 rounded-xl text-xs font-bold", syncResult.type === 'success' ? 'bg-white/20 text-white' : 'bg-red-900/40 text-red-100')}>
+            {syncResult.type === 'success' ? `Synced: ${syncResult.created} created, ${syncResult.updated} updated` : `Error: ${syncResult.message}`}
+          </div>
+        )}
       </div>
 
-      {/* Vendors Table/Grid */}
-      <div className="bg-white rounded-2xl lg:rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
-        <div
-          className="hidden lg:block overflow-x-auto overflow-y-auto"
-          ref={vendorsContainerRef}
-          style={{ maxHeight: 'calc(100vh - 320px)' }}
-        >
-          <table className="w-full text-left border-collapse table-fixed">
+      {/* Tabs */}
+      <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto no-scrollbar">
+        {tabs.map(tab => (
+          <button key={tab.key} onClick={() => setActiveTab(tab.key)} className={cn(
+            "flex items-center gap-1.5 px-5 py-3 text-xs font-bold uppercase tracking-wider transition-all relative whitespace-nowrap",
+            activeTab === tab.key ? "text-red-700" : "text-slate-400 hover:text-slate-600"
+          )}>
+            {tab.icon} {tab.label}
+            {activeTab === tab.key && <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-red-600 rounded-full" />}
+          </button>
+        ))}
+      </div>
+
+      {/* Search & Sort */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex-1 relative group">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-red-500 transition-colors pointer-events-none" style={{ zIndex: 10 }} size={16} />
+          <input type="text" placeholder="Search by name, phone, email, location..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+            style={{ paddingLeft: '2.75rem' }}
+            className="w-full pr-24 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-200 focus:border-red-400 outline-none transition-all font-medium text-sm text-slate-800" />
+          {searchTerm && <button onClick={handleClearSearch} className="absolute right-20 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-red-500 z-10"><X size={14} /></button>}
+          <button onClick={handleSearch} disabled={isLoading} className="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-1.5 bg-red-600 text-white rounded-lg font-bold text-[10px] uppercase tracking-wider hover:bg-red-700 transition-all disabled:opacity-50 z-10">Search</button>
+        </div>
+        <select value={sortOption} onChange={(e) => setSortOption(e.target.value)} className="px-4 py-3 bg-white border border-slate-200 rounded-xl font-bold text-sm focus:ring-2 focus:ring-red-200 focus:border-red-400">
+          <option value="newest">Newest First</option><option value="oldest">Oldest First</option>
+        </select>
+      </div>
+
+      {/* Table */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        {/* Desktop Table */}
+        <div className="hidden lg:block overflow-x-auto overflow-y-auto" ref={vendorsContainerRef} style={{ maxHeight: 'calc(100vh - 400px)' }}>
+          {activeTab === 'followup' ? (
+            <table className="w-full text-left table-fixed">
+              <thead>
+                <tr className="bg-red-50/50 border-b border-red-100">
+                  <th className="w-[10%] px-5 py-3 text-[9px] font-black text-red-600 uppercase tracking-widest">Time</th>
+                  <th className="w-[18%] px-5 py-3 text-[9px] font-black text-red-600 uppercase tracking-widest">Vendor</th>
+                  <th className="w-[12%] px-5 py-3 text-[9px] font-black text-red-600 uppercase tracking-widest">Contact</th>
+                  <th className="w-[22%] px-5 py-3 text-[9px] font-black text-red-600 uppercase tracking-widest">Note</th>
+                  <th className="w-[10%] px-5 py-3 text-[9px] font-black text-red-600 uppercase tracking-widest">Pipeline</th>
+                  <th className="w-[13%] px-5 py-3 text-[9px] font-black text-red-600 uppercase tracking-widest">Manager</th>
+                  <th className="w-[10%] px-5 py-3 text-[9px] font-black text-red-600 uppercase tracking-widest text-center">Done</th>
+                  <th className="w-[10%] px-5 py-3 text-[9px] font-black text-red-600 uppercase tracking-widest text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {followupLoading ? (
+                  <tr><td colSpan="8" className="px-6 py-16 text-center"><div className="flex flex-col items-center gap-2"><div className="w-6 h-6 border-2 border-red-600 border-t-transparent rounded-full animate-spin" /><span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Loading...</span></div></td></tr>
+                ) : filteredFollowups.length === 0 ? (
+                  <tr><td colSpan="8" className="px-6 py-16 text-center"><Clock size={32} className="text-slate-200 mx-auto mb-2" /><span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">No follow-ups today</span></td></tr>
+                ) : filteredFollowups.map((followup) => (
+                  <tr key={followup.display_activity_id} className="hover:bg-red-50/30 transition-colors">
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className={cn("p-1.5 rounded-lg", followup.is_overdue ? "bg-red-100 text-red-600" : "bg-amber-100 text-amber-600")}>
+                          <Clock size={12} />
+                        </div>
+                        <div className="flex flex-col">
+                          <span className={cn("font-bold text-sm", followup.is_overdue ? "text-red-600" : "text-slate-900")}>
+                            {followup.display_time ? new Date(`1970-01-01T${followup.display_time}`).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : followup.display_scheduled_for ? new Date(followup.display_scheduled_for).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'No Time'}
+                          </span>
+                          {followup.is_overdue && <span className="text-[8px] font-black uppercase text-red-500">Overdue</span>}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="font-bold text-slate-900 text-sm truncate">{followup.display_business_name}</div>
+                        {followup.hasActivity && <CheckCircle size={14} className="text-emerald-600" />}
+                      </div>
+                      <div className="flex items-center gap-1 text-[9px] font-bold text-slate-400 mt-0.5 uppercase truncate">
+                        <MapPin size={8} className="text-red-400" /> {followup.display_location}
+                      </div>
+                    </td>
+                    <td className="px-5 py-3">
+                      <div className="text-xs font-bold text-slate-700 truncate">{followup.display_contact_person}</div>
+                      <div className="text-[9px] font-bold text-slate-400 uppercase">{followup.display_phone}</div>
+                    </td>
+                    <td className="px-5 py-3">
+                      <p className="text-[10px] font-medium text-slate-600 line-clamp-2 italic">"{followup.display_message}"</p>
+                      <span className="text-[8px] font-bold text-slate-400 uppercase mt-1 inline-block bg-slate-100 px-1.5 py-0.5 rounded">{followup.display_category}</span>
+                    </td>
+                    <td className="px-5 py-3"><StatusBadge status={followup.display_status} /></td>
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 bg-red-600 rounded-lg flex items-center justify-center text-[8px] font-black text-white">{followup.display_manager_name[0]}</div>
+                        <span className="text-[10px] font-bold text-slate-700 truncate">{followup.display_manager_name}</span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-3 text-center">
+                      {followup.hasActivity ? (
+                        <span className="inline-flex items-center gap-1 text-emerald-600 font-black text-[10px]"><CheckCircle size={12} /> Yes</span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-amber-600 font-black text-[10px]"><AlertCircle size={12} /> No</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      <button onClick={() => handleDetail(followup)} className="p-2 bg-white border border-slate-200 text-slate-400 hover:text-red-600 hover:border-red-200 rounded-lg transition-all">
+                        <ExternalLink size={14} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+          <table className="w-full text-left table-fixed">
             <thead>
-<tr className="bg-slate-50/50 border-b border-slate-100">
-                 <th className="w-[20%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Enterprise</th>
-                 <th className="w-[15%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Key Contact</th>
-                 <th className="w-[12%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Category</th>
-                 <th className="w-[12%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Products</th>
-                 <th className="w-[12%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Verification</th>
-                 <th className="w-[12%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Pipeline</th>
-                 <th className="w-[15%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Manager</th>
-                 <th className="w-[15%] px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest text-right">Action</th>
-               </tr>
+              <tr className="bg-red-50/50 border-b border-red-100">
+                <th className="w-[20%] px-5 py-3 text-[10px] font-bold text-red-700/70 uppercase tracking-wider">Enterprise</th>
+                <th className="w-[15%] px-5 py-3 text-[10px] font-bold text-red-700/70 uppercase tracking-wider">Contact</th>
+                <th className="w-[12%] px-5 py-3 text-[10px] font-bold text-red-700/70 uppercase tracking-wider">Category</th>
+                <th className="w-[10%] px-5 py-3 text-[10px] font-bold text-red-700/70 uppercase tracking-wider">Products</th>
+                <th className="w-[10%] px-5 py-3 text-[10px] font-bold text-red-700/70 uppercase tracking-wider">Verified</th>
+                <th className="w-[12%] px-5 py-3 text-[10px] font-bold text-red-700/70 uppercase tracking-wider">Pipeline</th>
+                <th className="w-[12%] px-5 py-3 text-[10px] font-bold text-red-700/70 uppercase tracking-wider">Manager</th>
+                <th className="w-[9%] px-5 py-3 text-[10px] font-bold text-red-700/70 uppercase tracking-wider text-right">Actions</th>
+              </tr>
             </thead>
-            <tbody className="divide-y divide-slate-50">
-{loading ? (
-                 <tr>
-                   <td colSpan="8" className="px-6 py-12 text-center">
-                    <div className="flex flex-col items-center gap-2">
-                      <div className="w-6 h-6 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
-                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Syncing Vendors...</span>
+            <tbody className="divide-y divide-slate-100">
+              {isLoading ? (
+                <tr><td colSpan="8" className="px-6 py-16 text-center"><div className="w-6 h-6 border-2 border-red-600 border-t-transparent rounded-full animate-spin mx-auto mb-2" /><span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Loading vendors...</span></td></tr>
+              ) : sortedVendors.length === 0 ? (
+                <tr><td colSpan="8" className="px-6 py-16 text-center"><Store size={32} className="text-slate-200 mx-auto mb-2" /><span className="text-xs font-bold text-slate-400 uppercase tracking-wider">No vendors found</span></td></tr>
+              ) : sortedVendors.map((vendor) => (
+                <tr key={vendor._id} className="hover:bg-red-50/40 transition-colors group cursor-pointer" onClick={() => handleDetail(vendor)}>
+                  <td className="px-5 py-3">
+                    <div className="font-bold text-slate-900 text-sm truncate group-hover:text-red-700 transition-colors">{vendor.business_name}</div>
+                    <div className="flex items-center gap-1 text-[10px] text-slate-400 mt-0.5"><MapPin size={9} className="text-red-400" /> {vendor.location}</div>
+                  </td>
+                  <td className="px-5 py-3">
+                    <div className="text-xs font-semibold text-slate-700 truncate">{vendor.contact_person}</div>
+                    <a href={`tel:${vendor.phone}`} className="text-[10px] text-slate-400 hover:text-red-600">{vendor.phone}</a>
+                  </td>
+                  <td className="px-5 py-3"><span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">{vendor.category}</span></td>
+                  <td className="px-5 py-3"><span className="text-[10px] font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded-md">{vendor.expected_product_count ?? vendor.total_products_listed ?? 0}</span></td>
+                  <td className="px-5 py-3">{vendor.is_verified ? <ShieldCheck size={16} className="text-emerald-600" /> : <span className="text-[10px] text-slate-400 font-medium">Pending</span>}</td>
+                  <td className="px-5 py-3"><StatusBadge status={vendor.lead_status} /></td>
+                  <td className="px-5 py-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 bg-red-600 rounded-lg flex items-center justify-center text-[9px] font-bold text-white">{vendor.assigned_user?.name?.[0] || 'U'}</div>
+                      <span className="text-[10px] font-semibold text-slate-700 truncate">{vendor.assigned_user?.name || 'Unassigned'}</span>
                     </div>
                   </td>
-                </tr>
-) : filteredVendors.length === 0 ? (
-                 <tr>
-                   <td colSpan="8" className="px-6 py-12 text-center">
-                    <div className="flex flex-col items-center gap-2">
-                      <Briefcase size={32} className="text-slate-200" />
-                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">No Records</span>
-                    </div>
-                  </td>
-                </tr>
-              ) : filteredVendors.map((vendor) => (
-                <tr key={vendor._id} className="hover:bg-slate-50/50 transition-colors group">
-                  <td className="px-6 py-3">
-                    <div className="flex items-center gap-1">
-                      <div className="font-bold text-slate-900 text-sm truncate">{vendor.business_name}</div>
-                    </div>
-                    <div className="flex items-center gap-1 text-[9px] font-bold text-slate-400 mt-0.5 uppercase truncate">
-                      <MapPin size={8} className="text-red-400" /> {vendor.location}
-                    </div>
-                  </td>
-                  <td className="px-6 py-3">
-                    <div className="text-xs font-bold text-slate-700 truncate">{vendor.contact_person}</div>
-                    <div className="flex flex-col gap-0.5 mt-0.5">
-                      <a href={`mailto:${vendor.email}`} className="text-[9px] font-black text-slate-400 hover:text-red-600 transition-colors uppercase truncate max-w-[150px]">{vendor.email}</a>
-                      <a href={`tel:${vendor.phone}`} className="text-[9px] font-black text-slate-400 hover:text-red-600 transition-colors uppercase">{vendor.phone}</a>
-                    </div>
-                  </td>
-<td className="px-6 py-3">
-                     <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">{vendor.category}</span>
-                   </td>
-                   <td className="px-6 py-3">
-                     <span className="text-[10px] font-bold text-slate-600 bg-blue-50 px-2 py-0.5 rounded-md">
-                       {vendor.expected_product_count ?? vendor.productCount ?? vendor.total_products_listed ?? 0} products
-                     </span>
-                   </td>
-                   <td className="px-6 py-3">
-                     {vendor.is_verified ? (
-                       <ShieldCheck size={16} className="text-emerald-600" title="Verified" />
-                     ) : (
-                       <span className="text-[10px] font-bold text-slate-400">Pending</span>
-                     )}
-                   </td>
-                   <td className="px-6 py-3">
-                     <StatusBadge status={vendor.lead_status} />
-                   </td>
-                   <td className="px-6 py-3">
-                     <div className="flex items-center gap-2">
-                       <div className="w-6 h-6 bg-slate-900 rounded-lg flex items-center justify-center text-[8px] font-black text-white">
-                         {vendor.assigned_user?.name ? vendor.assigned_user.name[0] : 'U'}
-                       </div>
-                       <span className="text-[10px] font-bold text-slate-700 truncate">{vendor.assigned_user?.name || 'Unassigned'}</span>
-                     </div>
-                   </td>
-                  <td className="px-6 py-3 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <a
-                        href={`tel:${vendor.phone}`}
-                        className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-all"
-                        title="Call Now"
-                      >
-                        <Phone size={14} />
-                      </a>
-                      <a
-                        href={`https://wa.me/${vendor.phone.replace(/\D/g, '')}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-1.5 text-green-500 hover:bg-green-50 rounded-lg transition-all"
-                        title="WhatsApp"
-                      >
-                        <MessageCircle size={14} />
-                      </a>
-                      <button onClick={() => handleDetail(vendor)} className="p-1.5 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all"><ExternalLink size={14} /></button>
-                      <button onClick={() => handleAction(vendor)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"><MoreVertical size={16} /></button>
+                  <td className="px-5 py-3 text-right">
+                    <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                      <a href={`tel:${vendor.phone}`} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all" title="Call"><Phone size={14} /></a>
+                      <a href={`https://wa.me/${vendor.phone?.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all" title="WhatsApp"><MessageCircle size={14} /></a>
+                      <button onClick={() => handleDetail(vendor)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all" title="View Details"><ExternalLink size={14} /></button>
+                      <button onClick={() => handleAction(vendor)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all" title="Actions"><MoreVertical size={14} /></button>
                     </div>
                   </td>
                 </tr>
               ))}
-{reduxLoadingMore && (
-                 <tr>
-                   <td colSpan="8" className="px-6 py-4 text-center">
-                    <div className="flex items-center justify-center gap-2">
-                      <div className="w-4 h-4 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
-                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Loading more...</span>
-                    </div>
-                  </td>
-                </tr>
-              )}
-{!hasMore && allVendors.length > 0 && !loading && (
-                 <tr>
-                   <td colSpan="8" className="px-6 py-3 text-center">
-                    <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">No more vendors to load</span>
-                  </td>
-                </tr>
-              )}
+              {reduxLoadingMore && <tr><td colSpan="8" className="px-6 py-4 text-center"><div className="w-5 h-5 border-2 border-red-600 border-t-transparent rounded-full animate-spin mx-auto" /></td></tr>}
+              {hasMore && !isLoading && <tr ref={desktopSentinelRef}><td colSpan="8" className="h-1" /></tr>}
             </tbody>
           </table>
+          )}
         </div>
 
-        {/* Mobile Card View */}
+        {/* Mobile Cards */}
         <div className="block lg:hidden">
-          {loading ? (
-            <div className="px-4 py-8 text-center">
-              <div className="flex flex-col items-center gap-2">
-                <div className="w-6 h-6 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
-                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Syncing Vendors...</span>
-              </div>
-            </div>
-          ) : filteredVendors.length === 0 ? (
-            <div className="px-4 py-8 text-center">
-              <div className="flex flex-col items-center gap-2">
-                <Briefcase size={32} className="text-slate-200" />
-                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">No Records</span>
-              </div>
-            </div>
-          ) : filteredVendors.map((vendor) => (
-            <div key={vendor._id} className="p-4 border-b border-slate-100 last:border-b-0 active:bg-slate-50">
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex-1 min-w-0">
-                  <div className="font-bold text-slate-900 text-sm truncate">{vendor.business_name}</div>
-                  <div className="flex items-center gap-1 text-[9px] font-bold text-slate-400 uppercase mt-0.5">
-                    <MapPin size={8} className="text-red-400 shrink-0" />
-                    <span className="truncate">{vendor.location}</span>
+          {activeTab === 'followup' ? (
+            followupLoading ? (
+              <div className="p-12 text-center"><div className="w-8 h-8 border-4 border-red-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" /><p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Loading...</p></div>
+            ) : filteredFollowups.length === 0 ? (
+              <div className="p-12 text-center"><Clock size={40} className="text-slate-200 mx-auto mb-3" /><p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">No follow-ups today</p></div>
+            ) : filteredFollowups.map((followup) => (
+              <div key={followup.display_activity_id} className="p-4 active:bg-red-50/50 transition-colors border-l-4 border-red-500">
+                <div className="flex justify-between items-center mb-2">
+                  <div className="flex items-center gap-2">
+                    <div className={cn("p-1 rounded", followup.is_overdue ? "bg-red-100 text-red-600" : "bg-amber-100 text-amber-600")}>
+                      <Clock size={14} />
+                    </div>
+                    <div className="flex flex-col">
+                      <span className={cn("font-bold text-xs", followup.is_overdue ? "text-red-600" : "text-slate-900")}>
+                        {followup.display_time ? new Date(`1970-01-01T${followup.display_time}`).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : followup.display_scheduled_for ? new Date(followup.display_scheduled_for).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'No Time'}
+                      </span>
+                      {followup.is_overdue && <span className="text-[7px] font-black uppercase text-red-500">Overdue</span>}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {followup.hasActivity ? (
+                      <span className="p-1 bg-emerald-100 text-emerald-600 rounded"><CheckCircle size={12} /></span>
+                    ) : (
+                      <span className="p-1 bg-amber-100 text-amber-600 rounded"><AlertCircle size={12} /></span>
+                    )}
+                    <button onClick={() => handleDetail(followup)} className="p-2 bg-white border border-slate-100 rounded-lg text-slate-400"><ExternalLink size={14} /></button>
                   </div>
                 </div>
-                <div className="ml-2 shrink-0">
-                  <StatusBadge status={vendor.lead_status} />
+                <h3 className="font-bold text-slate-900 text-sm mb-1">{followup.display_business_name}</h3>
+                <p className="text-[10px] text-slate-500 italic line-clamp-2 mb-2">"{followup.display_message}"</p>
+                <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase">
+                  <span>{followup.display_contact_person}</span>
+                  <a href={`tel:${followup.display_phone}`} className="text-red-600">{followup.display_phone}</a>
+                </div>
+                <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-50">
+                  <span className="text-[9px] font-bold text-slate-500">Manager: {followup.display_manager_name}</span>
                 </div>
               </div>
-
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center text-[10px] font-black text-white shrink-0">
-                  {vendor.assigned_user?.name ? vendor.assigned_user.name[0] : 'U'}
+            ))
+          ) : (<>
+          {isLoading ? (
+            <div className="px-4 py-12 text-center"><div className="w-6 h-6 border-2 border-red-600 border-t-transparent rounded-full animate-spin mx-auto mb-2" /><span className="text-xs font-bold text-slate-400">Loading...</span></div>
+          ) : sortedVendors.length === 0 ? (
+            <div className="px-4 py-12 text-center"><Store size={32} className="text-slate-200 mx-auto mb-2" /><span className="text-xs font-bold text-slate-400">No vendors found</span></div>
+          ) : sortedVendors.map((vendor) => (
+            <div key={vendor._id} className="p-4 border-b border-slate-100 last:border-b-0 active:bg-red-50 cursor-pointer" onClick={() => handleDetail(vendor)}>
+              <div className="flex items-start justify-between mb-2">
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-slate-900 text-sm truncate">{vendor.business_name}</div>
+                  <div className="flex items-center gap-1 text-[10px] text-slate-400 mt-0.5"><MapPin size={9} className="text-red-400 shrink-0" /><span className="truncate">{vendor.location}</span></div>
                 </div>
+                <div className="ml-2 shrink-0"><StatusBadge status={vendor.lead_status} /></div>
+              </div>
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-7 h-7 bg-red-600 rounded-lg flex items-center justify-center text-[9px] font-bold text-white shrink-0">{vendor.assigned_user?.name?.[0] || 'U'}</div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-bold text-slate-700 truncate">{vendor.contact_person}</div>
-                  <div className="text-[10px] font-black text-slate-400">{vendor.phone}</div>
+                  <div className="text-xs font-semibold text-slate-700 truncate">{vendor.contact_person}</div>
+                  <div className="text-[10px] text-slate-400">{vendor.phone}</div>
                 </div>
-                <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded-md shrink-0">{vendor.category}</span>
+                <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md shrink-0">{vendor.category}</span>
               </div>
-
-<div className="flex items-center justify-between pt-2 border-t border-slate-50">
-                 <div className="flex items-center gap-3">
-                   <span className="text-[10px] font-bold text-slate-600 bg-blue-50 px-2 py-1 rounded-md">
-                     {vendor.expected_product_count ?? vendor.productCount ?? vendor.total_products_listed ?? 0} products
-                   </span>
-                   {vendor.is_verified ? (
-                     <ShieldCheck size={14} className="text-emerald-600" title="Verified" />
-                   ) : (
-                     <span className="text-[10px] font-bold text-slate-400">Pending</span>
-                   )}
-                 </div>
-                 <div className="flex items-center gap-1">
-                   <button
-                     onClick={() => handleDetail(vendor)}
-                     className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all active:scale-95"
-                   >
-                     <ExternalLink size={16} />
-                   </button>
-                   <button
-                     onClick={() => handleAction(vendor)}
-                     className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all active:scale-95"
-                   >
-                     <MoreVertical size={16} />
-                   </button>
-                 </div>
-               </div>
+              <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded-md">{vendor.expected_product_count ?? vendor.total_products_listed ?? 0} products</span>
+                  {vendor.is_verified ? <ShieldCheck size={14} className="text-emerald-600" /> : <span className="text-[10px] text-slate-400">Pending</span>}
+                </div>
+                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                  <a href={`tel:${vendor.phone}`} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Call"><Phone size={14} /></a>
+                  <a href={`https://wa.me/${vendor.phone?.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg" title="WhatsApp"><MessageCircle size={14} /></a>
+                  <button onClick={() => handleDetail(vendor)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="View Details"><ExternalLink size={14} /></button>
+                  <button onClick={() => handleAction(vendor)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Actions"><MoreVertical size={14} /></button>
+                </div>
+              </div>
             </div>
           ))}
-          {reduxLoadingMore && (
-            <div className="p-4 text-center">
-              <div className="flex items-center justify-center gap-2">
-                <div className="w-4 h-4 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
-                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Loading more...</span>
+          {reduxLoadingMore && <div className="p-4 text-center"><div className="w-5 h-5 border-2 border-red-600 border-t-transparent rounded-full animate-spin mx-auto" /></div>}
+          {hasMore && !isLoading && sortedVendors.length > 0 && <div ref={mobileSentinelRef} className="h-1" />}
+          {!hasMore && sortedVendors.length > 0 && <div className="p-4 text-center"><span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">All vendors loaded</span></div>}
+          </>
+        )}
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="px-5 py-3 flex items-center justify-between">
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+          {activeTab === 'followup'
+            ? `${todayFollowups.length} follow-ups today`
+            : `${sortedVendors.length} of ${(activeTab === 'active' ? activeSellersPagination?.total : pagination?.total) || displayVendors.length} vendors`
+          }
+        </span>
+      </div>
+
+      {/* Sync History Modal */}
+      {showSyncHistory && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/50 backdrop-blur-sm" onClick={() => setShowSyncHistory(false)}>
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Sync History</h3>
+                <p className="text-xs text-slate-400 mt-0.5">Last 20 sync attempts</p>
               </div>
+              <button onClick={() => setShowSyncHistory(false)} className="p-2 hover:bg-red-50 rounded-xl transition-all"><X size={18} className="text-slate-400" /></button>
             </div>
-          )}
-          {!hasMore && filteredVendors.length > 0 && !loading && (
-            <div className="p-4 text-center">
-              <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">No more vendors to load</span>
+            <div className="p-5 overflow-y-auto max-h-[60vh]">
+              {syncHistory.length === 0 ? (
+                <p className="text-sm text-slate-400 text-center py-8">No sync history</p>
+              ) : (
+                <div className="space-y-2">
+                  {syncHistory.map((log, index) => (
+                    <div key={index} className={cn("p-4 rounded-xl border", log.success ? 'bg-emerald-50/50 border-emerald-200' : 'bg-red-50/50 border-red-200')}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider", log.success ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700')}>
+                          {log.success ? 'Success' : 'Failed'}
+                        </span>
+                        <span className="text-[10px] text-slate-400">{new Date(log.createdAt).toLocaleString()}</span>
+                      </div>
+                      <div className="text-sm font-bold text-slate-900">{log.vendorsSynced} vendors <span className="text-[10px] font-normal text-slate-400 ml-1">({log.durationMs}ms)</span></div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">{log.mergedRecords} updated, {log.leadsSynced} created</div>
+                      {log.errorMessage && <p className="text-[10px] text-red-600 mt-1">{log.errorMessage}</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-
-          {/* Load More button for mobile */}
-          {hasMore && !loading && filteredVendors.length > 0 && (
-            <div className="p-4 text-center">
-              <button
-                onClick={loadMoreVendors}
-                disabled={reduxLoadingMore}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg font-black text-[10px] uppercase tracking-widest hover:bg-red-700 disabled:opacity-50"
-              >
-                {reduxLoadingMore ? 'Loading...' : 'Load More Vendors'}
-              </button>
-            </div>
-          )}
-</div>
-       </div>
-
-       {/* Sync History Modal */}
-       {showSyncHistory && (
-         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-           <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden">
-             <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-               <div>
-                 <h3 className="text-lg font-black text-slate-900">Vendor Sync History</h3>
-                 <p className="text-xs text-slate-500 mt-1">Last 20 sync attempts</p>
-               </div>
-               <button onClick={() => setShowSyncHistory(false)} className="p-2 hover:bg-slate-100 rounded-lg transition-all">
-                 <X size={18} className="text-slate-400" />
-               </button>
-             </div>
-             <div className="p-6 overflow-y-auto max-h-[60vh]">
-               {syncHistory.length === 0 ? (
-                 <p className="text-sm text-slate-400 text-center py-4">No sync history available</p>
-               ) : (
-                 <div className="space-y-3">
-                   {syncHistory.map((log, index) => (
-                     <div key={index} className={`p-4 rounded-xl border ${log.success ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100'}`}>
-                       <div className="flex items-center justify-between mb-2">
-                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest ${log.success ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                           {log.success ? 'Success' : 'Failed'}
-                         </span>
-                         <span className="text-xs text-slate-500">{new Date(log.createdAt).toLocaleString()}</span>
-                       </div>
-                       <div className="text-sm font-bold text-slate-900">
-                         {log.vendorsSynced} vendors processed<span className="text-[10px] font-normal text-slate-500 ml-2">({log.durationMs}ms)</span>
-                       </div>
-                       <div className="text-xs text-slate-600 mt-1">
-                         {log.mergedRecords} updated, {log.leadsSynced} created
-                       </div>
-                       {log.errorMessage && <p className="text-[10px] text-red-600 mt-1">{log.errorMessage}</p>}
-                     </div>
-                   ))}
-                 </div>
-               )}
-             </div>
-           </div>
-         </div>
-       )}
-
-       {/* Footer Info */}
-       <div className="px-6 lg:px-8 py-4 bg-slate-50/30 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
-         <span className="text-[9px] lg:text-[10px] font-black text-slate-400 uppercase tracking-widest text-center sm:text-left">
-           Showing {filteredVendors.length} of {pagination?.total || allVendors.length} records
-         </span>
-         <div className="flex items-center gap-2 w-full sm:w-auto justify-center">
-           <button className="flex-1 sm:flex-none px-4 py-2 text-[9px] lg:text-[10px] font-black text-slate-400 hover:text-red-600 border border-slate-200 rounded-lg uppercase tracking-widest disabled:opacity-50">Prev</button>
-           <button className="flex-1 sm:flex-none px-4 py-2 text-[9px] lg:text-[10px] font-black text-red-600 border border-red-100 rounded-lg uppercase tracking-widest">Next</button>
-         </div>
-       </div>
-     </div>
-   );
+          </div>
+        </div>
+      )}
+    </div>
+  );
 };
 
 export default VendorManagementPage;

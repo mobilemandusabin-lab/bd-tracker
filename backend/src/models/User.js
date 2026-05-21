@@ -34,6 +34,11 @@ const userSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Role'
   }],
+  team: {
+    type: String,
+    enum: ['qc', 'listing', 'bd', 'management', null],
+    default: null
+  },
   status: {
     type: String,
     enum: ['active', 'inactive'],

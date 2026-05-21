@@ -1,12 +1,16 @@
 const express = require('express');
-const { 
-  syncNepalcanOrders, 
-  getNepalcanOrders, 
+const {
+  syncNepalcanOrders,
+  getNepalcanOrders,
   getNepalcanStats,
   fetchFromNepalcan,
   getNepalcanOrderById,
   getLastSyncLog,
-  getSyncLogs
+  getSyncLogs,
+  getOrderTracking,
+  getNepalcanAnalytics,
+  getMonthlyData,
+  checkReturnedOrders
 } = require('../controllers/nepalcanOrderController');
 const { protect, restrictTo } = require('../middlewares/authMiddleware');
 
@@ -25,6 +29,12 @@ router.get('/orders', getNepalcanOrders);
 // Get statistics and processing times
 router.get('/stats', getNepalcanStats);
 
+// Get comprehensive analytics
+router.get('/analytics', getNepalcanAnalytics);
+
+// Get monthly aggregated data
+router.get('/monthly', getMonthlyData);
+
 // Get single order by ID with status history
 router.get('/order/:id', getNepalcanOrderById);
 
@@ -36,5 +46,11 @@ router.get('/sync-log/last', getLastSyncLog);
 
 // Get recent sync logs
 router.get('/sync-logs', getSyncLogs);
+
+// Get order tracking details from external logistics API
+router.get('/tracking/:orderId', getOrderTracking);
+
+// Manually check delivered orders for returns
+router.post('/check-returns', checkReturnedOrders);
 
 module.exports = router;

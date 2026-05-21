@@ -1,5 +1,8 @@
 const Goal = require('../models/Goal');
 const User = require('../models/User');
+const Lead = require('../models/Lead');
+const Activity = require('../models/Activity');
+const NepalcanOrder = require('../models/NepalcanOrder');
 
 exports.createGoal = async (req, res) => {
   try {
@@ -62,12 +65,55 @@ exports.getAllGoals = async (req, res) => {
     const goals = await Goal.find(filter)
       .populate('assigned_to', 'name email role')
       .populate('set_by', 'name email role')
-      .sort('-created_at');
-    
-    res.status(200).json({ 
-      status: 'success', 
-      results: goals.length,
-      data: { goals } 
+      .sort('-created_at')
+      .lean();
+
+    // Compute live progress for each goal using its own date range
+    const now = new Date();
+    const goalsWithProgress = await Promise.all(goals.map(async (goal) => {
+      const goalUserId = goal.assigned_to?._id || goal.assigned_to;
+      const goalStart = goal.start_date || new Date(0);
+      const goalEnd = goal.end_date ? new Date(Math.min(new Date(goal.end_date).getTime(), now.getTime())) : now;
+      const goalDateFilter = { $gte: goalStart, $lte: goalEnd };
+      const goalMatch = { assigned_user: goalUserId, created_at: goalDateFilter };
+
+      let currentValue = 0;
+      switch (goal.unit) {
+        case 'leads':
+          currentValue = await Lead.countDocuments(goalMatch);
+          break;
+        case 'conversions':
+          currentValue = await Lead.countDocuments({ ...goalMatch, lead_status: { $in: ['Activated', 'Active Seller'] } });
+          break;
+        case 'revenue':
+          const revData = await NepalcanOrder.aggregate([
+            { $match: { orderStatus: 'Delivered', createdAt: goalDateFilter } },
+            { $lookup: { from: 'leads', localField: 'vendor_lead_id', foreignField: '_id', as: 'lead' } },
+            { $unwind: { path: '$lead', preserveNullAndEmptyArrays: false } },
+            { $match: { 'lead.assigned_user': goalUserId } },
+            { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+          ]);
+          currentValue = revData[0]?.total || 0;
+          break;
+        case 'activated_vendors':
+          currentValue = await Lead.countDocuments({ assigned_user: goalUserId, $or: [{ active_seller: true }, { lead_status: 'Active Seller' }], created_at: goalDateFilter });
+          break;
+        case 'activities':
+        case 'calls':
+          currentValue = await Activity.countDocuments({ user_id: goalUserId, created_at: goalDateFilter });
+          break;
+        default:
+          currentValue = goal.current_value || 0;
+      }
+
+      const progress = goal.target_value > 0 ? Math.min(Math.round((currentValue / goal.target_value) * 100), 100) : 0;
+      return { ...goal, currentValue, progress, remaining: Math.max(goal.target_value - currentValue, 0) };
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      results: goalsWithProgress.length,
+      data: { goals: goalsWithProgress }
     });
   } catch (err) {
     res.status(400).json({ 

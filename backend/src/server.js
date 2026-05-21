@@ -6,48 +6,26 @@ dotenv.config({ path: path.join(__dirname, '../.env') });
 connectDB();
 
 const app = require('./app');
-const { checkOverdueFollowups, checkEscalationTriggers } = require('./services/overdueChecker');
-const { syncNepalcanOrders, updateStaleOrders } = require('./services/nepalcanSyncService');
 const seedPipelineStages = require('./services/pipelineStageSeeder');
+const seedExtensionVersion = require('./services/extensionSeeder');
 
 const port = process.env.PORT || 5000;
 const server = app.listen(port, '0.0.0.0', async () => {
   console.log(`App running on port ${port}...`);
   await seedPipelineStages();
+  await seedExtensionVersion();
+
+  // Run full sync on startup (after 30s to let DB connect)
+  setTimeout(async () => {
+    try {
+      const { runFullSync } = require('./services/unifiedSyncService');
+      console.log('[Startup] Running initial full sync...');
+      await runFullSync('startup');
+    } catch (err) {
+      console.error('[Startup] Initial sync failed:', err.message);
+    }
+  }, 30000);
 });
-
-// Run overdue check every 15 minutes (900000 ms)
-const OVERDUE_CHECK_INTERVAL = 15 * 60 * 1000; // 15 minutes
-
-setInterval(async () => {
-  console.log('[Cron] Running overdue follow-up check...');
-  const overdueCount = await checkOverdueFollowups();
-  if (overdueCount > 0) {
-    console.log(`[Cron] Found and processed ${overdueCount} overdue follow-ups`);
-    await checkEscalationTriggers();
-  }
-}, OVERDUE_CHECK_INTERVAL);
-
-// Run Nepalcan order sync every 2 hours (7200000 ms)
-const NEPA_CAN_SYNC_INTERVAL = 2 * 60 * 60 * 1000; // 2 hours
-
-setInterval(async () => {
-  console.log('[Cron] Running Nepalcan order sync...');
-  const result = await syncNepalcanOrders();
-  console.log(`[Cron] Nepalcan sync result:`, result.message || result.error);
-  
-  const staleCount = await updateStaleOrders();
-  console.log(`[Cron] Found ${staleCount} stale orders to recheck`);
-}, NEPA_CAN_SYNC_INTERVAL);
-
-// Also run once on server start (after 30 seconds to let DB connect)
-setTimeout(async () => {
-  console.log('[Cron] Initial overdue check...');
-  await checkOverdueFollowups();
-  
-  console.log('[Cron] Initial Nepalcan sync...');
-  await syncNepalcanOrders();
-}, 30000);
 
 process.on('unhandledRejection', (err) => {
   console.log('UNHANDLED REJECTION! 💥 Shutting down...');

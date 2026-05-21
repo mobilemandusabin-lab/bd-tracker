@@ -111,6 +111,10 @@ const leadSchema = new mongoose.Schema({
     unique: true,
     sparse: true
   },
+  service_branches: [{
+    branchId: { type: String },
+    name: { type: String }
+  }],
   is_verified: {
     type: Boolean,
     default: false
@@ -162,6 +166,10 @@ const leadSchema = new mongoose.Schema({
   active_seller: {
     type: Boolean,
     default: false
+  },
+  total_revenue: {
+    type: Number,
+    default: 0
   },
   created_at: {
     type: Date,

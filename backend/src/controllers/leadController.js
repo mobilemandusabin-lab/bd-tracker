@@ -142,11 +142,22 @@ exports.getAllLeads = async (req, res) => {
     
     // Filter by type to determine visibility rules
     const isVendorView = req.query.type === 'vendor';
-    
+
     // Super admin sees all leads/vendors by default
-    // Regular users see only their assigned leads, but all vendors
-    if (user.role !== 'super_admin' && !(isGlobalSearch || isVendorView)) {
-      query.assigned_user = user._id;
+    // Regular users see only their assigned leads
+    // For vendors: regular users see all vendors EXCEPT when unassigned filter is used
+    if (user.role !== 'super_admin' && !isGlobalSearch) {
+      if (!isVendorView) {
+        query.assigned_user = user._id;
+      } else if (isVendorView && req.query.unassigned !== 'true') {
+        // For vendor view, non-super-admin users only see their assigned vendors
+        query.assigned_user = user._id;
+      }
+    }
+
+    // Unassigned vendors filter - visible to all users
+    if (isVendorView && req.query.unassigned === 'true') {
+      query.assigned_user = null;
     }
 
     // Filter by assignment status if provided
@@ -159,16 +170,26 @@ exports.getAllLeads = async (req, res) => {
       query.assignment_status = { $in: ['pending', 'accepted'] };
     }
 
-    // Filter by lead status if provided
-    if (req.query.lead_status) {
-      query.lead_status = req.query.lead_status;
-    }
-
     // Filter by type field (lead or vendor) - supports vendor management
     if (req.query.type === 'vendor') {
       query.lead_status = { $in: VENDOR_STATUSES };
     } else if (req.query.type === 'lead') {
       query.lead_status = { $in: LEAD_STATUSES };
+    }
+
+    // Filter by lead status if provided (overrides type filter)
+    if (req.query.lead_status) {
+      query.lead_status = req.query.lead_status;
+    }
+
+    // Filter by verification status
+    if (req.query.verification_status) {
+      query.verification_status = req.query.verification_status;
+    }
+
+    // Filter by active_seller flag
+    if (req.query.active_seller === 'true') {
+      query.active_seller = true;
     }
 
     // Filter by category (leads or vendors) - super_admin only
@@ -402,6 +423,18 @@ exports.getLeadsByCategory = async (req, res) => {
       query.assigned_user = req.user._id;
     }
 
+    // Search functionality
+    if (req.query.search) {
+      const searchTerm = req.query.search.trim();
+      query.$or = [
+        { business_name: { $regex: searchTerm, $options: 'i' } },
+        { contact_person: { $regex: searchTerm, $options: 'i' } },
+        { phone: { $regex: searchTerm, $options: 'i' } },
+        { email: { $regex: searchTerm, $options: 'i' } },
+        { location: { $regex: searchTerm, $options: 'i' } }
+      ];
+    }
+
     const leads = await Lead.find(query)
       .populate('assigned_user', 'name email role')
       .populate('creator_id', 'name email role')
@@ -437,36 +470,70 @@ exports.deleteLead = async (req, res) => {
 // Get Active Sellers - vendors with delivered orders from NepalcanOrder
 exports.getActiveSellers = async (req, res) => {
   try {
-    // First, get unique vendor names from delivered orders
+    // Get unique vendor_lead_ids from delivered orders with metrics
     const vendorOrders = await NepalcanOrder.aggregate([
       { $match: { orderStatus: 'Delivered' } },
-      { $group: { _id: '$vendor', orderCount: { $sum: 1 }, totalAmount: { $sum: '$totalAmount' }, lastOrderDate: { $max: '$updatedAt' } } },
+      { $group: { 
+        _id: '$vendor_lead_id', 
+        vendorName: { $first: '$vendor' },
+        orderCount: { $sum: 1 }, 
+        totalAmount: { $sum: '$totalAmount' }, 
+        lastOrderDate: { $max: '$updatedAt' } 
+      } },
       { $sort: { orderCount: -1 } },
       { $limit: 1000 }
     ]);
-
-    // Find Lead records matching these vendor names
-    const vendorNames = vendorOrders.map(v => v._id).filter(Boolean);
-    const leadsMap = new Map();
     
-    if (vendorNames.length > 0) {
+    // Get lead IDs (for vendor_lead_id matches)
+    const leadIds = vendorOrders.map(v => v._id).filter(Boolean);
+    
+    // Get vendor names for fallback matching
+    const vendorNames = vendorOrders.map(v => v.vendorName).filter(Boolean);
+    
+    // Find Lead records matching these vendor_lead_ids first, then by vendor name
+    const leadsMap = new Map();
+    const leadsByNameMap = new Map();
+    
+    if (leadIds.length > 0) {
       const leads = await Lead.find({
-        type: 'vendor',
-        business_name: { $in: vendorNames }
+        _id: { $in: leadIds }
       })
         .populate('assigned_user', 'name email role')
         .populate('creator_id', 'name email role')
         .sort({ last_order_date: -1, created_at: -1 });
       
       leads.forEach(lead => {
-        leadsMap.set(lead.business_name, lead);
+        leadsMap.set(lead._id.toString(), lead);
       });
     }
-
-    // Build active sellers list - include vendors even if no matching lead
+    
+    if (vendorNames.length > 0) {
+      const leadsByName = await Lead.find({
+        type: 'vendor',
+        business_name: { $in: vendorNames }
+      })
+        .populate('assigned_user', 'name email role')
+        .populate('creator_id', 'name email role');
+      
+      leadsByName.forEach(lead => {
+        leadsByNameMap.set(lead.business_name.toLowerCase(), lead);
+      });
+    }
+    
+    // Build active sellers list
     const activeSellers = vendorOrders.map(vendorData => {
-      const { _id: vendorName, orderCount, totalAmount, lastOrderDate } = vendorData;
-      const lead = leadsMap.get(vendorName);
+      const { _id: leadId, vendorName, orderCount, totalAmount, lastOrderDate } = vendorData;
+      let lead = null;
+      
+      // First try vendor_lead_id match
+      if (leadId) {
+        lead = leadsMap.get(leadId.toString());
+      }
+      
+      // Fallback to vendor name match
+      if (!lead && vendorName) {
+        lead = leadsByNameMap.get(vendorName.toLowerCase());
+      }
       
       if (lead) {
         return {
@@ -480,8 +547,8 @@ exports.getActiveSellers = async (req, res) => {
       
       // No matching lead - create placeholder entry
       return {
-        _id: `vendor-${vendorName}`,
-        business_name: vendorName,
+        _id: `vendor-${leadId || vendorName}`,
+        business_name: vendorName || 'Unknown Vendor',
         contact_person: 'Not Found',
         phone: 'Not Found',
         email: 'Not Found',
@@ -499,15 +566,41 @@ exports.getActiveSellers = async (req, res) => {
       };
     });
 
+    // Apply search filter if provided
+    let filteredSellers = activeSellers;
+    if (req.query.search) {
+      const searchRegex = new RegExp(req.query.search, 'i');
+      filteredSellers = activeSellers.filter(s =>
+        searchRegex.test(s.business_name || '') ||
+        searchRegex.test(s.contact_person || '') ||
+        searchRegex.test(s.phone || '') ||
+        searchRegex.test(s.location || '')
+      );
+    }
+
+    // Calculate totals from full unfiltered set
+    const totalRevenue = vendorOrders.reduce((sum, v) => sum + (v.totalAmount || 0), 0);
+    const totalOrders = vendorOrders.reduce((sum, v) => sum + (v.orderCount || 0), 0);
+
+    // Apply pagination
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 25;
+    const startIndex = (page - 1) * limit;
+    const paginatedSellers = filteredSellers.slice(startIndex, startIndex + limit);
+
     res.status(200).json({
       status: 'success',
-      results: activeSellers.length,
-      data: { leads: activeSellers },
+      results: paginatedSellers.length,
+      data: {
+        leads: paginatedSellers,
+        totalRevenue,
+        totalOrders
+      },
       pagination: {
-        total: activeSellers.length,
-        page: 1,
-        limit: activeSellers.length,
-        totalPages: 1
+        total: filteredSellers.length,
+        page,
+        limit,
+        totalPages: Math.ceil(filteredSellers.length / limit)
       }
     });
   } catch (err) {

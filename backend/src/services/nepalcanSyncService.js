@@ -8,6 +8,36 @@ const API_BASE = 'https://commerce.thecanbrand.com/api';
 
 const NEPA_CAN_EMAIL = process.env.NEPA_CAN_EMAIL || 'sabin.awal@buy.nepalcan.com';
 const NEPA_CAN_PASSWORD = process.env.NEPA_CAN_PASSWORD || '1';
+
+// Helper: Fetch service branches for a vendor from Nepalcan API
+const fetchVendorServiceBranches = async (vendorNepalcanId, authToken) => {
+  try {
+    const response = await axios.get(
+      `${API_BASE}/vendor-profile/serviceBranches`,
+      {
+        params: { vendor: vendorNepalcanId, status: true },
+        headers: {
+          'Authorization': `Bearer ${authToken}`,
+          'Content-Type': 'application/json',
+          'Origin': 'https://commerce.thecanbrand.com',
+          'Referer': 'https://commerce.thecanbrand.com/'
+        },
+        timeout: 15000
+      }
+    );
+
+    // Handle multiple response shapes
+    const data = response.data;
+    if (Array.isArray(data)) return data;
+    if (data?.data && Array.isArray(data.data)) return data.data;
+    if (data?.branches && Array.isArray(data.branches)) return data.branches;
+    if (data?.data?.branches && Array.isArray(data.data.branches)) return data.data.branches;
+    return [];
+  } catch (err) {
+    // Silently skip — don't fail the whole sync for one vendor's branches
+    return [];
+  }
+};
 let defaultSyncUser = null;
 
 const getDefaultSyncUser = async () => {
@@ -169,8 +199,18 @@ const syncNepalcanOrders = async (token = null) => {
         if (!orderId) continue;
 
         const existingOrder = await NepalcanOrder.findOne({ orderId });
-        const newStatus = orderData.orderStatus || 'Pending';
+        let newStatus = orderData.orderStatus || 'Pending';
         const newUpdatedAt = orderData.updatedAt ? new Date(orderData.updatedAt) : new Date();
+
+        // Check marketplaceProcesses for "returned" status — overrides main orderStatus
+        if (orderData.marketplaceProcesses && Array.isArray(orderData.marketplaceProcesses)) {
+          const hasReturned = orderData.marketplaceProcesses.some(
+            p => p.process && p.process.toLowerCase() === 'returned'
+          );
+          if (hasReturned) {
+            newStatus = 'Returned';
+          }
+        }
 
         let vendorLeadId = null;
         if (orderData.vendor) {
@@ -260,11 +300,11 @@ const syncNepalcanOrders = async (token = null) => {
 
     console.log(`[Nepalcan Sync] Synced ${synced} orders`);
 
-    // Update Lead records with active seller metrics
+// Update Lead records with active seller metrics
     const deliveredOrdersAgg = await NepalcanOrder.aggregate([
-      { $match: { orderStatus: 'Delivered' } },
+      { $match: { orderStatus: 'Delivered', vendor_lead_id: { $ne: null } } },
       { $group: { 
-        _id: '$vendor', 
+        _id: '$vendor_lead_id', 
         deliveredCount: { $sum: 1 }, 
         totalAmount: { $sum: '$totalAmount' },
         lastOrderDate: { $max: '$updatedAt' }
@@ -272,28 +312,78 @@ const syncNepalcanOrders = async (token = null) => {
     ]);
     
 for (const vendorData of deliveredOrdersAgg) {
-       const { _id: vendorName, deliveredCount, totalAmount, lastOrderDate } = vendorData;
-       if (!vendorName) continue;
-       
-       const updated = await Lead.findOneAndUpdate(
-         { type: 'vendor', business_name: { $regex: `^${vendorName}$`, $options: 'i' } },
-         { 
-           delivered_order_count: deliveredCount,
-           active_seller: deliveredCount > 0,
-           last_order_date: lastOrderDate,
-           lead_status: 'Activated',
-           verification_status: 'verified',
-           is_verified: true,
-           onboarding_stage: 'seller_activated',
-           activation_status: 'active'
-         },
-         { new: true }
-       );
+      const { _id: vendorLeadId, deliveredCount, totalAmount, lastOrderDate } = vendorData;
+      if (!vendorLeadId) continue;
+      
+      const updated = await Lead.findByIdAndUpdate(
+        vendorLeadId,
+        { 
+          delivered_order_count: deliveredCount,
+          active_seller: deliveredCount > 0,
+          last_order_date: lastOrderDate,
+          total_revenue: totalAmount,
+          lead_status: 'Active Seller'
+        },
+        { new: true }
+      );
+      
+      if (updated) {
+        console.log(`[Nepalcan Sync] Updated lead ${updated.business_name}: ${deliveredCount} delivered orders - Active Seller`);
+      }
+    }
+
+    // Retroactively fix orders with null vendor_lead_id by matching vendor name
+    const ordersToFix = await NepalcanOrder.find({ 
+      orderStatus: 'Delivered', 
+      vendor_lead_id: null,
+      vendor: { $exists: true, $ne: null }
+    });
+
+    if (ordersToFix.length > 0) {
+      console.log(`[Nepalcan Sync] Fixing ${ordersToFix.length} orders with missing vendor_lead_id`);
+      
+      for (const order of ordersToFix) {
+        const vendorLead = await Lead.findOne({
+          $or: [
+            { business_name: { $regex: order.vendor, $options: 'i' } },
+            { nepalcanId: order.vendor }
+          ]
+        });
         
-       if (updated) {
-         console.log(`[Nepalcan Sync] Updated lead ${vendorName}: ${deliveredCount} delivered orders - Activated`);
-       }
-     }
+        if (vendorLead) {
+          order.vendor_lead_id = vendorLead._id;
+          await order.save();
+          console.log(`[Nepalcan Sync] Fixed order ${order.orderId} -> ${vendorLead.business_name}`);
+        }
+      }
+      
+      // Re-run aggregation now that orders are fixed
+      const fixedOrdersAgg = await NepalcanOrder.aggregate([
+        { $match: { orderStatus: 'Delivered', vendor_lead_id: { $ne: null } } },
+        { $group: { 
+          _id: '$vendor_lead_id', 
+          deliveredCount: { $sum: 1 }, 
+          totalAmount: { $sum: '$totalAmount' },
+          lastOrderDate: { $max: '$updatedAt' }
+        } }
+      ]);
+
+      for (const vendorData of fixedOrdersAgg) {
+        const { _id: vendorLeadId, deliveredCount, totalAmount, lastOrderDate } = vendorData;
+        if (!vendorLeadId) continue;
+        
+        await Lead.findByIdAndUpdate(
+          vendorLeadId,
+          { 
+            delivered_order_count: deliveredCount,
+            active_seller: deliveredCount > 0,
+            last_order_date: lastOrderDate,
+            total_revenue: totalAmount,
+            lead_status: 'Active Seller'
+          }
+        );
+      }
+    }
   } catch (error) {
     errorMessage = error.response?.data?.message || error.message || 'Unknown error';
     apiResponse = {
@@ -306,7 +396,7 @@ for (const vendorData of deliveredOrdersAgg) {
   }
 
   const durationMs = Date.now() - startTime;
-  
+
   await NepalcanSyncLog.create({
     success: !errorMessage,
     ordersSynced: synced,
@@ -315,17 +405,22 @@ for (const vendorData of deliveredOrdersAgg) {
     durationMs
   });
 
-  return { 
-    synced, 
+  // Check delivered orders for returns via logistics API (non-blocking)
+  checkAndUpdateReturnedOrders().catch(err =>
+    console.error('[Returned Check] Background error:', err.message)
+  );
+
+  return {
+    synced,
     message: errorMessage || `Successfully synced ${synced} orders`,
-    apiResponse 
+    apiResponse
   };
 };
 
 const updateStaleOrders = async () => {
   try {
     const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
-    
+
     const staleOrders = await NepalcanOrder.find({
       lastSyncedAt: { $lt: twoHoursAgo },
       orderStatus: { $in: ['Pending', 'Processing'] }
@@ -335,6 +430,77 @@ const updateStaleOrders = async () => {
     return staleOrders.length;
   } catch (error) {
     console.error('[Stale Orders] Error:', error.message);
+    return 0;
+  }
+};
+
+const LOGISTICS_API = 'https://can-logistic-prod-84pie.ondigitalocean.app/api/public/marketplace-tracker';
+
+/**
+ * Check delivered orders against the logistics API for returned status.
+ * The commerce API doesn't include marketplaceProcesses, so we need
+ * to check the logistics API to catch returned orders.
+ */
+const checkAndUpdateReturnedOrders = async () => {
+  try {
+    // Check all active orders for returns (not just Delivered)
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const orders = await NepalcanOrder.find({
+      orderStatus: { $in: ['Pending', 'Processing', 'Shipped', 'Delivered'] },
+      lastSyncedAt: { $lt: oneHourAgo }
+    }).limit(200);
+
+    if (orders.length === 0) {
+      console.log('[Returned Check] No delivered orders to recheck');
+      return 0;
+    }
+
+    console.log(`[Returned Check] Checking ${orders.length} delivered orders for returns...`);
+    let updated = 0;
+
+    for (const order of orders) {
+      try {
+        const response = await axios.get(`${LOGISTICS_API}/${order.orderId}`, { timeout: 10000 });
+        const trackingData = response.data;
+
+        if (trackingData?.marketplaceProcesses && Array.isArray(trackingData.marketplaceProcesses)) {
+          const hasReturned = trackingData.marketplaceProcesses.some(
+            p => p.process && p.process.toLowerCase() === 'returned'
+          );
+
+          if (hasReturned) {
+            order.orderStatus = 'Returned';
+            const alreadyHasReturned = order.statusHistory.some(h => h.status === 'Returned');
+            if (!alreadyHasReturned) {
+              order.statusHistory.push({ status: 'Returned', timestamp: new Date() });
+            }
+            order.lastSyncedAt = new Date();
+            await order.save();
+            updated++;
+            console.log(`[Returned Check] Updated order ${order.orderId} → Returned`);
+          } else {
+            // Update lastSyncedAt so we don't recheck too soon
+            order.lastSyncedAt = new Date();
+            await order.save();
+          }
+        }
+      } catch (err) {
+        // Skip individual order errors (rate limits, timeouts, etc.)
+        if (err.response?.status === 404) {
+          // Order not found in logistics — mark as checked
+          order.lastSyncedAt = new Date();
+          await order.save();
+        }
+        // For other errors (rate limit, timeout), skip silently
+      }
+    }
+
+    if (updated > 0) {
+      console.log(`[Returned Check] Updated ${updated} orders to Returned status`);
+    }
+    return updated;
+  } catch (error) {
+    console.error('[Returned Check] Error:', error.message);
     return 0;
   }
 };
@@ -395,12 +561,13 @@ const getTotalCount = (response) => {
 };
 
 /**
- * Sync vendors from Nepalcan API with pagination support
- * - All vendors are stored directly in leads collection with type='vendor'
- * - Matching by nepalcanId, email, phone, or business_name
- * - Verified vendors: lead_status='Activated', verification_status='verified', onboarding_stage='seller_activated', activation_status='active'
- * - Unverified vendors: lead_status='Document Pending', verification_status='pending', onboarding_stage='document_pending', activation_status='inactive'
- */
+* Sync vendors from Nepalcan API with pagination support
+   * - All vendors are stored directly in leads collection with type='vendor'
+   * - Matching by nepalcanId, email, phone, or business_name
+   * - Verified vendors: lead_status='Activated', verification_status='verified', onboarding_stage='seller_activated', activation_status='active'
+   * - Unverified vendors: lead_status='Document Pending', verification_status='pending', onboarding_stage='documents_pending', activation_status='inactive'
+   * - Vendors with delivered orders become 'Active Seller' with active_seller=true
+   */
 const syncNepalcanVendors = async (token = null, userId = null) => {
    const startTime = Date.now();
    let synced = 0;
@@ -504,28 +671,28 @@ console.log(`[Nepalcan Vendor Sync] Total vendors to process: ${allVendors.lengt
         });
 
 const leadData = {
-           business_name: name,
-           contact_person: name,
-           email: email || 'TBD',
-           phone: phone || 'TBD',
-           location: address || 'TBD',
-           lead_source: 'Nepalcan',
-           expected_product_count: productCountFromAPI,
-           nepalcanId: _id,
-           type: 'vendor',
-           is_verified: isVerified,
-           verification_status: isVerified ? 'verified' : 'pending',
-           onboarding_stage: isVerified ? 'seller_activated' : 'document_pending',
-           activation_status: isVerified ? 'active' : 'inactive',
-           lead_status: isVerified ? 'Activated' : 'Document Pending',
-           rawData: {
-             canId: canId?.canId,
-             slug,
-             createdAt,
-             updatedAt,
-             address
-           }
-         };
+             business_name: name,
+             contact_person: name,
+             email: email || 'TBD',
+             phone: phone || 'TBD',
+             location: address || 'TBD',
+             lead_source: 'Nepalcan',
+             expected_product_count: productCountFromAPI,
+             nepalcanId: _id,
+             type: 'vendor',
+             is_verified: isVerified,
+             verification_status: isVerified ? 'verified' : 'pending',
+             onboarding_stage: isVerified ? 'seller_activated' : 'documents_pending',
+             activation_status: isVerified ? 'active' : 'inactive',
+             lead_status: isVerified ? 'Activated' : 'Document Pending',
+             rawData: {
+               canId: canId?.canId,
+               slug,
+               createdAt,
+               updatedAt,
+               address
+             }
+           };
 
         if (existingLead) {
           Object.assign(existingLead, leadData);
@@ -549,34 +716,63 @@ const durationMs = Date.now() - startTime;
       
       console.log(`[Nepalcan Vendor Sync] COMPLETE - Total: ${synced}, Updated: ${updated}, Created: ${created}`);
 
-      // Update Lead records with active seller metrics from delivered orders
+     // Sync service branches for vendors
+     console.log('[Nepalcan Vendor Sync] Syncing service branches...');
+     const branchesResult = await syncServiceBranches(authToken);
+     console.log(`[Nepalcan Vendor Sync] Service branches sync complete: ${branchesResult.updated} vendors updated`);
+
+// Update Lead records with active seller metrics from delivered orders
       const deliveredOrdersAgg = await NepalcanOrder.aggregate([
-        { $match: { orderStatus: 'Delivered' } },
+        { $match: { orderStatus: 'Delivered', vendor_lead_id: { $ne: null } } },
         { $group: { 
-          _id: '$vendor', 
-          deliveredCount: { $sum: 1 }, 
+          _id: '$vendor_lead_id', 
+          deliveredCount: { $sum: 1 },
+          totalAmount: { $sum: '$totalAmount' },
           lastOrderDate: { $max: '$updatedAt' }
         } }
       ]);
       
-for (const vendorData of deliveredOrdersAgg) {
-         const { _id: vendorName, deliveredCount, lastOrderDate } = vendorData;
-         if (!vendorName) continue;
-         
-         await Lead.findOneAndUpdate(
-           { type: 'vendor', business_name: { $regex: `^${vendorName}$`, $options: 'i' } },
-           { 
-             delivered_order_count: deliveredCount,
-             active_seller: deliveredCount > 0,
-             last_order_date: lastOrderDate,
-             lead_status: 'Activated',
-             verification_status: 'verified',
-             is_verified: true,
-             onboarding_stage: 'seller_activated',
-             activation_status: 'active'
-           }
-         );
-       }
+      for (const vendorData of deliveredOrdersAgg) {
+        const { _id: vendorLeadId, deliveredCount, totalAmount, lastOrderDate } = vendorData;
+        if (!vendorLeadId) continue;
+        
+        await Lead.findByIdAndUpdate(
+          vendorLeadId,
+          { 
+            delivered_order_count: deliveredCount,
+            active_seller: deliveredCount > 0,
+            last_order_date: lastOrderDate,
+            total_revenue: totalAmount,
+            lead_status: 'Active Seller'
+          }
+        );
+      }
+
+      // Retroactively fix orders with null vendor_lead_id by matching vendor name
+      const ordersToFix = await NepalcanOrder.find({ 
+        orderStatus: 'Delivered', 
+        vendor_lead_id: null,
+        vendor: { $exists: true, $ne: null }
+      });
+      
+      if (ordersToFix.length > 0) {
+        console.log(`[Nepalcan Vendor Sync] Fixing ${ordersToFix.length} orders with missing vendor_lead_id`);
+        
+        for (const order of ordersToFix) {
+          const vendorLead = await Lead.findOne({
+            $or: [
+              { business_name: { $regex: order.vendor, $options: 'i' } },
+              { nepalcanId: order.vendor }
+            ]
+          });
+          
+          if (vendorLead) {
+            order.vendor_lead_id = vendorLead._id;
+            await order.save();
+            console.log(`[Nepalcan Vendor Sync] Fixed order ${order.orderId} -> ${vendorLead.business_name}`);
+          }
+        }
+      }
 
       await NepalcanSyncLog.create({
        type: 'vendors',
@@ -610,11 +806,134 @@ for (const vendorData of deliveredOrdersAgg) {
    }
 };
 
+/**
+ * Sync service branches for all vendors that have a nepalcanId.
+ * Fetches branches from Nepalcan API and matches to DeliveryZoneGroup branches.
+ */
+const syncServiceBranches = async (token = null) => {
+  const DeliveryZoneGroup = require('../models/DeliveryZoneGroup');
+  const startTime = Date.now();
+  let authToken = token;
+
+  if (!authToken) {
+    try {
+      authToken = await loginToNepalcan();
+    } catch (err) {
+      console.error('[Service Branches] Failed to login:', err.message);
+      return { updated: 0, message: 'Login failed' };
+    }
+  }
+
+  // Load all delivery zone branches for matching
+  const zoneGroups = await DeliveryZoneGroup.find({}).lean();
+  const branchLookup = {};
+  for (const group of zoneGroups) {
+    for (const branch of group.branches) {
+      branchLookup[branch.nepalcanId] = branch.name;
+    }
+  }
+
+  // Get all vendors with nepalcanId
+  const vendors = await Lead.find({
+    type: 'vendor',
+    nepalcanId: { $exists: true, $ne: null }
+  }).select('nepalcanId business_name service_branches').lean();
+
+  console.log(`[Service Branches] Checking ${vendors.length} vendors...`);
+  let updated = 0;
+
+  for (const vendor of vendors) {
+    const apiBranches = await fetchVendorServiceBranches(vendor.nepalcanId, authToken);
+    if (apiBranches.length === 0) continue;
+
+    // Match API branches to our DeliveryZoneGroup branches
+    const matched = [];
+    for (const branch of apiBranches) {
+      const branchId = branch._id || branch.id || branch.branchId || branch.nepalcanId;
+      const branchName = branch.name || branch.branchName || branch.label;
+      if (branchId) {
+        // Try to match against our zone branches for a better name
+        const zoneName = branchLookup[branchId];
+        matched.push({ branchId: String(branchId), name: zoneName || branchName || String(branchId) });
+      }
+    }
+
+    if (matched.length > 0) {
+      await Lead.findByIdAndUpdate(vendor._id, { service_branches: matched });
+      updated++;
+      console.log(`[Service Branches] Updated ${vendor.business_name}: ${matched.length} branches`);
+    }
+
+    // Small delay to avoid rate limiting
+    await new Promise(r => setTimeout(r, 200));
+  }
+
+  const durationMs = Date.now() - startTime;
+  console.log(`[Service Branches] Done — ${updated} vendors updated in ${durationMs}ms`);
+  return { updated, message: `Updated ${updated} vendors with service branches` };
+};
+
+/**
+ * Sync all Nepalcan data: orders and vendors together
+ * Runs both syncs sequentially with a single login
+ */
+const syncAllNepalcanData = async (userId = null) => {
+  const startTime = Date.now();
+  let loginToken = null;
+  let ordersResult = { synced: 0, message: '' };
+  let vendorsResult = { synced: 0, updated: 0, created: 0, message: '' };
+  let errorMessage = null;
+
+  try {
+    console.log('[Full Sync] Getting Nepalcan token...');
+    loginToken = await loginToNepalcan();
+    console.log('[Full Sync] Login successful');
+
+    console.log('[Full Sync] Starting orders sync...');
+    ordersResult = await syncNepalcanOrders(loginToken);
+    console.log(`[Full Sync] Orders sync complete: ${ordersResult.synced} orders`);
+
+    console.log('[Full Sync] Starting vendors sync...');
+    vendorsResult = await syncNepalcanVendors(loginToken, userId);
+    console.log(`[Full Sync] Vendors sync complete: ${vendorsResult.synced} vendors`);
+
+    console.log('[Full Sync] Starting service branches sync...');
+    const branchesResult = await syncServiceBranches(loginToken);
+    console.log(`[Full Sync] Service branches sync complete: ${branchesResult.updated} vendors updated`);
+  } catch (err) {
+    errorMessage = err.message;
+    console.error('[Full Sync] Error:', errorMessage);
+  }
+
+  const durationMs = Date.now() - startTime;
+
+  await NepalcanSyncLog.create({
+    type: 'full',
+    success: !errorMessage,
+    ordersSynced: ordersResult.synced || 0,
+    vendorsSynced: vendorsResult.synced || 0,
+    leadsSynced: vendorsResult.created || 0,
+    mergedRecords: vendorsResult.updated || 0,
+    errorMessage,
+    durationMs
+  });
+
+  return {
+    success: !errorMessage,
+    orders: ordersResult,
+    vendors: vendorsResult,
+    durationMs
+  };
+};
+
 module.exports = {
   syncNepalcanOrders,
   updateStaleOrders,
+  checkAndUpdateReturnedOrders,
   getLastSyncLog,
   getRecentSyncLogs,
   loginToNepalcan,
-  syncNepalcanVendors
+  syncNepalcanVendors,
+  syncAllNepalcanData,
+  syncServiceBranches
 };

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchGoals, deleteGoal } from '../store/goalSlice';
-import { Plus, Target, Calendar, TrendingUp, Users, Clock, Edit2, Trash2, CheckCircle } from 'lucide-react';
+import { Plus, Target, Calendar, TrendingUp, Users, Clock, Edit2, Trash2, CheckCircle, Search, X, Filter } from 'lucide-react';
 import GoalModal from '../components/GoalModal';
 import { cn } from '../utils/cn';
 
@@ -10,22 +10,23 @@ const GoalsPage = () => {
   const { items: goals, loading } = useSelector((state) => state.goals);
   const { user, token } = useSelector((state) => state.auth);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingGoal, setEditingGoal] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [periodFilter, setPeriodFilter] = useState('all');
 
   useEffect(() => {
     dispatch(fetchGoals());
   }, [dispatch]);
 
-  // Auto-refresh goals when window gains focus to show latest progress
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (!document.hidden) {
         dispatch(fetchGoals());
       }
     };
-    
     window.addEventListener('focus', handleVisibilityChange);
     window.addEventListener('visibilitychange', handleVisibilityChange);
-    
     return () => {
       window.removeEventListener('focus', handleVisibilityChange);
       window.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -42,25 +43,34 @@ const GoalsPage = () => {
     }
   };
 
+  const handleEdit = (goal) => {
+    setEditingGoal(goal);
+    setIsModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setEditingGoal(null);
+  };
+
   const getProgressColor = (percentage) => {
     if (percentage >= 100) return 'bg-emerald-500';
-    if (percentage >= 75) return 'bg-blue-500';
-    if (percentage >= 50) return 'bg-amber-500';
-    return 'bg-red-500';
+    if (percentage >= 75) return 'bg-red-500';
+    if (percentage >= 50) return 'bg-red-400';
+    return 'bg-red-300';
   };
 
   const getProgressBg = (percentage) => {
-    if (percentage >= 100) return 'bg-emerald-100';
-    if (percentage >= 75) return 'bg-blue-100';
-    if (percentage >= 50) return 'bg-amber-100';
-    return 'bg-red-100';
+    if (percentage >= 100) return 'bg-emerald-50';
+    return 'bg-red-50';
   };
 
   const getStatusBadge = (status) => {
     switch(status) {
-      case 'active': return 'bg-blue-50 text-blue-600 border-blue-100';
+      case 'active': return 'bg-red-50 text-red-600 border-red-100';
       case 'completed': return 'bg-emerald-50 text-emerald-600 border-emerald-100';
       case 'failed': return 'bg-rose-50 text-rose-600 border-rose-100';
+      case 'paused': return 'bg-amber-50 text-amber-600 border-amber-100';
       default: return 'bg-slate-50 text-slate-600 border-slate-100';
     }
   };
@@ -73,142 +83,220 @@ const GoalsPage = () => {
     });
   };
 
-  // Filter goals based on user role
-  const filteredGoals = goals.filter(goal => {
+  const roleFilteredGoals = goals.filter(goal => {
     if (user?.role === 'super_admin' || user?.role === 'admin') {
-      return true; // Show all goals
+      return true;
     }
-    // For regular users, show their own goals
     return goal.assigned_to?._id === user?._id || goal.assigned_to === user?._id;
+  });
+
+  const filteredGoals = roleFilteredGoals.filter(goal => {
+    if (statusFilter !== 'all' && goal.status !== statusFilter) return false;
+    if (periodFilter !== 'all' && goal.period !== periodFilter) return false;
+    if (!searchTerm.trim()) return true;
+    const q = searchTerm.toLowerCase();
+    return (
+      goal.title?.toLowerCase().includes(q) ||
+      goal.description?.toLowerCase().includes(q) ||
+      goal.assigned_to?.name?.toLowerCase().includes(q) ||
+      goal.unit?.toLowerCase().includes(q) ||
+      goal.period?.toLowerCase().includes(q) ||
+      goal.status?.toLowerCase().includes(q) ||
+      goal.priority?.toLowerCase().includes(q)
+    );
   });
 
   const canSetGoals = user?.role === 'super_admin' || user?.role === 'admin';
 
   return (
-    <div className="space-y-4 lg:space-y-8 max-w-[1600px] mx-auto">
-      <GoalModal 
-        isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)} 
-        onSuccess={handleSuccess} 
-        token={token} 
+    <div className="space-y-6 max-w-[1600px] mx-auto">
+      <GoalModal
+        isOpen={isModalOpen}
+        onClose={handleCloseModal}
+        onSuccess={handleSuccess}
+        token={token}
+        goal={editingGoal}
       />
-      
+
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 lg:gap-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 mb-1 lg:mb-2">
-            <div className="h-1 w-6 lg:w-8 bg-red-600 rounded-full" />
-            <span className="text-[8px] lg:text-[10px] font-black text-red-600 uppercase tracking-[0.2em]">Target Management</span>
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-1 h-6 bg-red-600 rounded-full" />
+            <span className="text-[10px] font-bold text-red-600 uppercase tracking-widest">Target Management</span>
           </div>
-          <h1 className="text-2xl lg:text-4xl font-black text-slate-900 tracking-tight">Monthly Goals</h1>
+          <h1 className="text-2xl lg:text-3xl font-extrabold text-slate-900 tracking-tight">Monthly Goals</h1>
         </div>
         <div className="flex items-center gap-2">
-          <button 
+          <button
             onClick={() => dispatch(fetchGoals())}
-            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-all"
+            className="p-2.5 text-slate-400 hover:text-slate-600 hover:bg-white rounded-xl transition-all border border-slate-100"
             title="Refresh goals"
           >
-            <TrendingUp size={18} />
+            <TrendingUp size={16} />
           </button>
           {canSetGoals && (
-            <button 
-              onClick={() => setIsModalOpen(true)}
-              className="flex items-center justify-center gap-2 px-6 lg:px-8 py-3 lg:py-4 bg-red-600 hover:bg-red-700 text-white rounded-xl lg:rounded-2xl font-black text-[10px] lg:text-xs uppercase tracking-widest shadow-xl shadow-red-100 transition-all active:scale-95 w-full sm:w-auto"
+            <button
+              onClick={() => { setEditingGoal(null); setIsModalOpen(true); }}
+              className="flex items-center justify-center gap-2 px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold text-xs uppercase tracking-wider shadow-sm transition-all active:scale-[0.98]"
             >
-              <Plus size={18} />
+              <Plus size={16} />
               <span>Set New Goal</span>
             </button>
           )}
         </div>
       </div>
 
+      {/* Search + Filters */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1 group">
+          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 z-10 pointer-events-none text-slate-400" />
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Search goals..."
+            style={{ paddingLeft: '2.5rem', paddingRight: '2.5rem' }}
+            className="w-full py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-100 focus:border-red-300 outline-none transition-all font-medium text-sm text-slate-800"
+          />
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm('')}
+              className="absolute right-3.5 top-1/2 -translate-y-1/2 z-10 p-0.5 text-slate-400 hover:text-slate-600 transition-colors"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Filter size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              style={{ paddingLeft: '2rem', paddingRight: '1rem' }}
+              className="py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 focus:ring-2 focus:ring-red-100 focus:border-red-300 outline-none appearance-none cursor-pointer"
+            >
+              <option value="all">All Status</option>
+              <option value="active">Active</option>
+              <option value="completed">Completed</option>
+              <option value="failed">Failed</option>
+              <option value="paused">Paused</option>
+            </select>
+          </div>
+          <select
+            value={periodFilter}
+            onChange={(e) => setPeriodFilter(e.target.value)}
+            className="px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 focus:ring-2 focus:ring-red-100 focus:border-red-300 outline-none appearance-none cursor-pointer"
+          >
+            <option value="all">All Periods</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="quarterly">Quarterly</option>
+            <option value="yearly">Yearly</option>
+          </select>
+        </div>
+      </div>
+
       {/* Goals Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {loading ? (
-          <div className="col-span-full py-12 flex flex-col items-center justify-center gap-4">
-            <div className="w-10 h-10 border-4 border-red-600 border-t-transparent rounded-full animate-spin" />
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Loading goals...</p>
+          <div className="col-span-full py-16 flex flex-col items-center justify-center gap-4">
+            <div className="w-8 h-8 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Loading goals...</p>
           </div>
         ) : filteredGoals.length === 0 ? (
-          <div className="col-span-full py-12 flex flex-col items-center justify-center gap-4 bg-white rounded-2xl border border-slate-100">
-            <Target size={48} className="text-slate-200" />
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No goals set yet</p>
+          <div className="col-span-full py-16 flex flex-col items-center justify-center gap-4 bg-white rounded-2xl border border-slate-100">
+            <div className="w-16 h-16 bg-red-50 rounded-2xl flex items-center justify-center">
+              {searchTerm ? <Search size={28} className="text-red-300" /> : <Target size={28} className="text-red-300" />}
+            </div>
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+              {searchTerm ? 'No goals found' : 'No goals set yet'}
+            </p>
           </div>
         ) : (
           filteredGoals.map((goal) => {
-            const progressPercentage = goal.target_value > 0 
-              ? Math.min(100, Math.round((goal.current_value / goal.target_value) * 100))
-              : 0;
+            const currentValue = goal.currentValue ?? goal.current_value ?? 0;
+            const progressPercentage = goal.progress ?? (goal.target_value > 0
+              ? Math.min(100, Math.round((currentValue / goal.target_value) * 100))
+              : 0);
             const isOwner = goal.set_by?._id === user?._id || goal.set_by === user?._id;
 
             return (
-              <div key={goal._id} className="bg-white p-6 lg:p-8 rounded-[2rem] border border-slate-100 shadow-sm hover:shadow-xl transition-all">
+              <div key={goal._id} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
                 {/* Header */}
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center text-red-600">
-                      <Target size={20} />
+                    <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center">
+                      <Target size={18} className="text-red-500" />
                     </div>
                     <div>
-                      <h3 className="font-black text-slate-900 text-sm lg:text-base">{goal.title}</h3>
-                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
-                        {goal.period} • {goal.unit} • Target: {goal.pipeline_stage !== 'all' ? goal.pipeline_stage : 'All Pipeline Stages'}
+                      <h3 className="font-bold text-slate-900 text-sm">{goal.title}</h3>
+                      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                        {goal.period} · {goal.unit} · {goal.pipeline_stage !== 'all' ? goal.pipeline_stage : 'All Stages'}
                       </p>
                     </div>
                   </div>
-                  <span className={cn("px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border", getStatusBadge(goal.status))}>
+                  <span className={cn("px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider border", getStatusBadge(goal.status))}>
                     {goal.status}
                   </span>
                 </div>
 
                 {/* Progress */}
-                <div className="mb-6">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[10px] font-black text-slate-400 uppercase">Progress</span>
-                    <span className="text-sm font-black text-slate-900">
-                      {goal.current_value} / {goal.target_value}
+                <div className="mb-4">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Progress</span>
+                    <span className="text-sm font-bold text-slate-900">
+                      {currentValue.toLocaleString()} / {goal.target_value.toLocaleString()}
                     </span>
                   </div>
-                  <div className={cn("h-3 rounded-full overflow-hidden", getProgressBg(progressPercentage))}>
-                    <div 
+                  <div className={cn("h-2 rounded-full overflow-hidden", getProgressBg(progressPercentage))}>
+                    <div
                       className={cn("h-full rounded-full transition-all duration-500", getProgressColor(progressPercentage))}
                       style={{ width: `${progressPercentage}%` }}
                     />
                   </div>
                   <div className="flex items-center justify-between mt-1">
-                    <span className="text-[9px] font-bold text-slate-500">{progressPercentage}% complete</span>
-                    <span className="text-[9px] font-bold text-slate-400">
-                      Priority: {goal.priority}
+                    <span className="text-[10px] font-semibold text-slate-500">{progressPercentage}%</span>
+                    <span className="text-[10px] font-semibold text-slate-400 capitalize">
+                      {goal.priority} priority
                     </span>
                   </div>
                 </div>
 
-
-
                 {/* Meta Info */}
-                <div className="space-y-3 text-[10px]">
-                  <div className="flex items-center gap-2">
+                <div className="space-y-2 text-xs">
+                  <div className="flex items-center gap-2 text-slate-500">
                     <Users size={12} className="text-slate-400" />
-                    <span className="font-bold text-slate-500">
-                      {user?.role === 'super_admin' || user?.role === 'admin' 
+                    <span className="font-medium">
+                      {user?.role === 'super_admin' || user?.role === 'admin'
                         ? `Assigned to: ${goal.assigned_to?.name || 'Unknown'}`
                         : `Assigned by: ${goal.set_by?.name || 'Unknown'}`}
                     </span>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 text-slate-500">
                     <Calendar size={12} className="text-slate-400" />
-                    <span className="font-bold text-slate-500">
-                      {formatDate(goal.start_date)} - {formatDate(goal.end_date)}
+                    <span className="font-medium">
+                      {formatDate(goal.start_date)} — {formatDate(goal.end_date)}
                     </span>
                   </div>
                 </div>
 
-                {/* Actions for goal owners */}
+                {/* Actions */}
                 {(isOwner || user?.role === 'super_admin') && goal.status === 'active' && (
-                  <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-50">
-                    <button 
+                  <div className="flex items-center gap-2 mt-4 pt-3 border-t border-slate-50">
+                    <button
+                      onClick={() => handleEdit(goal)}
+                      className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                      title="Edit goal"
+                    >
+                      <Edit2 size={14} />
+                    </button>
+                    <button
                       onClick={() => handleDelete(goal._id)}
-                      className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
+                      className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                      title="Delete goal"
                     >
                       <Trash2 size={14} />
                     </button>

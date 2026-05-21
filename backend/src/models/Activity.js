@@ -4,7 +4,7 @@ const activitySchema = new mongoose.Schema({
   lead_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Lead',
-    required: [true, 'Please provide lead ID']
+    default: null
   },
   user_id: {
     type: mongoose.Schema.Types.ObjectId,
