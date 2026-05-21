@@ -44,5 +44,12 @@ const activitySchema = new mongoose.Schema({
   }
 });
 
+// Indexes for common queries
+activitySchema.index({ created_at: -1 });
+activitySchema.index({ user_id: 1, created_at: -1 });
+activitySchema.index({ lead_id: 1, created_at: -1 });
+activitySchema.index({ activity_type: 1, created_at: -1 });
+activitySchema.index({ follow_up_required: 1, status: 1 });
+
 const Activity = mongoose.model('Activity', activitySchema);
 module.exports = Activity;

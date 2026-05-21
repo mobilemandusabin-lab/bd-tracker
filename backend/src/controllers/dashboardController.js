@@ -1278,7 +1278,8 @@ exports.getDayDetail = async (req, res) => {
       Activity.find({ created_at: { $gte: startOfDay, $lte: endOfDay } })
         .populate('user_id', 'name email')
         .populate({ path: 'lead_id', select: 'business_name lead_status' })
-        .sort('-created_at'),
+        .sort('-created_at')
+        .lean(),
       Activity.aggregate([
         { $match: { created_at: { $gte: startOfDay, $lte: endOfDay } } },
         { $group: { _id: { user_id: '$user_id', activity_type: '$activity_type' }, count: { $sum: 1 } } },
@@ -1290,19 +1291,24 @@ exports.getDayDetail = async (req, res) => {
       ]),
       Lead.find({ converted_at: { $gte: startOfDay, $lte: endOfDay } })
         .select('business_name lead_status converted_at assigned_user')
-        .populate('assigned_user', 'name'),
+        .populate('assigned_user', 'name')
+        .lean(),
       Lead.find({ created_at: { $gte: startOfDay, $lte: endOfDay } })
         .select('business_name lead_status lead_source created_at assigned_user')
-        .populate('assigned_user', 'name'),
+        .populate('assigned_user', 'name')
+        .lean(),
       Lead.find({ drop_date: { $gte: startOfDay, $lte: endOfDay } })
         .select('business_name drop_reason drop_date assigned_user')
-        .populate('assigned_user', 'name'),
+        .populate('assigned_user', 'name')
+        .lean(),
       Lead.find({ lead_status: 'Activated', updated_at: { $gte: startOfDay, $lte: endOfDay } })
         .select('business_name assigned_user updated_at')
-        .populate('assigned_user', 'name'),
+        .populate('assigned_user', 'name')
+        .lean(),
       Lead.find({ lead_status: 'Active Seller', updated_at: { $gte: startOfDay, $lte: endOfDay } })
         .select('business_name assigned_user updated_at')
         .populate('assigned_user', 'name')
+        .lean()
     ]);
 
     res.status(200).json({

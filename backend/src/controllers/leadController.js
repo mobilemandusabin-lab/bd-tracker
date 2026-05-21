@@ -229,7 +229,8 @@ exports.getAllLeads = async (req, res) => {
     let leadsQuery = Lead.find(query)
       .populate('assigned_user', 'name email role')
       .populate('creator_id', 'name email role')
-      .sort({ created_at: -1 });
+      .sort({ created_at: -1 })
+      .lean();
 
     // Apply pagination only if limit is specified
     if (limit > 0) {

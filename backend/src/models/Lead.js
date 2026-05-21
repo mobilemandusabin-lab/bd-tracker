@@ -251,5 +251,14 @@ leadSchema.virtual('priority').get(function() {
 leadSchema.set('toJSON', { virtuals: true });
 leadSchema.set('toObject', { virtuals: true });
 
+// Indexes for common queries
+leadSchema.index({ lead_status: 1 });
+leadSchema.index({ assigned_user: 1 });
+leadSchema.index({ created_at: -1 });
+leadSchema.index({ converted_at: -1 });
+leadSchema.index({ drop_date: -1 });
+leadSchema.index({ updated_at: -1 });
+leadSchema.index({ business_name: 'text', contact_person: 'text' });
+
 const Lead = mongoose.model('Lead', leadSchema);
 module.exports = Lead;
