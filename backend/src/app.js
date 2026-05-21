@@ -24,7 +24,12 @@ const extensionRoutes = require('./routes/extensionRoutes');
 const app = express();
 
 const corsOptions = {
-  origin: true,
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl, or chrome extensions)
+    if (!origin) return callback(null, true);
+    // Allow all origins including chrome-extension://
+    return callback(null, true);
+  },
   credentials: true,
   optionsSuccessStatus: 200,
   maxAge: 86400
