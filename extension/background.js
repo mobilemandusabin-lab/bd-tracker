@@ -139,7 +139,8 @@ async function handleLogin(message) {
       return { success: false, message: data.message || 'Login failed' };
     }
   } catch (err) {
-    return { success: false, message: 'Network error — is BD Tracker running?' };
+    console.error('[BD Tracker] Login error:', err.message, err);
+    return { success: false, message: `Network error: ${err.message}` };
   }
 }
 
