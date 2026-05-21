@@ -18,24 +18,43 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
   errorMsg.style.display = 'none';
 
   try {
-    const response = await new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({ type: 'LOGIN', email, password }, (resp) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-        } else {
-          resolve(resp || {});
-        }
-      });
+    // Load config to get API URL
+    const configResponse = await fetch(chrome.runtime.getURL('config.js'));
+    const configText = await configResponse.text();
+    const API_BASE_URL = configText.match(/API_BASE_URL:\s*'([^']+)'/)?.[1];
+
+    if (!API_BASE_URL) {
+      showError('Configuration error');
+      return;
+    }
+
+    // Call login API directly
+    const response = await fetch(`${API_BASE_URL}/extension/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
     });
 
-    if (response.success) {
-      // Close login tab and open popup
+    const data = await response.json();
+
+    if (response.ok && data.token) {
+      // Store auth data
+      await chrome.storage.local.set({
+        authToken: data.token,
+        userName: data.data?.user?.name || email,
+        userEmail: data.data?.user?.email || email,
+        userTeam: data.data?.user?.team || null
+      });
+
+      // Notify background to initialize
+      chrome.runtime.sendMessage({ type: 'LOGIN_SUCCESS' }).catch(() => {});
+
       window.close();
     } else {
-      showError(response.message || 'Login failed');
+      showError(data.message || 'Login failed');
     }
   } catch (err) {
-    showError(`Error: ${err.message || 'Could not connect to extension'}`);
+    showError(`Error: ${err.message}`);
   } finally {
     submitBtn.disabled = false;
     submitBtn.textContent = 'Sign In';

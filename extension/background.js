@@ -46,6 +46,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // async response
   }
 
+  if (message.type === 'LOGIN_SUCCESS') {
+    // Login was done directly from login page, initialize background
+    chrome.storage.local.get(['authToken'], (stored) => {
+      if (stored.authToken) {
+        authToken = stored.authToken;
+        startHeartbeat();
+        registerDevice();
+        checkForUpdates();
+      }
+    });
+    return;
+  }
+
   if (message.type === 'LOGOUT') {
     handleLogout().then(sendResponse);
     return true;
