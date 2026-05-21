@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "Captures listing, QC, and spec events from Nepalcan marketplace",
   "permissions": ["storage", "alarms", "webRequest"],
-  "host_permissions": ["https://commerce.thecanbrand.com/*", "https://demo.commerce.thecanbrand.com/*"],
+  "host_permissions": ["https://commerce.thecanbrand.com/*", "https://demo.commerce.thecanbrand.com/*", "https://bd-tracker-81oo.vercel.app/*"],
   "background": {
     "service_worker": "background.js"
   },

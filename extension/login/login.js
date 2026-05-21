@@ -18,10 +18,14 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
   errorMsg.style.display = 'none';
 
   try {
-    const response = await chrome.runtime.sendMessage({
-      type: 'LOGIN',
-      email,
-      password
+    const response = await new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({ type: 'LOGIN', email, password }, (resp) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else {
+          resolve(resp || {});
+        }
+      });
     });
 
     if (response.success) {
@@ -31,7 +35,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
       showError(response.message || 'Login failed');
     }
   } catch (err) {
-    showError('Could not connect to BD Tracker. Is the server running?');
+    showError(`Error: ${err.message || 'Could not connect to extension'}`);
   } finally {
     submitBtn.disabled = false;
     submitBtn.textContent = 'Sign In';
