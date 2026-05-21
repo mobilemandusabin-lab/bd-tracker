@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import {
   BarChart3, Package, ShieldCheck, ShieldX, Clock, FileText,
-  TrendingUp, Users, ChevronLeft, RefreshCw
+  TrendingUp, Users, ChevronLeft, RefreshCw, Calendar
 } from 'lucide-react';
 import { API_URL } from '../config/api';
 
@@ -15,15 +15,23 @@ const OperationsAnalyticsPage = () => {
   const [period, setPeriod] = useState('7d');
   const [view, setView] = useState('total');
   const [loading, setLoading] = useState(true);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
 
   useEffect(() => {
     fetchAnalytics();
-  }, [period]);
+  }, [period, startDate, endDate]);
 
   const fetchAnalytics = async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API_URL}/extension/analytics?period=${period}`, {
+      let url = `${API_URL}/extension/analytics`;
+      if (startDate && endDate) {
+        url += `?start_date=${startDate}&end_date=${endDate}`;
+      } else {
+        url += `?period=${period}`;
+      }
+      const res = await axios.get(url, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setAnalytics(res.data.data);
@@ -34,11 +42,21 @@ const OperationsAnalyticsPage = () => {
     }
   };
 
+  const handleStartDate = (e) => {
+    setStartDate(e.target.value);
+    if (!endDate) setEndDate(new Date().toISOString().split('T')[0]);
+  };
+
+  const clearDateRange = () => {
+    setStartDate('');
+    setEndDate('');
+  };
+
   const eventTypes = [
     { key: 'listing_created', label: 'Products Listed', icon: Package, color: 'blue' },
     { key: 'qc_approved', label: 'QC Approved', icon: ShieldCheck, color: 'emerald' },
     { key: 'qc_rejected', label: 'QC Rejected', icon: ShieldX, color: 'red' },
-    { key: 'qc_pending', label: 'QC Pending', icon: Clock, color: 'amber' },
+    { key: 'qc_pending', label: 'QC Pending', icon: Clock, color: 'amber', global: true },
     { key: 'spec_added', label: 'Specs Added', icon: FileText, color: 'violet' },
   ];
 
@@ -52,21 +70,7 @@ const OperationsAnalyticsPage = () => {
 
   const summary = analytics?.summary || {};
   const totalEvents = summary.total || 0;
-
-  // Build daily breakdown rows from dailyEvents
-  const dailyRows = (() => {
-    if (!analytics?.dailyEvents?.length) return [];
-    const byDate = {};
-    for (const ev of analytics.dailyEvents) {
-      if (!byDate[ev._id.date]) byDate[ev._id.date] = {};
-      byDate[ev._id.date][ev._id.event_type] = ev.count;
-    }
-    return Object.entries(byDate).reverse().map(([date, counts]) => ({
-      date,
-      ...counts,
-      total: Object.values(counts).reduce((a, b) => a + b, 0),
-    }));
-  })();
+  const comparisonRows = analytics?.dailyComparison || [];
 
   // Build user rows from eventsByUser
   const userRows = (analytics?.eventsByUser || []).map((u) => {
@@ -112,49 +116,77 @@ const OperationsAnalyticsPage = () => {
       </div>
 
       {/* Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        {/* View Toggle */}
-        <div className="flex items-center bg-slate-100 rounded-xl p-1">
-          {[
-            { key: 'total', label: 'Total', icon: BarChart3 },
-            { key: 'users', label: 'By Users', icon: Users },
-          ].map(({ key, label, icon: Icon }) => (
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          {/* View Toggle */}
+          <div className="flex items-center bg-slate-100 rounded-xl p-1">
+            {[
+              { key: 'total', label: 'Total', icon: BarChart3 },
+              { key: 'users', label: 'By Users', icon: Users },
+            ].map(({ key, label, icon: Icon }) => (
+              <button
+                key={key}
+                onClick={() => setView(key)}
+                className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                  view === key
+                    ? 'bg-white text-red-600 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                <Icon size={14} />
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* Period + Refresh */}
+          <div className="flex items-center gap-2">
+            {['today', '7d', '30d', '90d'].map((p) => (
+              <button
+                key={p}
+                onClick={() => { setPeriod(p); clearDateRange(); }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  period === p && !startDate
+                    ? 'bg-red-600 text-white'
+                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                }`}
+              >
+                {p === 'today' ? 'Today' : p === '7d' ? '7 Days' : p === '30d' ? '30 Days' : '90 Days'}
+              </button>
+            ))}
             <button
-              key={key}
-              onClick={() => setView(key)}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-                view === key
-                  ? 'bg-white text-red-600 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-700'
-              }`}
+              onClick={fetchAnalytics}
+              className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
             >
-              <Icon size={14} />
-              {label}
+              <RefreshCw size={14} />
             </button>
-          ))}
+          </div>
         </div>
 
-        {/* Period + Refresh */}
+        {/* Date Range Filter */}
         <div className="flex items-center gap-2">
-          {['today', '7d', '30d', '90d'].map((p) => (
+          <Calendar size={14} className="text-slate-400" />
+          <input
+            type="date"
+            value={startDate}
+            onChange={handleStartDate}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-600 border-none outline-none"
+          />
+          <span className="text-xs text-slate-400 font-bold">to</span>
+          <input
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-600 border-none outline-none"
+          />
+          {startDate && (
             <button
-              key={p}
-              onClick={() => setPeriod(p)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                period === p
-                  ? 'bg-red-600 text-white'
-                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-              }`}
+              onClick={clearDateRange}
+              className="px-2 py-1.5 text-[10px] font-bold text-red-500 hover:bg-red-50 rounded-lg transition-colors"
             >
-              {p === 'today' ? 'Today' : p === '7d' ? '7 Days' : p === '30d' ? '30 Days' : '90 Days'}
+              Clear
             </button>
-          ))}
-          <button
-            onClick={fetchAnalytics}
-            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
-          >
-            <RefreshCw size={14} />
-          </button>
+          )}
         </div>
       </div>
 
@@ -170,11 +202,29 @@ const OperationsAnalyticsPage = () => {
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-2 ${c.bg} ${c.text}`}>
                     <Icon size={18} />
                   </div>
-                  <p className="text-2xl font-extrabold text-slate-900">{summary[key] || 0}</p>
+                  <p className="text-2xl font-extrabold text-slate-900">{summary[key] ?? '—'}</p>
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">{label}</p>
                 </div>
               );
             })}
+          </div>
+
+          {/* Vendor Conversions */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="p-4 bg-white rounded-2xl border border-slate-100 shadow-sm text-center">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-2 bg-emerald-50 text-emerald-600">
+                <ShieldCheck size={18} />
+              </div>
+              <p className="text-2xl font-extrabold text-slate-900">{analytics?.vendorConversions?.activated ?? 0}</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Vendors Activated</p>
+            </div>
+            <div className="p-4 bg-white rounded-2xl border border-slate-100 shadow-sm text-center">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-2 bg-amber-50 text-amber-600">
+                <TrendingUp size={18} />
+              </div>
+              <p className="text-2xl font-extrabold text-slate-900">{analytics?.vendorConversions?.active_sellers ?? 0}</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">New Active Sellers</p>
+            </div>
           </div>
 
           {/* Total Events Bar */}
@@ -212,33 +262,48 @@ const OperationsAnalyticsPage = () => {
             </div>
           </div>
 
-          {/* Daily Breakdown Table */}
-          {dailyRows.length > 0 ? (
+          {/* QC Daily Comparison Table */}
+          {comparisonRows.length > 0 ? (
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
               <div className="px-6 py-4 border-b border-slate-100">
-                <h3 className="text-sm font-bold text-slate-700">Daily Breakdown</h3>
+                <h3 className="text-sm font-bold text-slate-700">QC Daily Comparison</h3>
+                <p className="text-[10px] text-slate-400 mt-0.5">Pending count vs approved vs rejected per day</p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-slate-50">
                       <th className="px-4 py-2.5 text-left text-[10px] font-bold text-slate-400 uppercase">Date</th>
-                      {eventTypes.map(({ key, label }) => (
-                        <th key={key} className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">{label}</th>
-                      ))}
-                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Total</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">QC Pending</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">QC Approved</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">QC Rejected</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Listed</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Specs</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Updated</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
-                    {dailyRows.map((row) => (
+                    {comparisonRows.map((row) => (
                       <tr key={row.date} className="hover:bg-slate-50">
                         <td className="px-4 py-2.5 font-bold text-slate-700">{row.date}</td>
-                        {eventTypes.map(({ key, color }) => (
-                          <td key={key} className={`px-4 py-2.5 text-center font-bold ${colorMap[color].text}`}>
-                            {row[key] || 0}
-                          </td>
-                        ))}
-                        <td className="px-4 py-2.5 text-center font-bold text-slate-900">{row.total}</td>
+                        <td className="px-4 py-2.5 text-center font-bold text-amber-600">
+                          {row.pending !== null ? row.pending.toLocaleString() : '—'}
+                        </td>
+                        <td className="px-4 py-2.5 text-center font-bold text-emerald-600">
+                          {row.approved || 0}
+                        </td>
+                        <td className="px-4 py-2.5 text-center font-bold text-red-600">
+                          {row.rejected || 0}
+                        </td>
+                        <td className="px-4 py-2.5 text-center font-bold text-blue-600">
+                          {row.listed || 0}
+                        </td>
+                        <td className="px-4 py-2.5 text-center font-bold text-violet-600">
+                          {row.specs || 0}
+                        </td>
+                        <td className="px-4 py-2.5 text-center font-bold text-slate-500">
+                          {row.updated || 0}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -273,11 +338,11 @@ const OperationsAnalyticsPage = () => {
                       </div>
                     </div>
                     <div className="grid grid-cols-5 gap-2">
-                      {eventTypes.map(({ key, label, color }) => {
+                      {eventTypes.map(({ key, label, color, global }) => {
                         const c = colorMap[color];
                         return (
                           <div key={key} className={`p-2 rounded-lg ${c.bg} text-center`}>
-                            <p className={`text-lg font-extrabold ${c.text}`}>{user[key] || 0}</p>
+                            <p className={`text-lg font-extrabold ${c.text}`}>{global ? (summary[key] ?? '—') : (user[key] || 0)}</p>
                             <p className="text-[8px] font-bold text-slate-400 uppercase leading-tight mt-0.5">{label.split(' ').pop()}</p>
                           </div>
                         );
@@ -310,9 +375,9 @@ const OperationsAnalyticsPage = () => {
                             <div className="font-bold text-slate-900">{user.name}</div>
                             {user.team && <div className="text-[10px] text-slate-400 uppercase">{user.team}</div>}
                           </td>
-                          {eventTypes.map(({ key, color }) => (
+                          {eventTypes.map(({ key, color, global }) => (
                             <td key={key} className={`px-4 py-2.5 text-center font-bold ${colorMap[color].text}`}>
-                              {user[key] || 0}
+                              {global ? (summary[key] ?? '—') : (user[key] || 0)}
                             </td>
                           ))}
                           <td className="px-4 py-2.5 text-center font-bold text-slate-900">{user.total}</td>

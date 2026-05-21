@@ -2,7 +2,6 @@ const mongoose = require('mongoose');
 const ExtensionVersion = require('../models/ExtensionVersion');
 const ExtensionDevice = require('../models/ExtensionDevice');
 const ExtensionEvent = require('../models/ExtensionEvent');
-const Activity = require('../models/Activity');
 const Lead = require('../models/Lead');
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
@@ -159,7 +158,7 @@ exports.heartbeat = async (req, res) => {
 // POST /extension/activity-log
 exports.logActivity = async (req, res) => {
   try {
-    const { event_type, product_id, vendor_id, product_name, qc_status, product_sku, metadata } = req.body;
+    const { event_type, product_id, vendor_id, product_name, qc_status, product_sku, pending_count, metadata } = req.body;
 
     // Verify required fields
     if (!event_type) {
@@ -171,9 +170,60 @@ exports.logActivity = async (req, res) => {
       return res.status(400).json({ status: 'fail', message: `Invalid event_type. Must be one of: ${validEvents.join(', ')}` });
     }
 
-    // Verify product_id exists for non-listing events
-    if (event_type !== 'listing_created' && !product_id) {
-      return res.status(400).json({ status: 'fail', message: 'product_id is required for this event type' });
+    // Try to extract product_id from URL path if not provided (webRequest source)
+    let effectiveProductId = product_id;
+    if (!effectiveProductId && metadata?.url) {
+      const match = metadata.url.match(/\/products\/([a-f0-9]+)/);
+      if (match) effectiveProductId = match[1];
+    }
+
+    // Deduplicate: skip spec_added if a listing_created for the same product exists within 7 minutes
+    if (event_type === 'spec_added' && effectiveProductId) {
+      const sevenMinAgo = new Date(Date.now() - 7 * 60 * 1000);
+      const recentListing = await ExtensionEvent.findOne({
+        event_type: 'listing_created',
+        product_id: effectiveProductId,
+        created_at: { $gte: sevenMinAgo }
+      });
+      if (recentListing) {
+        return res.status(200).json({
+          status: 'success',
+          data: {
+            event_id: recentListing._id,
+            event_type: 'spec_added',
+            product_id: effectiveProductId,
+            duplicate: true,
+            message: 'Skipped — listing created within 7 min'
+          }
+        });
+      }
+    }
+
+    // Deduplicate: qc_pending only once per day (first page load)
+    if (event_type === 'qc_pending') {
+      const startOfDay = new Date();
+      startOfDay.setUTCHours(0, 0, 0, 0);
+      const existing = await ExtensionEvent.findOne({
+        event_type: 'qc_pending',
+        created_at: { $gte: startOfDay }
+      });
+      if (existing) {
+        // Update pending_count if the new value is different
+        if (pending_count != null && existing.pending_count !== pending_count) {
+          existing.pending_count = pending_count;
+          await existing.save();
+        }
+        return res.status(200).json({
+          status: 'success',
+          data: {
+            event_id: existing._id,
+            event_type: 'qc_pending',
+            pending_count: existing.pending_count,
+            duplicate: true,
+            message: 'Already recorded today'
+          }
+        });
+      }
     }
 
     // Try to find the lead by nepalcanId (vendor_id)
@@ -185,62 +235,26 @@ exports.logActivity = async (req, res) => {
       }
     }
 
-    // Format description based on event type
-    let description = '';
-    let activitySubtype = event_type;
-
-    switch (event_type) {
-      case 'listing_created':
-        description = `Product listed: ${product_name || product_id} [${product_sku || 'no SKU'}] (Vendor: ${vendor_id}) — QC: ${qc_status || 'pending'}`;
-        break;
-      case 'product_updated':
-        description = `Product updated: ${product_name || product_id} [${product_sku || 'no SKU'}] (Vendor: ${vendor_id}) — QC: ${qc_status || 'unknown'}`;
-        break;
-      case 'qc_approved':
-        description = `QC approved: ${product_name || product_id} [${product_sku || 'no SKU'}] (Vendor: ${vendor_id})`;
-        break;
-      case 'qc_rejected':
-        description = `QC rejected: ${product_name || product_id} [${product_sku || 'no SKU'}] (Vendor: ${vendor_id})`;
-        break;
-      case 'qc_pending':
-        description = `QC pending: ${product_name || product_id} [${product_sku || 'no SKU'}] (Vendor: ${vendor_id})`;
-        break;
-      case 'spec_added':
-        description = `Spec added: ${product_name || product_id} [${product_sku || 'no SKU'}] (Vendor: ${vendor_id})`;
-        break;
-      default:
-        description = `${event_type}: ${product_name || product_id || 'unknown'}`;
-    }
-
-    // Create structured ExtensionEvent first (analytics data is never lost)
+    // Create ExtensionEvent (single source of truth for extension analytics)
     const extensionEvent = await ExtensionEvent.create({
       event_type,
-      product_id,
+      product_id: effectiveProductId,
       vendor_id,
       product_name,
       product_sku,
       qc_status,
+      pending_count: pending_count || metadata?.pending_count || null,
       user_id: req.user._id,
       lead_id: lead_id || undefined,
       metadata: metadata || {}
     });
 
-    // Also create Activity record for the activity feed
-    const activity = await Activity.create({
-      lead_id: lead_id || undefined,
-      user_id: req.user._id,
-      activity_type: 'note',
-      description,
-      status: 'completed'
-    });
-
     res.status(201).json({
       status: 'success',
       data: {
-        activity_id: activity._id,
         event_id: extensionEvent._id,
         event_type,
-        product_id,
+        product_id: effectiveProductId,
         vendor_id,
         verified: true,
         lead_matched: !!lead_id
@@ -296,20 +310,28 @@ exports.getStats = async (req, res) => {
 // GET /extension/analytics
 exports.getAnalytics = async (req, res) => {
   try {
-    const { period = '7d', user_id } = req.query;
+    const { period = '7d', user_id, start_date, end_date } = req.query;
 
-    // Calculate date range
-    const now = new Date();
-    let startDate;
-    switch (period) {
-      case 'today': startDate = new Date(now.setHours(0, 0, 0, 0)); break;
-      case '7d': startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000); break;
-      case '30d': startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); break;
-      case '90d': startDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000); break;
-      default: startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    // Calculate date range — custom dates take priority over period
+    let startDate, endDate;
+    if (start_date) {
+      startDate = new Date(start_date + 'T00:00:00.000Z');
+      endDate = end_date
+        ? new Date(end_date + 'T23:59:59.999Z')
+        : new Date();
+    } else {
+      const now = new Date();
+      endDate = new Date();
+      switch (period) {
+        case 'today': startDate = new Date(now.setHours(0, 0, 0, 0)); break;
+        case '7d': startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000); break;
+        case '30d': startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); break;
+        case '90d': startDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000); break;
+        default: startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      }
     }
 
-    const matchFilter = { created_at: { $gte: startDate } };
+    const matchFilter = { created_at: { $gte: startDate, $lte: endDate } };
     if (user_id && mongoose.Types.ObjectId.isValid(user_id)) {
       matchFilter.user_id = new mongoose.Types.ObjectId(user_id);
     }
@@ -318,6 +340,20 @@ exports.getAnalytics = async (req, res) => {
     const eventsByType = await ExtensionEvent.aggregate([
       { $match: matchFilter },
       { $group: { _id: '$event_type', count: { $sum: 1 } } }
+    ]);
+
+    // Get latest pending count for each day
+    const dailyPendingCounts = await ExtensionEvent.aggregate([
+      { $match: { ...matchFilter, event_type: 'qc_pending', pending_count: { $ne: null } } },
+      { $sort: { created_at: -1 } },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$created_at' } },
+          latest_pending_count: { $first: '$pending_count' },
+          latest_time: { $first: '$created_at' }
+        }
+      },
+      { $sort: { _id: 1 } }
     ]);
 
     // Daily breakdown
@@ -377,26 +413,77 @@ exports.getAnalytics = async (req, res) => {
       .limit(20)
       .lean();
 
+    // Get latest qc_pending count (global, not per-user)
+    const latestPendingEvent = await ExtensionEvent.findOne(
+      { event_type: 'qc_pending', pending_count: { $ne: null } },
+      { pending_count: 1 }
+    ).sort({ created_at: -1 }).lean();
+    const latestPendingCount = latestPendingEvent?.pending_count ?? null;
+
+    // Vendor conversions: activated + new active sellers in date range
+    const Lead = require('../models/Lead');
+    const [activatedToday, activeSellersToday] = await Promise.all([
+      Lead.countDocuments({
+        lead_status: 'Activated',
+        updated_at: { $gte: startDate, $lte: endDate }
+      }),
+      Lead.countDocuments({
+        lead_status: 'Active Seller',
+        updated_at: { $gte: startDate, $lte: endDate }
+      })
+    ]);
+
     // Build summary
     const summary = {};
     for (const item of eventsByType) {
-      summary[item._id] = item.count;
+      if (item._id !== 'qc_pending') {
+        summary[item._id] = item.count;
+      }
     }
+
+    // Build dailyComparison: merge pending counts + event counts per day
+    const pendingMap = {};
+    for (const pc of dailyPendingCounts) {
+      pendingMap[pc._id] = pc.latest_pending_count;
+    }
+    const dailyByDate = {};
+    for (const ev of dailyEvents) {
+      if (!dailyByDate[ev._id.date]) dailyByDate[ev._id.date] = {};
+      dailyByDate[ev._id.date][ev._id.event_type] = ev.count;
+    }
+    const allDates = new Set([...Object.keys(pendingMap), ...Object.keys(dailyByDate)]);
+    const dailyComparison = [...allDates].sort().map((date) => ({
+      date,
+      pending: pendingMap[date] ?? null,
+      approved: dailyByDate[date]?.qc_approved || 0,
+      rejected: dailyByDate[date]?.qc_rejected || 0,
+      listed: dailyByDate[date]?.listing_created || 0,
+      specs: dailyByDate[date]?.spec_added || 0,
+      updated: dailyByDate[date]?.product_updated || 0,
+    }));
 
     res.status(200).json({
       status: 'success',
       data: {
         period,
+        start_date: start_date || null,
+        end_date: end_date || null,
         summary: {
           listing_created: summary.listing_created || 0,
           product_updated: summary.product_updated || 0,
           qc_approved: summary.qc_approved || 0,
           qc_rejected: summary.qc_rejected || 0,
-          qc_pending: summary.qc_pending || 0,
+          qc_pending: latestPendingCount,
           spec_added: summary.spec_added || 0,
           total: Object.values(summary).reduce((a, b) => a + b, 0)
         },
+        vendorConversions: {
+          activated: activatedToday,
+          active_sellers: activeSellersToday
+        },
+        dailyComparison,
         dailyEvents,
+        dailyPendingCounts,
         eventsByUser,
         recentEvents
       }

@@ -58,9 +58,20 @@ const VendorManagementPage = () => {
   const desktopSentinelRef = useRef(null);
   const mobileSentinelRef = useRef(null);
 
+  const VENDOR_STATUSES = ['Negotiation', 'Document Pending', 'Verification', 'Onboarding', 'Activated', 'Active Seller', 'Lost', 'Self Registered'];
+
+  // Determine if a lead is a vendor based on its status
+  const isVendor = (lead) => VENDOR_STATUSES.includes(lead.lead_status);
+
   // Build API params based on active tab
   const buildParams = useCallback((page = 1, limit = 25) => {
-    const params = { page, limit, type: 'vendor' };
+    // When searching in "All Vendors" tab, search all types (no type filter)
+    const params = { page, limit };
+    if (activeTab === 'all' && searchQuery) {
+      // No type filter — search everything
+    } else {
+      params.type = 'vendor';
+    }
     if (searchQuery) params.search = searchQuery;
 
     switch (activeTab) {
@@ -448,7 +459,14 @@ const VendorManagementPage = () => {
               ) : sortedVendors.map((vendor) => (
                 <tr key={vendor._id} className="hover:bg-red-50/40 transition-colors group cursor-pointer" onClick={() => handleDetail(vendor)}>
                   <td className="px-5 py-3">
-                    <div className="font-bold text-slate-900 text-sm truncate group-hover:text-red-700 transition-colors">{vendor.business_name}</div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-slate-900 text-sm truncate group-hover:text-red-700 transition-colors">{vendor.business_name}</span>
+                      {searchQuery && (
+                        <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider ${isVendor(vendor) ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
+                          {isVendor(vendor) ? 'Vendor' : 'Lead'}
+                        </span>
+                      )}
+                    </div>
                     <div className="flex items-center gap-1 text-[10px] text-slate-400 mt-0.5"><MapPin size={9} className="text-red-400" /> {vendor.location}</div>
                   </td>
                   <td className="px-5 py-3">
@@ -532,7 +550,14 @@ const VendorManagementPage = () => {
             <div key={vendor._id} className="p-4 border-b border-slate-100 last:border-b-0 active:bg-red-50 cursor-pointer" onClick={() => handleDetail(vendor)}>
               <div className="flex items-start justify-between mb-2">
                 <div className="flex-1 min-w-0">
-                  <div className="font-bold text-slate-900 text-sm truncate">{vendor.business_name}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-900 text-sm truncate">{vendor.business_name}</span>
+                    {searchQuery && (
+                      <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider ${isVendor(vendor) ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
+                        {isVendor(vendor) ? 'Vendor' : 'Lead'}
+                      </span>
+                    )}
+                  </div>
                   <div className="flex items-center gap-1 text-[10px] text-slate-400 mt-0.5"><MapPin size={9} className="text-red-400 shrink-0" /><span className="truncate">{vendor.location}</span></div>
                 </div>
                 <div className="ml-2 shrink-0"><StatusBadge status={vendor.lead_status} /></div>

@@ -62,6 +62,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
+// Storage relay listener — picks up events from bridge.js when sendMessage is unavailable
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local') return;
+  for (const [key, change] of Object.entries(changes)) {
+    if (!key.startsWith('bd_event_')) continue;
+    const message = change.newValue;
+    if (message && message.type === 'BD_TRACKER_EVENT') {
+      handleEvent(message);
+      // Clean up the storage entry
+      chrome.storage.local.remove(key);
+    }
+  }
+});
+
 // Handle API events from content script
 async function handleEvent(message) {
   if (!authToken) return;
@@ -80,6 +94,7 @@ async function handleEvent(message) {
         product_name: message.data.product_name,
         product_sku: message.data.product_sku,
         qc_status: message.data.qc_status,
+        pending_count: message.data.pending_count,
         metadata: message.data
       })
     });
@@ -268,73 +283,52 @@ function generateDeviceId() {
 
 // ==================== WEB REQUEST INTERCEPT ====================
 // Detect API calls at the network level (can't be bypassed by page JS)
+// Note: product PUT handled by content script (needs response body inspection for spec detection)
 const API_EVENT_MAP = [
   { method: 'POST', urlPattern: '/api/vendor/products', eventType: 'listing_created' },
-  { method: 'PUT', urlPattern: '/api/vendor/products/', eventType: 'product_updated' },
   { method: 'POST', urlPattern: '/api/quality-check/products/', urlSuffix: '/approve', eventType: 'qc_approved' },
   { method: 'POST', urlPattern: '/api/quality-check/products/', urlSuffix: '/reject', eventType: 'qc_rejected' }
 ];
 
 chrome.webRequest.onCompleted.addListener(
-  async (details) => {
-    // Debug: log ALL requests to see what we're getting
-    console.log('[BD Tracker webRequest] Request:', details.method, details.url, 'status:', details.statusCode);
-
-    // Only successful responses
+  (details) => {
     if (details.statusCode < 200 || details.statusCode >= 300) return;
 
-    // Match against our patterns
-    const matched = API_EVENT_MAP.find(p => {
+    const matches = API_EVENT_MAP.filter(p => {
       if (details.method !== p.method) return false;
       if (!details.url.includes(p.urlPattern)) return false;
       if (p.urlSuffix && !details.url.includes(p.urlSuffix)) return false;
       return true;
     });
 
-    if (!matched) return;
+    if (matches.length === 0) return;
 
-    console.log('[BD Tracker webRequest] Detected:', matched.eventType, details.url);
+    chrome.storage.local.get(['authToken'], async (stored) => {
+      const token = stored.authToken || authToken;
+      if (!token) return;
 
-    // Get auth state
-    if (!authToken) {
-      const stored = await chrome.storage.local.get(['authToken']);
-      authToken = stored.authToken || null;
-    }
-
-    if (!authToken) {
-      console.log('[BD Tracker webRequest] Not logged in, skipping');
-      return;
-    }
-
-    // Send to backend — we don't have response body from webRequest,
-    // but the backend will still create the ExtensionEvent with event_type and user_id
-    try {
-      const response = await fetch(`${CONFIG.API_BASE_URL}/extension/activity-log`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`
-        },
-        body: JSON.stringify({
-          event_type: matched.eventType,
-          product_id: null,
-          vendor_id: null,
-          product_name: null,
-          product_sku: null,
-          qc_status: null,
-          metadata: { source: 'webRequest', url: details.url, method: details.method }
-        })
-      });
-
-      if (response.ok) {
-        console.log('[BD Tracker webRequest] Event logged:', matched.eventType);
-      } else {
-        console.log('[BD Tracker webRequest] Failed:', response.status);
+      for (const matched of matches) {
+        try {
+          await fetch(`${CONFIG.API_BASE_URL}/extension/activity-log`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              event_type: matched.eventType,
+              product_id: null,
+              vendor_id: null,
+              product_name: null,
+              product_sku: null,
+              qc_status: null,
+              metadata: { source: 'webRequest', url: details.url, method: details.method }
+            })
+          });
+        } catch (err) {}
       }
-    } catch (err) {
-      console.log('[BD Tracker webRequest] Error:', err.message);
-    }
+    });
   },
-  { urls: ['https://commerce.thecanbrand.com/*'] },
+  { urls: ['https://commerce.thecanbrand.com/*', 'https://demo.commerce.thecanbrand.com/*'] },
   ['responseHeaders']
 );

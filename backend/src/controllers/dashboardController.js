@@ -1273,7 +1273,7 @@ exports.getDayDetail = async (req, res) => {
 
     const dateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
 
-    const [summary, activities, userBreakdown, convertedLeads, createdLeads, lostLeads] = await Promise.all([
+    const [summary, activities, userBreakdown, convertedLeads, createdLeads, lostLeads, activatedVendors, activeSellers] = await Promise.all([
       getDaySummary(startOfDay, endOfDay),
       Activity.find({ created_at: { $gte: startOfDay, $lte: endOfDay } })
         .populate('user_id', 'name email')
@@ -1296,6 +1296,12 @@ exports.getDayDetail = async (req, res) => {
         .populate('assigned_user', 'name'),
       Lead.find({ drop_date: { $gte: startOfDay, $lte: endOfDay } })
         .select('business_name drop_reason drop_date assigned_user')
+        .populate('assigned_user', 'name'),
+      Lead.find({ lead_status: 'Activated', updated_at: { $gte: startOfDay, $lte: endOfDay } })
+        .select('business_name assigned_user updated_at')
+        .populate('assigned_user', 'name'),
+      Lead.find({ lead_status: 'Active Seller', updated_at: { $gte: startOfDay, $lte: endOfDay } })
+        .select('business_name assigned_user updated_at')
         .populate('assigned_user', 'name')
     ]);
 
@@ -1308,7 +1314,9 @@ exports.getDayDetail = async (req, res) => {
         activities,
         converted_leads: convertedLeads,
         created_leads: createdLeads,
-        lost_leads: lostLeads
+        lost_leads: lostLeads,
+        activated_vendors: activatedVendors,
+        active_sellers: activeSellers
       }
     });
   } catch (err) {
@@ -1362,6 +1370,81 @@ exports.getDayCompare = async (req, res) => {
         date1: { date: date1, summary: summary1 },
         date2: { date: date2, summary: summary2 },
         delta
+      }
+    });
+  } catch (err) {
+    res.status(400).json({ status: 'fail', message: err.message });
+  }
+};
+
+// GET /dashboard/week-compare?date=2026-05-21
+// Compares Sunday-to-selected-date vs previous week same period
+exports.getWeekCompare = async (req, res) => {
+  try {
+    const { date } = req.query;
+    const [y, m, d] = date.split('-').map(Number);
+    const selectedDate = new Date(y, m - 1, d);
+
+    // Find Sunday of the current week
+    const dayOfWeek = selectedDate.getDay(); // 0=Sun, 1=Mon, ...
+    const currentSunday = new Date(selectedDate);
+    currentSunday.setDate(selectedDate.getDate() - dayOfWeek);
+    currentSunday.setHours(0, 0, 0, 0);
+
+    // End is the selected date end of day
+    const currentEnd = new Date(selectedDate);
+    currentEnd.setHours(23, 59, 59, 999);
+
+    // Previous week: same day-of-week range
+    const prevSunday = new Date(currentSunday);
+    prevSunday.setDate(prevSunday.getDate() - 7);
+
+    const prevEnd = new Date(currentEnd);
+    prevEnd.setDate(prevEnd.getDate() - 7);
+
+    const [currentSummary, prevSummary, currentActivated, prevActivated, currentActiveSellers, prevActiveSellers] = await Promise.all([
+      getDaySummary(currentSunday, currentEnd),
+      getDaySummary(prevSunday, prevEnd),
+      Lead.countDocuments({ lead_status: 'Activated', updated_at: { $gte: currentSunday, $lte: currentEnd } }),
+      Lead.countDocuments({ lead_status: 'Activated', updated_at: { $gte: prevSunday, $lte: prevEnd } }),
+      Lead.countDocuments({ lead_status: 'Active Seller', updated_at: { $gte: currentSunday, $lte: currentEnd } }),
+      Lead.countDocuments({ lead_status: 'Active Seller', updated_at: { $gte: prevSunday, $lte: prevEnd } })
+    ]);
+
+    const pct = (a, b) => b > 0 ? parseFloat((((a - b) / b) * 100).toFixed(1)) : null;
+
+    const currentWeekLabel = `Sun ${currentSunday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+    const prevWeekLabel = `Sun ${prevSunday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${prevEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        current_week: {
+          label: currentWeekLabel,
+          summary: { ...currentSummary, activated: currentActivated, active_sellers: currentActiveSellers }
+        },
+        previous_week: {
+          label: prevWeekLabel,
+          summary: { ...prevSummary, activated: prevActivated, active_sellers: prevActiveSellers }
+        },
+        delta: {
+          total_activities: currentSummary.total_activities - prevSummary.total_activities,
+          total_activities_pct: pct(currentSummary.total_activities, prevSummary.total_activities),
+          calls: (currentSummary.by_type.call || 0) - (prevSummary.by_type.call || 0),
+          calls_pct: pct(currentSummary.by_type.call || 0, prevSummary.by_type.call || 0),
+          leads_converted: currentSummary.leads_converted - prevSummary.leads_converted,
+          leads_converted_pct: pct(currentSummary.leads_converted, prevSummary.leads_converted),
+          leads_created: currentSummary.leads_created - prevSummary.leads_created,
+          leads_created_pct: pct(currentSummary.leads_created, prevSummary.leads_created),
+          leads_lost: currentSummary.leads_lost - prevSummary.leads_lost,
+          leads_lost_pct: pct(currentSummary.leads_lost, prevSummary.leads_lost),
+          leads_contacted: currentSummary.leads_contacted - prevSummary.leads_contacted,
+          leads_contacted_pct: pct(currentSummary.leads_contacted, prevSummary.leads_contacted),
+          activated: currentActivated - prevActivated,
+          activated_pct: pct(currentActivated, prevActivated),
+          active_sellers: currentActiveSellers - prevActiveSellers,
+          active_sellers_pct: pct(currentActiveSellers, prevActiveSellers)
+        }
       }
     });
   } catch (err) {

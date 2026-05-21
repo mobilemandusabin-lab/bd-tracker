@@ -4,19 +4,19 @@
   "version": "1.0.0",
   "description": "Captures listing, QC, and spec events from Nepalcan marketplace",
   "permissions": ["storage", "alarms", "webRequest"],
-  "host_permissions": ["https://commerce.thecanbrand.com/*"],
+  "host_permissions": ["https://commerce.thecanbrand.com/*", "https://demo.commerce.thecanbrand.com/*"],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["https://commerce.thecanbrand.com/*"],
+      "matches": ["https://commerce.thecanbrand.com/*", "https://demo.commerce.thecanbrand.com/*"],
       "js": ["content.js"],
       "world": "MAIN",
       "run_at": "document_start"
     },
     {
-      "matches": ["https://commerce.thecanbrand.com/*"],
+      "matches": ["https://commerce.thecanbrand.com/*", "https://demo.commerce.thecanbrand.com/*"],
       "js": ["bridge.js"],
       "run_at": "document_start"
     }

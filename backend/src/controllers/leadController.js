@@ -136,22 +136,33 @@ exports.getAllLeads = async (req, res) => {
   try {
     const query = {};
     const user = req.user;
-    
-    // Database search mode (all=true with search) allows searching entire database for all users
+
+    // Database search mode: no type + search = search entire database
     const isGlobalSearch = req.query.all === 'true' && req.query.search;
-    
+    const isUntypedSearch = !req.query.type && req.query.search;
+    const searchAll = isGlobalSearch || isUntypedSearch;
+
     // Filter by type to determine visibility rules
     const isVendorView = req.query.type === 'vendor';
 
     // Super admin sees all leads/vendors by default
     // Regular users see only their assigned leads
     // For vendors: regular users see all vendors EXCEPT when unassigned filter is used
-    if (user.role !== 'super_admin' && !isGlobalSearch) {
+    // When searching without type filter: show everything (no assigned_user filter)
+    if (user.role !== 'super_admin' && !searchAll) {
       if (!isVendorView) {
         query.assigned_user = user._id;
       } else if (isVendorView && req.query.unassigned !== 'true') {
-        // For vendor view, non-super-admin users only see their assigned vendors
-        query.assigned_user = user._id;
+        if (req.query.search) {
+          // When searching vendors, include both assigned and unassigned
+          query.$or = [
+            { assigned_user: user._id },
+            { assigned_user: null }
+          ];
+        } else {
+          // Without search, only show assigned vendors
+          query.assigned_user = user._id;
+        }
       }
     }
 

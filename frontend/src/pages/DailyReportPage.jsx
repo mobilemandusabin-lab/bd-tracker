@@ -6,7 +6,8 @@ import {
   Phone, MessageSquare, Mail, CalendarDays, Monitor, Clock, StickyNote,
   ChevronLeft, ChevronRight, ArrowUpRight, ArrowDownRight, Minus,
   Users, Target, TrendingUp, TrendingDown, Activity, GitCompareArrows,
-  X, BarChart3, ArrowLeft, Calendar, Loader2, AlertCircle, FileText
+  X, BarChart3, ArrowLeft, Calendar, Loader2, AlertCircle, FileText,
+  ShieldCheck, Zap
 } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { API_URL } from '../config/api';
@@ -99,7 +100,11 @@ export default function DailyReportPage({ embedded }) {
   const [compareData, setCompareData] = useState(null);
   const [compareLoading, setCompareLoading] = useState(false);
   const [showComparePicker, setShowComparePicker] = useState(false);
-  const [expandedSections, setExpandedSections] = useState({ converted: true, created: false, lost: false });
+  const [weekCompareData, setWeekCompareData] = useState(null);
+  const [weekCompareLoading, setWeekCompareLoading] = useState(false);
+  const [compareMode, setCompareMode] = useState('day'); // 'day' or 'week'
+  const [expandedSections, setExpandedSections] = useState({ converted: true, created: false, lost: false, activated: false, activeSellers: false });
+  const [selectedUser, setSelectedUser] = useState(null);
 
   const today = new Date();
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -130,15 +135,27 @@ export default function DailyReportPage({ embedded }) {
   };
 
   const handleCompare = async () => {
-    if (!compareDate) return;
-    setCompareLoading(true);
-    try {
-      const res = await axios.get(`${API_URL}/dashboard/day-compare?date1=${selectedDate}&date2=${compareDate}`, { headers });
-      setCompareData(res.data.data);
-    } catch (err) {
-      console.error('Error fetching comparison:', err);
-    } finally {
-      setCompareLoading(false);
+    if (compareMode === 'week') {
+      setWeekCompareLoading(true);
+      try {
+        const res = await axios.get(`${API_URL}/dashboard/week-compare?date=${selectedDate}`, { headers });
+        setWeekCompareData(res.data.data);
+      } catch (err) {
+        console.error('Error fetching week comparison:', err);
+      } finally {
+        setWeekCompareLoading(false);
+      }
+    } else {
+      if (!compareDate) return;
+      setCompareLoading(true);
+      try {
+        const res = await axios.get(`${API_URL}/dashboard/day-compare?date1=${selectedDate}&date2=${compareDate}`, { headers });
+        setCompareData(res.data.data);
+      } catch (err) {
+        console.error('Error fetching comparison:', err);
+      } finally {
+        setCompareLoading(false);
+      }
     }
   };
 
@@ -292,30 +309,89 @@ export default function DailyReportPage({ embedded }) {
 
         {/* Compare Picker */}
         {showComparePicker && (
-          <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-center gap-3">
-            <span className="text-sm font-bold text-slate-700">Compare with:</span>
-            <input
-              type="date"
-              value={compareDate}
-              onChange={(e) => setCompareDate(e.target.value)}
-              max={todayStr}
-              className="px-3 py-2 border border-slate-200 rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
-            />
-            <button
-              onClick={handleCompare}
-              disabled={!compareDate || compareLoading}
-              className="px-4 py-2 bg-red-600 text-white text-xs font-bold rounded-xl hover:bg-red-700 transition-colors disabled:opacity-50"
-            >
-              {compareLoading ? <Loader2 size={14} className="animate-spin" /> : 'Compare'}
-            </button>
-            {compareData && (
-              <button
-                onClick={() => { setCompareData(null); setCompareDate(''); }}
-                className="p-2 text-slate-400 hover:text-red-600 rounded-lg"
-              >
-                <X size={14} />
-              </button>
-            )}
+          <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm space-y-3">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-bold text-slate-700">Compare mode:</span>
+              <div className="flex items-center bg-slate-100 rounded-lg p-0.5">
+                <button
+                  onClick={() => setCompareMode('day')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${compareMode === 'day' ? 'bg-white text-red-600 shadow-sm' : 'text-slate-500'}`}
+                >
+                  Day vs Day
+                </button>
+                <button
+                  onClick={() => setCompareMode('week')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${compareMode === 'week' ? 'bg-white text-red-600 shadow-sm' : 'text-slate-500'}`}
+                >
+                  Week to Date
+                </button>
+              </div>
+            </div>
+            <div className="flex flex-col sm:flex-row items-center gap-3">
+              {compareMode === 'day' ? (
+                <>
+                  <input
+                    type="date"
+                    value={compareDate}
+                    onChange={(e) => setCompareDate(e.target.value)}
+                    max={todayStr}
+                    className="px-3 py-2 border border-slate-200 rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                  />
+                  <button
+                    onClick={handleCompare}
+                    disabled={!compareDate || compareLoading}
+                    className="px-4 py-2 bg-red-600 text-white text-xs font-bold rounded-xl hover:bg-red-700 transition-colors disabled:opacity-50"
+                  >
+                    {compareLoading ? <Loader2 size={14} className="animate-spin" /> : 'Compare'}
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={handleCompare}
+                  disabled={weekCompareLoading}
+                  className="px-4 py-2 bg-red-600 text-white text-xs font-bold rounded-xl hover:bg-red-700 transition-colors disabled:opacity-50"
+                >
+                  {weekCompareLoading ? <Loader2 size={14} className="animate-spin" /> : 'Compare This Week vs Last Week'}
+                </button>
+              )}
+              {(compareData || weekCompareData) && (
+                <button
+                  onClick={() => { setCompareData(null); setWeekCompareData(null); setCompareDate(''); }}
+                  className="p-2 text-slate-400 hover:text-red-600 rounded-lg"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Week Comparison */}
+        {weekCompareData && (
+          <div className="bg-gradient-to-r from-slate-50 to-white border border-slate-100 rounded-2xl p-4 lg:p-5 shadow-sm">
+            <div className="flex items-center gap-2 mb-3">
+              <GitCompareArrows size={16} className="text-red-600" />
+              <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                {weekCompareData.current_week.label} vs {weekCompareData.previous_week.label}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              {[
+                { label: 'Total Activities', delta: weekCompareData.delta.total_activities, pct: weekCompareData.delta.total_activities_pct },
+                { label: 'Calls', delta: weekCompareData.delta.calls, pct: weekCompareData.delta.calls_pct },
+                { label: 'Converted', delta: weekCompareData.delta.leads_converted, pct: weekCompareData.delta.leads_converted_pct },
+                { label: 'Created', delta: weekCompareData.delta.leads_created, pct: weekCompareData.delta.leads_created_pct },
+                { label: 'Lost', delta: weekCompareData.delta.leads_lost, pct: weekCompareData.delta.leads_lost_pct, invert: true },
+                { label: 'Contacted', delta: weekCompareData.delta.leads_contacted, pct: weekCompareData.delta.leads_contacted_pct },
+                { label: 'Activated', delta: weekCompareData.delta.activated, pct: weekCompareData.delta.activated_pct },
+                { label: 'Active Sellers', delta: weekCompareData.delta.active_sellers, pct: weekCompareData.delta.active_sellers_pct }
+              ].map(item => (
+                <div key={item.label} className="bg-white rounded-xl p-3 border border-slate-100">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">{item.label}</p>
+                  <DeltaBadge delta={item.delta} pct={item.pct} invertColors={item.invert} />
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -372,13 +448,15 @@ export default function DailyReportPage({ embedded }) {
         ) : (
           <>
             {/* Summary Stat Cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <StatCard icon={Activity} label="Total Activities" value={dayDetail.summary.total_activities} />
               <StatCard icon={Phone} label="Calls Made" value={dayDetail.summary.by_type.call || 0} />
               <StatCard icon={Target} label="Leads Converted" value={dayDetail.summary.leads_converted} color="text-emerald-600" iconBg="bg-emerald-50" />
               <StatCard icon={TrendingUp} label="Leads Created" value={dayDetail.summary.leads_created} color="text-blue-600" iconBg="bg-blue-50" />
               <StatCard icon={TrendingDown} label="Leads Lost" value={dayDetail.summary.leads_lost} color="text-red-600" iconBg="bg-red-50" />
               <StatCard icon={Users} label="Leads Contacted" value={dayDetail.summary.leads_contacted} color="text-violet-600" iconBg="bg-violet-50" />
+              <StatCard icon={ShieldCheck} label="Vendors Activated" value={dayDetail.activated_vendors?.length || 0} color="text-emerald-600" iconBg="bg-emerald-50" />
+              <StatCard icon={Zap} label="New Active Sellers" value={dayDetail.active_sellers?.length || 0} color="text-amber-600" iconBg="bg-amber-50" />
             </div>
 
             {/* Activity Type Chart + User Breakdown */}
@@ -405,45 +483,116 @@ export default function DailyReportPage({ embedded }) {
 
               {/* Per-User Breakdown */}
               <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
-                <div className="px-4 py-3 border-b border-slate-100">
+                <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
                   <h3 className="text-sm font-bold text-slate-900">User Performance</h3>
+                  {selectedUser && (
+                    <button
+                      onClick={() => setSelectedUser(null)}
+                      className="text-[10px] font-bold text-red-600 hover:text-red-700"
+                    >
+                      ← Back to all
+                    </button>
+                  )}
                 </div>
-                {dayDetail.user_breakdown.length === 0 ? (
-                  <div className="p-6 text-center">
-                    <Users size={28} className="text-slate-200 mx-auto mb-2" />
-                    <p className="text-xs font-bold text-slate-400">No user activity</p>
-                  </div>
-                ) : (
-                  <div className="max-h-[320px] overflow-y-auto divide-y divide-slate-50">
-                    {dayDetail.user_breakdown.map(user => {
-                      const typeMap = {};
-                      user.types.forEach(t => { typeMap[t.type] = t.count; });
+                {selectedUser ? (
+                  // User drill-down: show all activities for this user
+                  <div className="max-h-[400px] overflow-y-auto">
+                    {(() => {
+                      const userActivities = dayDetail.activities.filter(a => a.user_id?._id === selectedUser._id || a.user_id === selectedUser._id);
+                      if (userActivities.length === 0) {
+                        return (
+                          <div className="p-6 text-center">
+                            <Activity size={28} className="text-slate-200 mx-auto mb-2" />
+                            <p className="text-xs font-bold text-slate-400">No activities for this user</p>
+                          </div>
+                        );
+                      }
                       return (
-                        <div key={user._id} className="px-4 py-3 hover:bg-red-50/30 transition-colors">
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                              <div className="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center text-white text-xs font-extrabold">
-                                {user.user?.name?.[0] || 'U'}
+                        <div className="divide-y divide-slate-50">
+                          {userActivities.map(act => {
+                            const Icon = ACTIVITY_ICONS[act.activity_type] || Activity;
+                            return (
+                              <div key={act._id} className="px-4 py-3 hover:bg-red-50/30 transition-colors">
+                                <div className="flex items-start gap-3">
+                                  <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5" style={{ backgroundColor: `${ACTIVITY_COLORS[act.activity_type]}15` }}>
+                                    <Icon size={14} style={{ color: ACTIVITY_COLORS[act.activity_type] }} />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 mb-0.5">
+                                      <span className="text-xs font-bold text-slate-900 capitalize">{act.activity_type?.replace('_', ' ')}</span>
+                                      <span className="text-[10px] text-slate-400">
+                                        {new Date(act.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-slate-600">{act.description}</p>
+                                    {act.lead_id && (
+                                      <div className="flex items-center gap-1 mt-1">
+                                        <span className="text-[10px] font-bold text-slate-400">Vendor:</span>
+                                        <span className="text-[10px] font-semibold text-red-600">{act.lead_id.business_name || 'Unknown'}</span>
+                                        {act.lead_id.lead_status && (
+                                          <span className="text-[10px] text-slate-400">({act.lead_id.lead_status})</span>
+                                        )}
+                                      </div>
+                                    )}
+                                    {act.follow_up_required && (
+                                      <span className="inline-block mt-1 px-2 py-0.5 bg-amber-50 text-amber-600 text-[10px] font-bold rounded">
+                                        Follow-up: {act.follow_up_date ? new Date(act.follow_up_date).toLocaleDateString() : 'Required'}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
                               </div>
-                              <span className="text-sm font-bold text-slate-900">{user.user?.name}</span>
-                            </div>
-                            <span className="text-sm font-extrabold text-red-600">{user.total_activities}</span>
-                          </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {Object.entries(typeMap).map(([type, count]) => {
-                              const Icon = ACTIVITY_ICONS[type] || Activity;
-                              return (
-                                <span key={type} className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-50 rounded-md text-[10px] font-bold text-slate-600">
-                                  <Icon size={10} style={{ color: ACTIVITY_COLORS[type] }} />
-                                  {count}
-                                </span>
-                              );
-                            })}
-                          </div>
+                            );
+                          })}
                         </div>
                       );
-                    })}
+                    })()}
                   </div>
+                ) : (
+                  // User list
+                  <>
+                    {dayDetail.user_breakdown.length === 0 ? (
+                      <div className="p-6 text-center">
+                        <Users size={28} className="text-slate-200 mx-auto mb-2" />
+                        <p className="text-xs font-bold text-slate-400">No user activity</p>
+                      </div>
+                    ) : (
+                      <div className="max-h-[320px] overflow-y-auto divide-y divide-slate-50">
+                        {dayDetail.user_breakdown.map(user => {
+                          const typeMap = {};
+                          user.types.forEach(t => { typeMap[t.type] = t.count; });
+                          return (
+                            <div
+                              key={user._id}
+                              className="px-4 py-3 hover:bg-red-50/30 transition-colors cursor-pointer"
+                              onClick={() => setSelectedUser(user)}
+                            >
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center text-white text-xs font-extrabold">
+                                    {user.user?.name?.[0] || 'U'}
+                                  </div>
+                                  <span className="text-sm font-bold text-slate-900">{user.user?.name}</span>
+                                </div>
+                                <span className="text-sm font-extrabold text-red-600">{user.total_activities}</span>
+                              </div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {Object.entries(typeMap).map(([type, count]) => {
+                                  const Icon = ACTIVITY_ICONS[type] || Activity;
+                                  return (
+                                    <span key={type} className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-50 rounded-md text-[10px] font-bold text-slate-600">
+                                      <Icon size={10} style={{ color: ACTIVITY_COLORS[type] }} />
+                                      {count}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -506,6 +655,28 @@ export default function DailyReportPage({ embedded }) {
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-xs text-slate-500">{lead.assigned_user?.name || 'Unassigned'}</span>
                       <span className="text-[10px] text-emerald-600 font-bold">{lead.lead_status}</span>
+                    </div>
+                  </div>
+                )
+              },
+              { key: 'activated', label: 'Vendors Activated', icon: ShieldCheck, leads: dayDetail.activated_vendors || [], emptyText: 'No vendors activated today', color: 'text-emerald-600',
+                render: (lead) => (
+                  <div key={lead._id} className="px-4 py-3 hover:bg-emerald-50/30 transition-colors">
+                    <p className="text-sm font-bold text-slate-900">{lead.business_name}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-xs text-slate-500">{lead.assigned_user?.name || 'Unassigned'}</span>
+                      <span className="text-[10px] text-emerald-600 font-bold">Activated</span>
+                    </div>
+                  </div>
+                )
+              },
+              { key: 'activeSellers', label: 'New Active Sellers', icon: Zap, leads: dayDetail.active_sellers || [], emptyText: 'No new active sellers today', color: 'text-amber-600',
+                render: (lead) => (
+                  <div key={lead._id} className="px-4 py-3 hover:bg-amber-50/30 transition-colors">
+                    <p className="text-sm font-bold text-slate-900">{lead.business_name}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-xs text-slate-500">{lead.assigned_user?.name || 'Unassigned'}</span>
+                      <span className="text-[10px] text-amber-600 font-bold">Active Seller</span>
                     </div>
                   </div>
                 )

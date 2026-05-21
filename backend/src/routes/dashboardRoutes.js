@@ -19,6 +19,7 @@ router.get('/analytics', dashboardController.getAnalytics);
 router.get('/my-analytics', dashboardController.getMyAnalytics);
 router.get('/day-detail', authMiddleware.restrictTo('super_admin'), dashboardController.getDayDetail);
 router.get('/day-compare', authMiddleware.restrictTo('super_admin'), dashboardController.getDayCompare);
+router.get('/week-compare', authMiddleware.restrictTo('super_admin'), dashboardController.getWeekCompare);
 
 // Sync endpoints (super_admin only)
 router.post('/sync-all', authMiddleware.restrictTo('super_admin'), dashboardController.triggerFullSync);
