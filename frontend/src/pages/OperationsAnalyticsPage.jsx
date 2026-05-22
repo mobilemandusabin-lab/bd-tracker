@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import {
   BarChart3, Package, ShieldCheck, ShieldX, Clock, FileText,
-  TrendingUp, Users, ChevronLeft, RefreshCw, Calendar
+  TrendingUp, Users, ChevronLeft, RefreshCw, Calendar, Trash2
 } from 'lucide-react';
 import { API_URL } from '../config/api';
 
@@ -50,6 +50,18 @@ const OperationsAnalyticsPage = () => {
   const clearDateRange = () => {
     setStartDate('');
     setEndDate('');
+  };
+
+  const deleteQcPending = async () => {
+    if (!confirm('Delete QC Pending data? Extension will re-sync on next page load.')) return;
+    try {
+      await axios.delete(`${API_URL}/extension/qc-pending`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      fetchAnalytics();
+    } catch (err) {
+      console.error('Error deleting qc_pending:', err);
+    }
   };
 
   const eventTypes = [
@@ -195,10 +207,19 @@ const OperationsAnalyticsPage = () => {
         <>
           {/* Summary Metric Cards */}
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-            {eventTypes.map(({ key, label, icon: Icon, color }) => {
+            {eventTypes.map(({ key, label, icon: Icon, color, global }) => {
               const c = colorMap[color];
               return (
-                <div key={key} className="p-4 bg-white rounded-2xl border border-slate-100 shadow-sm text-center">
+                <div key={key} className="p-4 bg-white rounded-2xl border border-slate-100 shadow-sm text-center relative">
+                  {key === 'qc_pending' && (
+                    <button
+                      onClick={deleteQcPending}
+                      className="absolute top-2 right-2 p-1 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                      title="Delete QC Pending data (allows re-sync)"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  )}
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-2 ${c.bg} ${c.text}`}>
                     <Icon size={18} />
                   </div>

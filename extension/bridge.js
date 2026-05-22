@@ -1,40 +1,47 @@
-// BD Tracker — Bridge Script (runs in ISOLATED world)
-// Forwards intercepted events from page to background service worker
-
 (function() {
   'use strict';
 
-  const hasSendMessage = typeof chrome !== 'undefined'
-    && typeof chrome.runtime !== 'undefined'
-    && typeof chrome.runtime.sendMessage === 'function';
-
-  const hasStorage = typeof chrome !== 'undefined'
-    && typeof chrome.storage !== 'undefined'
-    && typeof chrome.storage.local !== 'undefined';
+  function isContextValid() {
+    try {
+      return !!(chrome && chrome.runtime && chrome.runtime.id);
+    } catch (e) {
+      return false;
+    }
+  }
 
   function forwardEvent(eventData) {
-    const message = {
+    var message = {
       type: 'BD_TRACKER_EVENT',
       event_type: eventData.event_type,
       data: eventData.data
     };
 
-    if (hasSendMessage) {
-      chrome.runtime.sendMessage(message).catch(function() {
-        fallbackToStorage(message);
-      });
+    if (!isContextValid()) {
+      fallbackToStorage(message);
       return;
     }
 
-    fallbackToStorage(message);
+    try {
+      var promise = chrome.runtime.sendMessage(message);
+      if (promise && promise.catch) {
+        promise.catch(function() {
+          fallbackToStorage(message);
+        });
+      }
+    } catch (e) {
+      fallbackToStorage(message);
+    }
   }
 
   function fallbackToStorage(message) {
-    if (!hasStorage) return;
-    var key = 'bd_event_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
-    var store = {};
-    store[key] = message;
-    chrome.storage.local.set(store);
+    try {
+      if (chrome && chrome.storage && chrome.storage.local) {
+        var key = 'bd_event_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+        var store = {};
+        store[key] = message;
+        chrome.storage.local.set(store);
+      }
+    } catch (e) {}
   }
 
   window.addEventListener('message', function(event) {

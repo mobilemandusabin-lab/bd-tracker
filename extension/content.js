@@ -1,6 +1,3 @@
-// BD Tracker — Content Script (runs in PAGE context via manifest world: "MAIN")
-// Intercepts fetch and XHR calls on commerce sites
-
 (function() {
   'use strict';
 
@@ -9,7 +6,7 @@
     { method: 'PUT', pattern: '/api/vendor/products/', event_type: 'product_updated' },
     { method: 'POST', pattern: '/api/quality-check/products/', suffix: '/approve', event_type: 'qc_approved' },
     { method: 'POST', pattern: '/api/quality-check/products/', suffix: '/reject', event_type: 'qc_rejected' },
-    { method: 'GET', pattern: '/api/quality-check/products', event_type: 'qc_pending', extractPagination: true }
+    { method: 'GET', pattern: '/api/quality-check/products', requiredParams: ['qcStatus=pending'], event_type: 'qc_pending', extractPagination: true }
   ];
 
   function matchPattern(method, url) {
@@ -18,6 +15,10 @@
       if (method !== apiPattern.method) continue;
       if (!url.includes(apiPattern.pattern)) continue;
       if (apiPattern.suffix && !url.includes(apiPattern.suffix)) continue;
+      if (apiPattern.requiredParams) {
+        const hasAll = apiPattern.requiredParams.every(p => url.includes(p));
+        if (!hasAll) continue;
+      }
       matches.push(apiPattern);
     }
     return matches;
@@ -61,7 +62,6 @@
     }, '*');
   }
 
-  // ==================== FETCH INTERCEPT ====================
   const _nativeFetch = window.fetch;
 
   window.fetch = async function(...args) {
@@ -85,7 +85,9 @@
             eventType = 'spec_added';
           }
 
-          sendEvent(eventType, extractData(responseData, eventType));
+          const data = extractData(responseData, eventType);
+          data.url = url.split('?')[0];
+          sendEvent(eventType, data);
         }
       }
     } catch (err) {}
@@ -93,7 +95,6 @@
     return response;
   };
 
-  // ==================== XHR INTERCEPT ====================
   const _nativeOpen = XMLHttpRequest.prototype.open;
   const _nativeSend = XMLHttpRequest.prototype.send;
 
@@ -121,7 +122,9 @@
               eventType = 'spec_added';
             }
 
-            sendEvent(eventType, extractData(responseData, eventType));
+            const data = extractData(responseData, eventType);
+            data.url = url.split('?')[0];
+            sendEvent(eventType, data);
           }
         }
       } catch (err) {}

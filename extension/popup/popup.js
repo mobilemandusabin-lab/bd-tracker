@@ -1,5 +1,3 @@
-// BD Tracker — Popup Script
-
 document.addEventListener('DOMContentLoaded', async () => {
   const status = await sendMessage({ type: 'GET_STATUS' });
 
@@ -9,19 +7,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     showLoggedOut();
   }
 
-  // Login button
   document.getElementById('loginBtn').addEventListener('click', () => {
     chrome.tabs.create({ url: chrome.runtime.getURL('login/login.html') });
     window.close();
   });
 
-  // Logout button
   document.getElementById('logoutBtn').addEventListener('click', async () => {
     await sendMessage({ type: 'LOGOUT' });
     showLoggedOut();
   });
 
-  // Sync button
   document.getElementById('syncBtn').addEventListener('click', async () => {
     const btn = document.getElementById('syncBtn');
     btn.disabled = true;
@@ -53,7 +48,6 @@ function showLoggedIn(status) {
 
   updateLastSync(status.lastSync);
 
-  // Check for updates
   chrome.storage.local.get(['updateAvailable', 'latestVersion'], (data) => {
     if (data.updateAvailable) {
       document.getElementById('updateBanner').style.display = 'flex';

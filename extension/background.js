@@ -1,10 +1,16 @@
-// BD Tracker — Background Service Worker
 importScripts('config.js');
 
 let authToken = null;
 let deviceId = null;
 
-// Initialize on install
+chrome.storage.local.get(['authToken', 'deviceId']).then((stored) => {
+  authToken = stored.authToken || null;
+  deviceId = stored.deviceId || generateDeviceId();
+  if (authToken) {
+    startHeartbeat();
+  }
+});
+
 chrome.runtime.onInstalled.addListener(async () => {
   const stored = await chrome.storage.local.get(['authToken', 'deviceId', 'userName']);
   authToken = stored.authToken || null;
@@ -21,7 +27,6 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
 });
 
-// Initialize on startup
 chrome.runtime.onStartup.addListener(async () => {
   const stored = await chrome.storage.local.get(['authToken', 'deviceId']);
   authToken = stored.authToken || null;
@@ -34,7 +39,6 @@ chrome.runtime.onStartup.addListener(async () => {
   }
 });
 
-// Listen for messages from content script or popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'BD_TRACKER_EVENT') {
     handleEvent(message);
@@ -43,11 +47,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'LOGIN') {
     handleLogin(message).then(sendResponse);
-    return true; // async response
+    return true;
   }
 
   if (message.type === 'LOGIN_SUCCESS') {
-    // Login was done directly from login page, initialize background
     chrome.storage.local.get(['authToken'], (stored) => {
       if (stored.authToken) {
         authToken = stored.authToken;
@@ -75,7 +78,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-// Storage relay listener — picks up events from bridge.js when sendMessage is unavailable
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   for (const [key, change] of Object.entries(changes)) {
@@ -83,15 +85,16 @@ chrome.storage.onChanged.addListener((changes, area) => {
     const message = change.newValue;
     if (message && message.type === 'BD_TRACKER_EVENT') {
       handleEvent(message);
-      // Clean up the storage entry
       chrome.storage.local.remove(key);
     }
   }
 });
 
-// Handle API events from content script
 async function handleEvent(message) {
   if (!authToken) return;
+
+  const dedupKey = message.data?.product_id || message.data?.url || message.data?.product_name || '';
+  if (isDuplicate(message.event_type, dedupKey)) return;
 
   try {
     const response = await fetch(`${CONFIG.API_BASE_URL}/extension/activity-log`, {
@@ -113,17 +116,13 @@ async function handleEvent(message) {
     });
 
     if (!response.ok) {
-      const data = await response.json();
       if (response.status === 401) {
         await handleLogout();
       }
     }
-  } catch (err) {
-    // Network error — will retry on next event
-  }
+  } catch (err) {}
 }
 
-// Handle login
 async function handleLogin(message) {
   try {
     const response = await fetch(`${CONFIG.API_BASE_URL}/extension/login`, {
@@ -152,12 +151,10 @@ async function handleLogin(message) {
       return { success: false, message: data.message || 'Login failed' };
     }
   } catch (err) {
-    console.error('[BD Tracker] Login error:', err.message, err);
     return { success: false, message: `Network error: ${err.message}` };
   }
 }
 
-// Handle logout
 async function handleLogout() {
   authToken = null;
   stopHeartbeat();
@@ -165,7 +162,6 @@ async function handleLogout() {
   return { success: true };
 }
 
-// Get current status
 async function getStatus() {
   const stored = await chrome.storage.local.get(['authToken', 'userName', 'userEmail', 'deviceId', 'lastSync']);
   return {
@@ -178,7 +174,6 @@ async function getStatus() {
   };
 }
 
-// Register device with backend
 async function registerDevice() {
   if (!authToken || !deviceId) return;
 
@@ -194,12 +189,9 @@ async function registerDevice() {
         extension_version: chrome.runtime.getManifest().version
       })
     });
-  } catch (err) {
-    // Will retry on next heartbeat
-  }
+  } catch (err) {}
 }
 
-// Send heartbeat
 async function sendHeartbeat() {
   if (!authToken || !deviceId) return;
 
@@ -218,12 +210,9 @@ async function sendHeartbeat() {
     } else if (response.status === 401) {
       await handleLogout();
     }
-  } catch (err) {
-    // Network error
-  }
+  } catch (err) {}
 }
 
-// Check for extension updates
 async function checkForUpdates() {
   try {
     const response = await fetch(`${CONFIG.API_BASE_URL}/extension/latest-version`);
@@ -243,12 +232,9 @@ async function checkForUpdates() {
         await chrome.storage.local.set({ updateAvailable: false });
       }
     }
-  } catch (err) {
-    // Network error
-  }
+  } catch (err) {}
 }
 
-// Start heartbeat using chrome.alarms (survives MV3 service worker termination)
 function startHeartbeat() {
   stopHeartbeat();
   sendHeartbeat();
@@ -258,15 +244,12 @@ function startHeartbeat() {
   chrome.alarms.create('versionCheck', { periodInMinutes: CONFIG.VERSION_CHECK_INTERVAL / 60000 });
 }
 
-// Stop alarms
 function stopHeartbeat() {
   chrome.alarms.clear('heartbeat');
   chrome.alarms.clear('versionCheck');
 }
 
-// Handle alarm fires
 chrome.alarms.onAlarm.addListener(async (alarm) => {
-  // Restore auth state from storage (service worker may have been restarted)
   if (!authToken) {
     const stored = await chrome.storage.local.get(['authToken', 'deviceId']);
     authToken = stored.authToken || null;
@@ -282,7 +265,6 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 });
 
-// Manual sync
 async function syncNow() {
   await sendHeartbeat();
   await checkForUpdates();
@@ -290,16 +272,32 @@ async function syncNow() {
   return { success: true, lastSync: stored.lastSync };
 }
 
-// Generate unique device ID
 function generateDeviceId() {
   return 'ext_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
 }
 
-// ==================== WEB REQUEST INTERCEPT ====================
-// Detect API calls at the network level (can't be bypassed by page JS)
-// Note: product PUT handled by content script (needs response body inspection for spec detection)
+const recentEvents = new Map();
+const DEDUP_WINDOW = 8000;
+
+function isDuplicate(eventType, dedupKey) {
+  const key = eventType + '|' + dedupKey;
+  const now = Date.now();
+  if (recentEvents.has(key) && now - recentEvents.get(key) < DEDUP_WINDOW) {
+    return true;
+  }
+  recentEvents.set(key, now);
+  for (const [k, t] of recentEvents) {
+    if (now - t > DEDUP_WINDOW) recentEvents.delete(k);
+  }
+  return false;
+}
+
+function extractProductIdFromUrl(url) {
+  const match = url.match(/\/products\/([^\/]+)/);
+  return match ? match[1] : null;
+}
+
 const API_EVENT_MAP = [
-  { method: 'POST', urlPattern: '/api/vendor/products', eventType: 'listing_created' },
   { method: 'POST', urlPattern: '/api/quality-check/products/', urlSuffix: '/approve', eventType: 'qc_approved' },
   { method: 'POST', urlPattern: '/api/quality-check/products/', urlSuffix: '/reject', eventType: 'qc_rejected' }
 ];
@@ -322,6 +320,9 @@ chrome.webRequest.onCompleted.addListener(
       if (!token) return;
 
       for (const matched of matches) {
+        const pid = extractProductIdFromUrl(details.url);
+        const dedupKey = pid || details.url.split('?')[0];
+        if (isDuplicate(matched.eventType, dedupKey)) continue;
         try {
           await fetch(`${CONFIG.API_BASE_URL}/extension/activity-log`, {
             method: 'POST',
@@ -331,7 +332,7 @@ chrome.webRequest.onCompleted.addListener(
             },
             body: JSON.stringify({
               event_type: matched.eventType,
-              product_id: null,
+              product_id: pid,
               vendor_id: null,
               product_name: null,
               product_sku: null,

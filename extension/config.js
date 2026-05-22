@@ -1,8 +1,7 @@
-// BD Tracker API Configuration
 const CONFIG = {
   API_BASE_URL: 'https://bd-tracker-81oo.vercel.app/api/v1',
-  HEARTBEAT_INTERVAL: 5 * 60 * 1000, // 5 minutes
-  VERSION_CHECK_INTERVAL: 60 * 60 * 1000, // 1 hour
+  HEARTBEAT_INTERVAL: 5 * 60 * 1000,
+  VERSION_CHECK_INTERVAL: 60 * 60 * 1000,
   API_PATTERNS: {
     LISTING: {
       method: 'POST',

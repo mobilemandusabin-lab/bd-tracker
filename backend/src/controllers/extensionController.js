@@ -8,7 +8,7 @@ const jwt = require('jsonwebtoken');
 const path = require('path');
 const fs = require('fs');
 
-// POST /extension/login — Extension-specific login (restricted to qc/listing teams)
+// POST /extension/login — Extension login (any active user)
 exports.extensionLogin = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -26,11 +26,6 @@ exports.extensionLogin = async (req, res) => {
     const isPasswordCorrect = await user.comparePassword(password);
     if (!isPasswordCorrect) {
       return res.status(401).json({ status: 'fail', message: 'Incorrect email or password' });
-    }
-
-    // Only qc and listing team members can use the extension
-    if (!user.team || !['qc', 'listing'].includes(user.team)) {
-      return res.status(403).json({ status: 'fail', message: 'Only QC and Listing team members can use the extension' });
     }
 
     if (user.status !== 'active') {
@@ -199,20 +194,10 @@ exports.logActivity = async (req, res) => {
       }
     }
 
-    // Deduplicate: qc_pending only once per day (first page load)
+    // Deduplicate: qc_pending recorded once, stays until manually removed
     if (event_type === 'qc_pending') {
-      const startOfDay = new Date();
-      startOfDay.setUTCHours(0, 0, 0, 0);
-      const existing = await ExtensionEvent.findOne({
-        event_type: 'qc_pending',
-        created_at: { $gte: startOfDay }
-      });
+      const existing = await ExtensionEvent.findOne({ event_type: 'qc_pending' });
       if (existing) {
-        // Update pending_count if the new value is different
-        if (pending_count != null && existing.pending_count !== pending_count) {
-          existing.pending_count = pending_count;
-          await existing.save();
-        }
         return res.status(200).json({
           status: 'success',
           data: {
@@ -220,7 +205,7 @@ exports.logActivity = async (req, res) => {
             event_type: 'qc_pending',
             pending_count: existing.pending_count,
             duplicate: true,
-            message: 'Already recorded today'
+            message: 'Already recorded — remove from DB to re-sync'
           }
         });
       }
@@ -259,6 +244,19 @@ exports.logActivity = async (req, res) => {
         verified: true,
         lead_matched: !!lead_id
       }
+    });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+// DELETE /extension/qc-pending — Remove qc_pending record to allow re-sync
+exports.deleteQcPending = async (req, res) => {
+  try {
+    const result = await ExtensionEvent.deleteMany({ event_type: 'qc_pending' });
+    res.status(200).json({
+      status: 'success',
+      message: `Deleted ${result.deletedCount} qc_pending record(s)`
     });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });

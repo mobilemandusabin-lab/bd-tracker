@@ -1,5 +1,3 @@
-// BD Tracker — Login Page Script
-
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
 
@@ -18,7 +16,6 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
   errorMsg.style.display = 'none';
 
   try {
-    // Load config to get API URL
     const configResponse = await fetch(chrome.runtime.getURL('config.js'));
     const configText = await configResponse.text();
     const API_BASE_URL = configText.match(/API_BASE_URL:\s*'([^']+)'/)?.[1];
@@ -28,7 +25,6 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
       return;
     }
 
-    // Call login API directly
     const response = await fetch(`${API_BASE_URL}/extension/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -38,7 +34,6 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
     const data = await response.json();
 
     if (response.ok && data.token) {
-      // Store auth data
       await chrome.storage.local.set({
         authToken: data.token,
         userName: data.data?.user?.name || email,
@@ -46,7 +41,6 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
         userTeam: data.data?.user?.team || null
       });
 
-      // Notify background to initialize
       chrome.runtime.sendMessage({ type: 'LOGIN_SUCCESS' }).catch(() => {});
 
       window.close();
