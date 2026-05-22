@@ -8,6 +8,11 @@ const CONFIG = {
       pattern: '/api/vendor/products',
       event_type: 'listing_created'
     },
+    PRODUCT_DETAIL: {
+      method: 'GET',
+      pattern: '/api/vendor/products/',
+      event_type: 'product_created'
+    },
     PRODUCT_UPDATE: {
       method: 'PUT',
       pattern: '/api/vendor/products/',

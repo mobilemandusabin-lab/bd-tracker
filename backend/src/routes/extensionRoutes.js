@@ -21,5 +21,6 @@ router.delete('/qc-pending', authMiddleware.restrictTo('super_admin', 'admin'), 
 router.get('/devices', authMiddleware.restrictTo('super_admin', 'admin'), extensionController.getDevices);
 router.get('/stats', authMiddleware.restrictTo('super_admin', 'admin'), extensionController.getStats);
 router.get('/analytics', authMiddleware.restrictTo('super_admin', 'admin'), extensionController.getAnalytics);
+router.get('/debug', authMiddleware.restrictTo('super_admin', 'admin'), extensionController.debugEvents);
 
 module.exports = router;

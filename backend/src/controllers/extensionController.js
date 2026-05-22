@@ -160,7 +160,7 @@ exports.logActivity = async (req, res) => {
       return res.status(400).json({ status: 'fail', message: 'event_type is required' });
     }
 
-    const validEvents = ['listing_created', 'product_updated', 'qc_approved', 'qc_rejected', 'qc_pending', 'spec_added'];
+    const validEvents = ['listing_created', 'product_created', 'product_updated', 'qc_approved', 'qc_rejected', 'qc_pending', 'spec_added'];
     if (!validEvents.includes(event_type)) {
       return res.status(400).json({ status: 'fail', message: `Invalid event_type. Must be one of: ${validEvents.join(', ')}` });
     }
@@ -170,6 +170,33 @@ exports.logActivity = async (req, res) => {
     if (!effectiveProductId && metadata?.url) {
       const match = metadata.url.match(/\/products\/([a-f0-9]+)/);
       if (match) effectiveProductId = match[1];
+    }
+
+    // Handle listing_created: new listing vs edit
+    let effectiveEventType = event_type;
+    console.log('[BD Tracker] Received event:', event_type, 'product_id:', effectiveProductId, 'metadata.method:', metadata?.method);
+    if (event_type === 'listing_created' && effectiveProductId) {
+      const isPost = metadata?.method === 'POST';
+      console.log('[BD Tracker] isPost:', isPost);
+      if (isPost) {
+        // POST = product created with packageType in one go → always listing_created
+        console.log('[BD Tracker] POST creation → keeping listing_created');
+      } else {
+        // PUT = check if this is a new listing or an edit
+        const sevenMinAgo = new Date(Date.now() - 7 * 60 * 1000);
+        const recentCreation = await ExtensionEvent.findOne({
+          event_type: 'product_created',
+          product_id: effectiveProductId,
+          created_at: { $gte: sevenMinAgo }
+        });
+        if (recentCreation) {
+          // New listing: delete product_created signal, keep listing_created
+          await ExtensionEvent.deleteOne({ _id: recentCreation._id });
+        } else {
+          // Edit of existing listing: convert to product_updated
+          effectiveEventType = 'product_updated';
+        }
+      }
     }
 
     // Deduplicate: skip spec_added if a listing_created for the same product exists within 7 minutes
@@ -221,8 +248,9 @@ exports.logActivity = async (req, res) => {
     }
 
     // Create ExtensionEvent (single source of truth for extension analytics)
+    console.log('[BD Tracker] Storing event:', effectiveEventType, 'product_id:', effectiveProductId);
     const extensionEvent = await ExtensionEvent.create({
-      event_type,
+      event_type: effectiveEventType,
       product_id: effectiveProductId,
       vendor_id,
       product_name,
@@ -238,7 +266,7 @@ exports.logActivity = async (req, res) => {
       status: 'success',
       data: {
         event_id: extensionEvent._id,
-        event_type,
+        event_type: effectiveEventType,
         product_id: effectiveProductId,
         vendor_id,
         verified: true,
@@ -455,6 +483,7 @@ exports.getAnalytics = async (req, res) => {
       pending: pendingMap[date] ?? null,
       approved: dailyByDate[date]?.qc_approved || 0,
       rejected: dailyByDate[date]?.qc_rejected || 0,
+      created: dailyByDate[date]?.product_created || 0,
       listed: dailyByDate[date]?.listing_created || 0,
       specs: dailyByDate[date]?.spec_added || 0,
       updated: dailyByDate[date]?.product_updated || 0,
@@ -467,6 +496,7 @@ exports.getAnalytics = async (req, res) => {
         start_date: start_date || null,
         end_date: end_date || null,
         summary: {
+          product_created: summary.product_created || 0,
           listing_created: summary.listing_created || 0,
           product_updated: summary.product_updated || 0,
           qc_approved: summary.qc_approved || 0,
@@ -485,6 +515,29 @@ exports.getAnalytics = async (req, res) => {
         eventsByUser,
         recentEvents
       }
+    });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+// GET /extension/debug — Returns last 20 extension events
+exports.debugEvents = async (req, res) => {
+  try {
+    const events = await ExtensionEvent.find()
+      .sort({ created_at: -1 })
+      .limit(20)
+      .lean();
+
+    res.status(200).json({
+      status: 'success',
+      count: events.length,
+      events: events.map(e => ({
+        event_type: e.event_type,
+        product_id: e.product_id,
+        product_name: e.product_name,
+        created_at: e.created_at
+      }))
     });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });

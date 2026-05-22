@@ -69,7 +69,12 @@ const NotificationBell = ({ token }) => {
       setNotifications(newNotifications);
       const countRes = await axios.get(`${API_URL}/notifications/unread-count`, { headers: { Authorization: `Bearer ${token}` } });
       setUnreadCount(countRes.data.data.count);
-    } catch (err) { console.error('Error fetching notifications:', err); }
+    } catch (err) {
+      // Suppress network errors (offline, network changed, etc.)
+      if (!err.message?.includes('Network Error') && !err.code?.includes('ERR_NETWORK')) {
+        console.error('Error fetching notifications:', err);
+      }
+    }
   }, [token, handleNotificationClick, playNotificationSound, showDesktopNotification]);
 
   useEffect(() => {

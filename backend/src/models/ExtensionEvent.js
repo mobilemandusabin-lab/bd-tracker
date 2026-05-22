@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const extensionEventSchema = new mongoose.Schema({
   event_type: {
     type: String,
-    enum: ['listing_created', 'product_updated', 'qc_approved', 'qc_rejected', 'qc_pending', 'spec_added'],
+    enum: ['listing_created', 'product_created', 'product_updated', 'qc_approved', 'qc_rejected', 'qc_pending', 'spec_added'],
     required: true
   },
   product_id: {

@@ -3,6 +3,7 @@
 
   const API_PATTERNS = [
     { method: 'POST', pattern: '/api/vendor/products', event_type: 'listing_created' },
+    { method: 'GET', pattern: '/api/vendor/products/', event_type: 'product_created' },
     { method: 'PUT', pattern: '/api/vendor/products/', event_type: 'product_updated' },
     { method: 'POST', pattern: '/api/quality-check/products/', suffix: '/approve', event_type: 'qc_approved' },
     { method: 'POST', pattern: '/api/quality-check/products/', suffix: '/reject', event_type: 'qc_rejected' },
@@ -24,10 +25,43 @@
     return matches;
   }
 
-  function hasSpecs(responseData) {
-    const data = responseData?.data || responseData;
-    const details = data?.categoryComplianceDetails;
-    return details && typeof details === 'object' && Object.keys(details).length > 0;
+  function hasData(val) {
+    return val && typeof val === 'object' && Object.keys(val).length > 0;
+  }
+
+  function hasPackageTypeObject(val) {
+    if (!val || typeof val !== 'object') return false;
+    if (Array.isArray(val)) return false;
+    return Object.values(val).some(v => v != null && v !== '');
+  }
+
+  function detectEventType(matched, reqBody, responseData, method) {
+    if (matched.event_type === 'product_created') {
+      const data = responseData?.data || responseData;
+      const productId = data?._id || data?.id;
+      const hasPackageType = data?.packageType && (
+        (typeof data.packageType === 'string' && data.packageType.length > 0) ||
+        (typeof data.packageType === 'object' && !Array.isArray(data.packageType))
+      );
+      if (productId && !hasPackageType) {
+        return 'product_created';
+      }
+      return null;
+    }
+    if (matched.event_type === 'product_updated') {
+      if (hasData(responseData?.categoryComplianceDetails)) {
+        return 'spec_added';
+      }
+      if (hasPackageTypeObject(reqBody?.packageType) && (responseData?.packageTypeID || (typeof responseData?.packageType === 'string' && responseData.packageType))) {
+        return 'listing_created';
+      }
+      return 'product_updated';
+    }
+    // POST to /api/vendor/products = always listing_created
+    if (matched.event_type === 'listing_created' && method === 'POST') {
+      return 'listing_created';
+    }
+    return matched.event_type;
   }
 
   function extractData(responseData, eventType) {
@@ -72,32 +106,50 @@
     const url = typeof reqObj === 'string' ? reqObj : reqObj?.url || '';
     const method = (args[1]?.method || reqObj?.method || 'GET').toUpperCase();
 
-    const response = await _nativeFetch.apply(this, args);
+    // Get request body
+    let reqBody = null;
+    if (args[1]?.body) {
+      try {
+        reqBody = typeof args[1].body === 'string' ? JSON.parse(args[1].body) : args[1].body;
+      } catch (e) {}
+    }
+    // If a Request object was passed, clone it to read body (clone gets independent stream)
+    if (!reqBody && reqObj?.clone && (method === 'POST' || method === 'PUT')) {
+      try {
+        const clonedReq = reqObj.clone();
+        const bodyText = await clonedReq.text();
+        if (bodyText) reqBody = JSON.parse(bodyText);
+      } catch (e) {}
+    }
 
     try {
       const matches = matchPattern(method, url);
-      console.log('[BD Tracker] Fetch check:', method, url.substring(0, 120), 'matches:', matches.length);
       if (matches.length > 0) {
         console.log('[BD Tracker] Fetch intercepted:', method, url);
+        const response = await _nativeFetch.apply(this, args);
         const clone = response.clone();
         let responseData = {};
         try { responseData = await clone.json(); } catch(e) {}
 
         for (const matched of matches) {
-          let eventType = matched.event_type;
-
-          if (eventType === 'product_updated' && hasSpecs(responseData)) {
-            eventType = 'spec_added';
+          let eventType = detectEventType(matched, reqBody, responseData, method);
+          if (!eventType) {
+            console.log('[BD Tracker] Skipped — no valid event type');
+            continue;
           }
-
+          console.log('[BD Tracker] Detected event type:', eventType, 'reqBody.packageType:', reqBody?.packageType, 'responseData.packageType:', responseData?.packageType);
           const data = extractData(responseData, eventType);
           data.url = url.split('?')[0];
+          data.method = method;
           sendEvent(eventType, data);
         }
+        return response;
       }
-    } catch (err) {}
+    } catch (err) {
+      console.error('[BD Tracker] Fetch intercept error:', err);
+    }
 
-    return response;
+    return _nativeFetch.apply(this, args);
   };
 
   const _nativeOpen = XMLHttpRequest.prototype.open;
@@ -113,6 +165,13 @@
     const method = (this._bdMethod || 'GET').toUpperCase();
     const url = this._bdUrl || '';
 
+    let reqBody = null;
+    if ((method === 'PUT' || method === 'POST') && body) {
+      try {
+        reqBody = typeof body === 'string' ? JSON.parse(body) : body;
+      } catch (e) {}
+    }
+
     this.addEventListener('load', function() {
       try {
         const matches = matchPattern(method, url);
@@ -122,14 +181,11 @@
           try { responseData = JSON.parse(this.responseText); } catch(e) {}
 
           for (const matched of matches) {
-            let eventType = matched.event_type;
-
-            if (eventType === 'product_updated' && hasSpecs(responseData)) {
-              eventType = 'spec_added';
-            }
-
+            let eventType = detectEventType(matched, reqBody, responseData, method);
+            if (!eventType) continue;
             const data = extractData(responseData, eventType);
             data.url = url.split('?')[0];
+            data.method = method;
             sendEvent(eventType, data);
           }
         }

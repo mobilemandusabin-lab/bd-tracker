@@ -136,7 +136,8 @@ async function handleEvent(message) {
         await handleLogout();
       }
     } else {
-      console.log('[BD Tracker] Event sent OK');
+      const result = await response.json();
+      console.log('[BD Tracker] Event sent OK:', result.data?.event_type, 'product_id:', result.data?.product_id, 'duplicate:', result.data?.duplicate);
     }
   } catch (err) {
     console.error('[BD Tracker] Event error:', err.message);
