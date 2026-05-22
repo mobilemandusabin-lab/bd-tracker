@@ -55,12 +55,15 @@
   }
 
   function sendEvent(eventType, data) {
+    console.log('[BD Tracker] Sending event to bridge:', eventType);
     window.postMessage({
       type: 'BD_TRACKER_INTERCEPTED',
       event_type: eventType,
       data: data
     }, '*');
   }
+
+  console.log('[BD Tracker] Content script loaded');
 
   const _nativeFetch = window.fetch;
 
@@ -73,7 +76,9 @@
 
     try {
       const matches = matchPattern(method, url);
+      console.log('[BD Tracker] Fetch check:', method, url.substring(0, 120), 'matches:', matches.length);
       if (matches.length > 0) {
+        console.log('[BD Tracker] Fetch intercepted:', method, url);
         const clone = response.clone();
         let responseData = {};
         try { responseData = await clone.json(); } catch(e) {}
@@ -112,6 +117,7 @@
       try {
         const matches = matchPattern(method, url);
         if (matches.length > 0) {
+          console.log('[BD Tracker] XHR intercepted:', method, url);
           let responseData = {};
           try { responseData = JSON.parse(this.responseText); } catch(e) {}
 
