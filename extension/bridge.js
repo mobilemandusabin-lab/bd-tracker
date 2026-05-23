@@ -9,10 +9,7 @@
     }
   }
 
-  console.log('[BD Tracker] Bridge script loaded');
-
   function forwardEvent(eventData) {
-    console.log('[BD Tracker] Bridge forwarding:', eventData.event_type);
     var message = {
       type: 'BD_TRACKER_EVENT',
       event_type: eventData.event_type,
@@ -20,7 +17,6 @@
     };
 
     if (!isContextValid()) {
-      console.warn('[BD Tracker] Extension context invalid, using storage fallback');
       fallbackToStorage(message);
       return;
     }

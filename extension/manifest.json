@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BD Tracker Extension",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Captures listing, QC, and spec events from Nepalcan marketplace",
   "permissions": ["storage", "alarms", "webRequest"],
   "host_permissions": ["https://commerce.thecanbrand.com/*", "https://demo.commerce.thecanbrand.com/*", "https://bd-tracker-81oo.vercel.app/*"],

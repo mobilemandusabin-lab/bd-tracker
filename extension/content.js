@@ -89,15 +89,12 @@
   }
 
   function sendEvent(eventType, data) {
-    console.log('[BD Tracker] Sending event to bridge:', eventType);
     window.postMessage({
       type: 'BD_TRACKER_INTERCEPTED',
       event_type: eventType,
       data: data
     }, '*');
   }
-
-  console.log('[BD Tracker] Content script loaded');
 
   const _nativeFetch = window.fetch;
 
@@ -125,7 +122,6 @@
     try {
       const matches = matchPattern(method, url);
       if (matches.length > 0) {
-        console.log('[BD Tracker] Fetch intercepted:', method, url);
         const response = await _nativeFetch.apply(this, args);
         const clone = response.clone();
         let responseData = {};
@@ -134,10 +130,8 @@
         for (const matched of matches) {
           let eventType = detectEventType(matched, reqBody, responseData, method);
           if (!eventType) {
-            console.log('[BD Tracker] Skipped — no valid event type');
             continue;
           }
-          console.log('[BD Tracker] Detected event type:', eventType, 'reqBody.packageType:', reqBody?.packageType, 'responseData.packageType:', responseData?.packageType);
           const data = extractData(responseData, eventType);
           data.url = url.split('?')[0];
           data.method = method;
@@ -145,9 +139,7 @@
         }
         return response;
       }
-    } catch (err) {
-      console.error('[BD Tracker] Fetch intercept error:', err);
-    }
+    } catch (err) {}
 
     return _nativeFetch.apply(this, args);
   };
@@ -176,7 +168,6 @@
       try {
         const matches = matchPattern(method, url);
         if (matches.length > 0) {
-          console.log('[BD Tracker] XHR intercepted:', method, url);
           let responseData = {};
           try { responseData = JSON.parse(this.responseText); } catch(e) {}
 

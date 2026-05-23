@@ -3,16 +3,11 @@ importScripts('config.js');
 let authToken = null;
 let deviceId = null;
 
-console.log('[BD Tracker] Service worker loaded');
-
 chrome.storage.local.get(['authToken', 'deviceId']).then((stored) => {
   authToken = stored.authToken || null;
   deviceId = stored.deviceId || generateDeviceId();
   if (authToken) {
-    console.log('[BD Tracker] Restored auth token from storage');
     startHeartbeat();
-  } else {
-    console.log('[BD Tracker] No auth token in storage');
   }
 });
 
@@ -46,7 +41,6 @@ chrome.runtime.onStartup.addListener(async () => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'BD_TRACKER_EVENT') {
-    console.log('[BD Tracker] Received event from bridge:', message.event_type);
     handleEvent(message);
     return;
   }
@@ -90,7 +84,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (!key.startsWith('bd_event_')) continue;
     const message = change.newValue;
     if (message && message.type === 'BD_TRACKER_EVENT') {
-      console.log('[BD Tracker] Storage fallback received:', message.event_type);
       handleEvent(message);
       chrome.storage.local.remove(key);
     }
@@ -99,17 +92,14 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 async function handleEvent(message) {
   if (!authToken) {
-    console.log('[BD Tracker] Event ignored — not logged in');
     return;
   }
 
   const dedupKey = message.data?.product_id || message.data?.url || message.data?.product_name || '';
   if (isDuplicate(message.event_type, dedupKey)) {
-    console.log('[BD Tracker] Skipping duplicate:', message.event_type, dedupKey);
     return;
   }
 
-  console.log('[BD Tracker] Sending event:', message.event_type);
   try {
     const response = await fetch(`${CONFIG.API_BASE_URL}/extension/activity-log`, {
       method: 'POST',
@@ -130,18 +120,13 @@ async function handleEvent(message) {
     });
 
     if (!response.ok) {
-      const data = await response.json();
-      console.log('[BD Tracker] Event failed:', response.status, data);
       if (response.status === 401) {
         await handleLogout();
       }
     } else {
-      const result = await response.json();
-      console.log('[BD Tracker] Event sent OK:', result.data?.event_type, 'product_id:', result.data?.product_id, 'duplicate:', result.data?.duplicate);
+      await response.json();
     }
-  } catch (err) {
-    console.error('[BD Tracker] Event error:', err.message);
-  }
+  } catch (err) {}
 }
 
 async function handleLogin(message) {
@@ -172,7 +157,6 @@ async function handleLogin(message) {
       return { success: false, message: data.message || 'Login failed' };
     }
   } catch (err) {
-    console.error('[BD Tracker] Login error:', err.message);
     return { success: false, message: `Network error: ${err.message}` };
   }
 }
@@ -217,7 +201,6 @@ async function registerDevice() {
 async function sendHeartbeat() {
   if (!authToken || !deviceId) return;
 
-  console.log('[BD Tracker] Sending heartbeat');
   try {
     const response = await fetch(`${CONFIG.API_BASE_URL}/extension/heartbeat`, {
       method: 'POST',
@@ -346,10 +329,8 @@ chrome.webRequest.onCompleted.addListener(
         const pid = extractProductIdFromUrl(details.url);
         const dedupKey = pid || details.url.split('?')[0];
         if (isDuplicate(matched.eventType, dedupKey)) {
-          console.log('[BD Tracker] Skipping duplicate webRequest:', matched.eventType, dedupKey);
           continue;
         }
-        console.log('[BD Tracker] webRequest sending:', matched.eventType, dedupKey);
         try {
           await fetch(`${CONFIG.API_BASE_URL}/extension/activity-log`, {
             method: 'POST',
@@ -367,9 +348,7 @@ chrome.webRequest.onCompleted.addListener(
               metadata: { source: 'webRequest', url: details.url, method: details.method }
             })
           });
-        } catch (err) {
-          console.error('[BD Tracker] webRequest send error:', err.message);
-        }
+        } catch (err) {}
       }
     });
   },
