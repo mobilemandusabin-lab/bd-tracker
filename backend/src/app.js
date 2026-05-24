@@ -37,7 +37,11 @@ const corsOptions = {
 
 // Middleware
 app.use(morgan('dev'));
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: false,
+  crossOriginOpenerPolicy: false,
+  crossOriginEmbedderPolicy: false
+}));
 app.use(cors(corsOptions));
 app.use(express.json());
 
