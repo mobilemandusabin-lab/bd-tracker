@@ -265,8 +265,7 @@ export default function VendorSnapshotsPage({ embedded }) {
           <table className="w-full">
             <thead>
               <tr className="bg-slate-50/80">
-                <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-slate-400">Nepali Date</th>
-                <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-slate-400">AD Date</th>
+                <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-slate-400">Period</th>
                 <th className="px-5 py-3 text-right text-[10px] font-bold uppercase tracking-widest text-slate-400">Total Vendors</th>
                 <th className="px-5 py-3 text-right text-[10px] font-bold uppercase tracking-widest text-slate-400">Verified</th>
                 <th className="px-5 py-3 text-right text-[10px] font-bold uppercase tracking-widest text-slate-400">Active Sellers</th>
@@ -276,27 +275,36 @@ export default function VendorSnapshotsPage({ embedded }) {
               {comparisonData.map((snap, i) => (
                 <tr key={snap._id} className={i === 0 ? 'bg-red-50/30' : 'hover:bg-slate-50/50'}>
                   <td className="px-5 py-3.5">
-                    <span className="text-sm font-bold text-slate-900">{snap.nepaliDate}</span>
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <span className="text-sm text-slate-500">
-                      {new Date(snap.snapshotDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
-                    </span>
+                    <div className="flex flex-col">
+                      <span className="text-sm font-bold text-slate-900">{snap.nepaliDate}</span>
+                      {snap.prevNepaliDate && (
+                        <span className="text-[10px] text-slate-400 mt-0.5">vs {snap.prevNepaliDate}</span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-5 py-3.5 text-right">
                     <div className="flex flex-col items-end">
+                      {snap.prevTotalVendors != null && (
+                        <span className="text-xs text-slate-400">{snap.prevTotalVendors}</span>
+                      )}
                       <span className="text-sm font-extrabold text-slate-900">{snap.totalVendors}</span>
                       <DeltaBadge delta={snap.totalVendorsDelta} percent={snap.totalVendorsPercentChange} />
                     </div>
                   </td>
                   <td className="px-5 py-3.5 text-right">
                     <div className="flex flex-col items-end">
+                      {snap.prevVerifiedVendors != null && (
+                        <span className="text-xs text-slate-400">{snap.prevVerifiedVendors}</span>
+                      )}
                       <span className="text-sm font-extrabold text-slate-900">{snap.verifiedVendors}</span>
                       <DeltaBadge delta={snap.verifiedVendorsDelta} percent={snap.verifiedVendorsPercentChange} />
                     </div>
                   </td>
                   <td className="px-5 py-3.5 text-right">
                     <div className="flex flex-col items-end">
+                      {snap.prevActiveSellers != null && (
+                        <span className="text-xs text-slate-400">{snap.prevActiveSellers}</span>
+                      )}
                       <span className="text-sm font-extrabold text-slate-900">{snap.activeSellers}</span>
                       <DeltaBadge delta={snap.activeSellersDelta} percent={snap.activeSellersPercentChange} />
                     </div>
@@ -321,24 +329,29 @@ export default function VendorSnapshotsPage({ embedded }) {
           {comparisonData.map((snap) => (
             <div key={snap._id} className="p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-bold text-slate-900">{snap.nepaliDate}</span>
-                <span className="text-xs text-slate-400">
-                  {new Date(snap.snapshotDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                </span>
+                <div>
+                  <span className="text-sm font-bold text-slate-900">{snap.nepaliDate}</span>
+                  {snap.prevNepaliDate && (
+                    <span className="text-[10px] text-slate-400 ml-2">vs {snap.prevNepaliDate}</span>
+                  )}
+                </div>
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">Total</p>
+                  {snap.prevTotalVendors != null && <p className="text-xs text-slate-400">{snap.prevTotalVendors} &rarr;</p>}
                   <p className="text-base font-extrabold text-slate-900">{snap.totalVendors}</p>
                   <DeltaBadge delta={snap.totalVendorsDelta} percent={snap.totalVendorsPercentChange} />
                 </div>
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">Verified</p>
+                  {snap.prevVerifiedVendors != null && <p className="text-xs text-slate-400">{snap.prevVerifiedVendors} &rarr;</p>}
                   <p className="text-base font-extrabold text-slate-900">{snap.verifiedVendors}</p>
                   <DeltaBadge delta={snap.verifiedVendorsDelta} percent={snap.verifiedVendorsPercentChange} />
                 </div>
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">Active</p>
+                  {snap.prevActiveSellers != null && <p className="text-xs text-slate-400">{snap.prevActiveSellers} &rarr;</p>}
                   <p className="text-base font-extrabold text-slate-900">{snap.activeSellers}</p>
                   <DeltaBadge delta={snap.activeSellersDelta} percent={snap.activeSellersPercentChange} />
                 </div>
