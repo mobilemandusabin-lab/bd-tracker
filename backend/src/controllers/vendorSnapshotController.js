@@ -57,35 +57,35 @@ exports.getComparison = async (req, res) => {
       .limit(limit);
 
     const comparison = [];
-    for (let i = 1; i < snapshots.length; i++) {
+    for (let i = 0; i < snapshots.length; i++) {
       const current = snapshots[i];
-      const previous = snapshots[i - 1];
+      const previous = i > 0 ? snapshots[i - 1] : null;
 
       comparison.push({
         _id: current._id,
         totalVendors: current.totalVendors,
         verifiedVendors: current.verifiedVendors,
         activeSellers: current.activeSellers,
-        prevTotalVendors: previous.totalVendors,
-        prevVerifiedVendors: previous.verifiedVendors,
-        prevActiveSellers: previous.activeSellers,
+        prevTotalVendors: previous ? previous.totalVendors : null,
+        prevVerifiedVendors: previous ? previous.verifiedVendors : null,
+        prevActiveSellers: previous ? previous.activeSellers : null,
         snapshotDate: current.snapshotDate,
-        prevSnapshotDate: previous.snapshotDate,
+        prevSnapshotDate: previous ? previous.snapshotDate : null,
         nepaliDate: current.nepaliDate,
-        prevNepaliDate: previous.nepaliDate,
+        prevNepaliDate: previous ? previous.nepaliDate : null,
         nepaliYear: current.nepaliYear,
         nepaliMonth: current.nepaliMonth,
         type: current.type,
-        totalVendorsDelta: current.totalVendors - previous.totalVendors,
-        verifiedVendorsDelta: current.verifiedVendors - previous.verifiedVendors,
-        activeSellersDelta: current.activeSellers - previous.activeSellers,
-        totalVendorsPercentChange: previous.totalVendors > 0
+        totalVendorsDelta: previous ? current.totalVendors - previous.totalVendors : 0,
+        verifiedVendorsDelta: previous ? current.verifiedVendors - previous.verifiedVendors : 0,
+        activeSellersDelta: previous ? current.activeSellers - previous.activeSellers : 0,
+        totalVendorsPercentChange: previous && previous.totalVendors > 0
           ? parseFloat((((current.totalVendors - previous.totalVendors) / previous.totalVendors) * 100).toFixed(1))
           : 0,
-        verifiedVendorsPercentChange: previous.verifiedVendors > 0
+        verifiedVendorsPercentChange: previous && previous.verifiedVendors > 0
           ? parseFloat((((current.verifiedVendors - previous.verifiedVendors) / previous.verifiedVendors) * 100).toFixed(1))
           : 0,
-        activeSellersPercentChange: previous.activeSellers > 0
+        activeSellersPercentChange: previous && previous.activeSellers > 0
           ? parseFloat((((current.activeSellers - previous.activeSellers) / previous.activeSellers) * 100).toFixed(1))
           : 0
       });
@@ -115,6 +115,18 @@ exports.triggerSnapshot = async (req, res) => {
       status: 'success',
       data: { snapshot }
     });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+// DELETE /api/v1/vendor-snapshots
+exports.deleteSnapshots = async (req, res) => {
+  try {
+    const { type } = req.query;
+    const query = type ? { type } : {};
+    const result = await VendorSnapshot.deleteMany(query);
+    res.status(200).json({ status: 'success', deleted: result.deletedCount });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
   }

@@ -11,6 +11,23 @@ chrome.storage.local.get(['authToken', 'deviceId']).then((stored) => {
   }
 });
 
+async function injectIntoExistingTabs() {
+  const urls = COMMERCE_PATTERNS.map(p => p.url_pattern);
+  const tabs = await chrome.tabs.query({ url: urls });
+  for (const tab of tabs) {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['content.js']
+      });
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['bridge.js']
+      });
+    } catch (e) {}
+  }
+}
+
 chrome.runtime.onInstalled.addListener(async () => {
   const stored = await chrome.storage.local.get(['authToken', 'deviceId', 'userName']);
   authToken = stored.authToken || null;
@@ -25,6 +42,7 @@ chrome.runtime.onInstalled.addListener(async () => {
     registerDevice();
     checkForUpdates();
   }
+  injectIntoExistingTabs();
 });
 
 chrome.runtime.onStartup.addListener(async () => {
@@ -37,6 +55,7 @@ chrome.runtime.onStartup.addListener(async () => {
     registerDevice();
     checkForUpdates();
   }
+  injectIntoExistingTabs();
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -95,8 +114,12 @@ async function handleEvent(message) {
     return;
   }
 
-  const dedupKey = message.data?.product_id || message.data?.url || message.data?.product_name || '';
-  if (isDuplicate(message.event_type, dedupKey)) {
+  const dedupKey = message.data?.product_id || message.data?.product_name || message.data?.url || '';
+  
+  // Use a shorter window for creation events to allow rapid successive creations
+  const window = (message.event_type === 'listing_created' || message.event_type === 'product_created') ? 5000 : DEDUP_WINDOW;
+
+  if (isDuplicate(message.event_type, dedupKey, window)) {
     return;
   }
 
@@ -283,17 +306,19 @@ function generateDeviceId() {
 }
 
 const recentEvents = new Map();
-const DEDUP_WINDOW = 8000;
+const DEDUP_WINDOW = 60000;
 
-function isDuplicate(eventType, dedupKey) {
+function isDuplicate(eventType, dedupKey, windowOverride) {
   const key = eventType + '|' + dedupKey;
   const now = Date.now();
-  if (recentEvents.has(key) && now - recentEvents.get(key) < DEDUP_WINDOW) {
+  const window = windowOverride || DEDUP_WINDOW;
+
+  if (recentEvents.has(key) && now - recentEvents.get(key) < window) {
     return true;
   }
   recentEvents.set(key, now);
   for (const [k, t] of recentEvents) {
-    if (now - t > DEDUP_WINDOW) recentEvents.delete(k);
+    if (now - t > DEDUP_WINDOW * 2) recentEvents.delete(k);
   }
   return false;
 }

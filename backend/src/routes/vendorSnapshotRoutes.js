@@ -11,5 +11,6 @@ router.get('/', vendorSnapshotController.getSnapshots);
 router.get('/latest', vendorSnapshotController.getLatestSnapshot);
 router.get('/compare', vendorSnapshotController.getComparison);
 router.post('/capture', vendorSnapshotController.triggerSnapshot);
+router.delete('/', vendorSnapshotController.deleteSnapshots);
 
 module.exports = router;

@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const Lead = require('./Lead');
+const NepalcanOrder = require('./NepalcanOrder');
 const { toNepaliDateObject } = require('../utils/nepaliDate');
 
 const vendorSnapshotSchema = new mongoose.Schema({
@@ -44,7 +45,7 @@ vendorSnapshotSchema.index({ nepaliYear: 1, nepaliMonth: 1 });
 vendorSnapshotSchema.index({ snapshotDate: 1, type: 1 }, { unique: true });
 
 vendorSnapshotSchema.statics.captureSnapshot = async function (type) {
-  const [totalVendors, verifiedVendors, activeSellers] = await Promise.all([
+  const [totalVendors, verifiedVendors, activeSellerAgg] = await Promise.all([
     Lead.countDocuments({ type: 'vendor' }),
     Lead.countDocuments({
       type: 'vendor',
@@ -53,14 +54,14 @@ vendorSnapshotSchema.statics.captureSnapshot = async function (type) {
         { verification_status: 'verified' }
       ]
     }),
-    Lead.countDocuments({
-      type: 'vendor',
-      $or: [
-        { active_seller: true },
-        { lead_status: 'Active Seller' }
-      ]
-    })
+    NepalcanOrder.aggregate([
+      { $match: { orderStatus: 'Delivered' } },
+      { $group: { _id: '$vendor_lead_id' } },
+      { $count: 'total' }
+    ])
   ]);
+
+  const activeSellers = activeSellerAgg.length > 0 ? activeSellerAgg[0].total : 0;
 
   const now = new Date();
   const bsDate = toNepaliDateObject(now);

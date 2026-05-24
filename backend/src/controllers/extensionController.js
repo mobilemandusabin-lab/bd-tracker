@@ -193,11 +193,12 @@ exports.logActivity = async (req, res) => {
       if (isPost) {
       } else {
         // PUT = check if this is a new listing or an edit
-        const sevenMinAgo = new Date(Date.now() - 7 * 60 * 1000);
+        // Increased window to 60 minutes to support staff opening many tabs at once
+        const sixtyMinAgo = new Date(Date.now() - 60 * 60 * 1000);
         const recentCreation = await ExtensionEvent.findOne({
           event_type: 'product_created',
           product_id: effectiveProductId,
-          created_at: { $gte: sevenMinAgo }
+          created_at: { $gte: sixtyMinAgo }
         });
         if (recentCreation) {
           // New listing: delete product_created signal, keep listing_created
@@ -209,13 +210,13 @@ exports.logActivity = async (req, res) => {
       }
     }
 
-    // Deduplicate: skip spec_added if a listing_created for the same product exists within 7 minutes
+    // Deduplicate: skip spec_added if a listing_created for the same product exists within 60 minutes
     if (event_type === 'spec_added' && effectiveProductId) {
-      const sevenMinAgo = new Date(Date.now() - 7 * 60 * 1000);
+      const sixtyMinAgo = new Date(Date.now() - 60 * 60 * 1000);
       const recentListing = await ExtensionEvent.findOne({
         event_type: 'listing_created',
         product_id: effectiveProductId,
-        created_at: { $gte: sevenMinAgo }
+        created_at: { $gte: sixtyMinAgo }
       });
       if (recentListing) {
         return res.status(200).json({
@@ -225,7 +226,7 @@ exports.logActivity = async (req, res) => {
             event_type: 'spec_added',
             product_id: effectiveProductId,
             duplicate: true,
-            message: 'Skipped — listing created within 7 min'
+            message: 'Skipped — listing created within 60 min'
           }
         });
       }

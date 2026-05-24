@@ -46,6 +46,10 @@
       if (productId && !hasPackageType) {
         return 'product_created';
       }
+      // GET to /products/{id} with packageType = product viewed (listed product detail page)
+      if (method === 'GET' && productId) {
+        return 'product_viewed';
+      }
       return null;
     }
     if (matched.event_type === 'product_updated') {
@@ -64,7 +68,7 @@
     return matched.event_type;
   }
 
-  function extractData(responseData, eventType) {
+  function extractData(responseData, eventType, reqBody) {
     if (eventType === 'qc_pending') {
       const pendingCount = responseData?.pagination?.total ?? null;
       return {
@@ -76,23 +80,26 @@
     }
 
     const data = responseData?.data || responseData;
+    const body = reqBody || {};
+
     return {
-      product_id: data._id || data.id || null,
-      vendor_id: typeof data.vendor === 'object' ? data.vendor?._id : data.vendor || null,
-      product_name: data.productName || null,
+      product_id: data._id || data.id || body._id || body.id || null,
+      vendor_id: typeof data.vendor === 'object' ? data.vendor?._id : (data.vendor || body.vendor || null),
+      product_name: data.productName || body.productName || data.name || body.name || null,
       qc_status: data.qcStatus || null,
       is_qc_approved: data.isQCApproved || false,
-      product_sku: data.productSku || null,
+      product_sku: data.productSku || body.productSku || null,
       event_type: eventType,
       timestamp: new Date().toISOString()
     };
   }
 
-  function sendEvent(eventType, data) {
+  function sendEvent(eventType, data, reqBody) {
     window.postMessage({
       type: 'BD_TRACKER_INTERCEPTED',
       event_type: eventType,
-      data: data
+      data: data,
+      reqBody: reqBody || null
     }, '*');
   }
 
@@ -132,10 +139,10 @@
           if (!eventType) {
             continue;
           }
-          const data = extractData(responseData, eventType);
+          const data = extractData(responseData, eventType, reqBody);
           data.url = url.split('?')[0];
           data.method = method;
-          sendEvent(eventType, data);
+          sendEvent(eventType, data, reqBody);
         }
         return response;
       }
@@ -174,10 +181,10 @@
           for (const matched of matches) {
             let eventType = detectEventType(matched, reqBody, responseData, method);
             if (!eventType) continue;
-            const data = extractData(responseData, eventType);
+            const data = extractData(responseData, eventType, reqBody);
             data.url = url.split('?')[0];
             data.method = method;
-            sendEvent(eventType, data);
+            sendEvent(eventType, data, reqBody);
           }
         }
       } catch (err) {}

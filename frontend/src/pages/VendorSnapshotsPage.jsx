@@ -277,8 +277,9 @@ export default function VendorSnapshotsPage({ embedded }) {
                   <td className="px-5 py-3.5">
                     <div className="flex flex-col">
                       <span className="text-sm font-bold text-slate-900">{snap.nepaliDate}</span>
+                      <span className="text-[10px] text-slate-400">{new Date(snap.snapshotDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</span>
                       {snap.prevNepaliDate && (
-                        <span className="text-[10px] text-slate-400 mt-0.5">vs {snap.prevNepaliDate}</span>
+                        <span className="text-[10px] text-slate-400 mt-1">vs {snap.prevNepaliDate} ({new Date(snap.prevSnapshotDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})</span>
                       )}
                     </div>
                   </td>
@@ -331,30 +332,25 @@ export default function VendorSnapshotsPage({ embedded }) {
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-sm font-bold text-slate-900">{snap.nepaliDate}</span>
-                  {snap.prevNepaliDate && (
-                    <span className="text-[10px] text-slate-400 ml-2">vs {snap.prevNepaliDate}</span>
-                  )}
+                  <span className="text-[10px] text-slate-400 ml-2">{new Date(snap.snapshotDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
                 </div>
+                {snap.prevNepaliDate && (
+                  <span className="text-[10px] text-slate-400">vs {snap.prevNepaliDate}</span>
+                )}
               </div>
               <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">Total</p>
-                  {snap.prevTotalVendors != null && <p className="text-xs text-slate-400">{snap.prevTotalVendors} &rarr;</p>}
-                  <p className="text-base font-extrabold text-slate-900">{snap.totalVendors}</p>
-                  <DeltaBadge delta={snap.totalVendorsDelta} percent={snap.totalVendorsPercentChange} />
-                </div>
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">Verified</p>
-                  {snap.prevVerifiedVendors != null && <p className="text-xs text-slate-400">{snap.prevVerifiedVendors} &rarr;</p>}
-                  <p className="text-base font-extrabold text-slate-900">{snap.verifiedVendors}</p>
-                  <DeltaBadge delta={snap.verifiedVendorsDelta} percent={snap.verifiedVendorsPercentChange} />
-                </div>
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">Active</p>
-                  {snap.prevActiveSellers != null && <p className="text-xs text-slate-400">{snap.prevActiveSellers} &rarr;</p>}
-                  <p className="text-base font-extrabold text-slate-900">{snap.activeSellers}</p>
-                  <DeltaBadge delta={snap.activeSellersDelta} percent={snap.activeSellersPercentChange} />
-                </div>
+                {[
+                  { label: 'Total', curr: snap.totalVendors, prev: snap.prevTotalVendors, delta: snap.totalVendorsDelta, pct: snap.totalVendorsPercentChange },
+                  { label: 'Verified', curr: snap.verifiedVendors, prev: snap.prevVerifiedVendors, delta: snap.verifiedVendorsDelta, pct: snap.verifiedVendorsPercentChange },
+                  { label: 'Active', curr: snap.activeSellers, prev: snap.prevActiveSellers, delta: snap.activeSellersDelta, pct: snap.activeSellersPercentChange }
+                ].map(m => (
+                  <div key={m.label}>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">{m.label}</p>
+                    {m.prev != null && <p className="text-xs text-slate-400">{m.prev} &rarr; {m.curr}</p>}
+                    {m.prev == null && <p className="text-base font-extrabold text-slate-900">{m.curr}</p>}
+                    <DeltaBadge delta={m.delta} percent={m.pct} />
+                  </div>
+                ))}
               </div>
             </div>
           ))}
