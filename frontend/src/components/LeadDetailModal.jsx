@@ -3,7 +3,7 @@ import axios from 'axios';
 import toast from 'react-hot-toast';
 import {
   X, Calendar, User, Tag, MapPin, Phone, Mail, History, Clock,
-  Briefcase, MessageSquare, ChevronRight, TrendingUp, ShieldCheck,
+  Briefcase, MessageSquare, ChevronRight, ChevronDown, TrendingUp, ShieldCheck,
   AlertCircle, Loader2, Send, Edit2, Check, X as XIcon
 } from 'lucide-react';
 import { cn } from '../utils/cn';
@@ -16,6 +16,9 @@ const LeadDetailModal = ({ isOpen, onClose, lead, token, user, onSuccess }) => {
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState({ business_name: '', contact_person: '', phone: '', email: '', location: '', category: '', lead_source: '' });
   const [phoneError, setPhoneError] = useState('');
+  const [zoneGroups, setZoneGroups] = useState([]);
+  const [showBranches, setShowBranches] = useState(false);
+  const [selectedBranches, setSelectedBranches] = useState([]);
   const [newActivity, setNewActivity] = useState({ description: '', activity_type: 'call', follow_up_required: false, follow_up_date: '', follow_up_time: '' });
 
   const fetchActivities = async () => {
@@ -30,8 +33,22 @@ const LeadDetailModal = ({ isOpen, onClose, lead, token, user, onSuccess }) => {
     if (isOpen && lead) {
       fetchActivities();
       setEditData({ business_name: lead.business_name || '', contact_person: lead.contact_person || '', phone: lead.phone || '', email: lead.email || '', location: lead.location || '', category: lead.category || '', lead_source: lead.lead_source || '' });
+      setSelectedBranches(lead.service_branches || []);
+      setShowBranches(false);
+      setEditing(false);
+      axios.get(`${API_URL}/delivery-zones`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(res => setZoneGroups(res.data.data.groups || []))
+        .catch(() => {});
     }
   }, [isOpen, lead, token]);
+
+  const toggleBranch = (branchId, name) => {
+    setSelectedBranches(prev => {
+      const exists = prev.find(b => b.branchId === branchId);
+      if (exists) return prev.filter(b => b.branchId !== branchId);
+      return [...prev, { branchId, name }];
+    });
+  };
 
   const handleSubmitActivity = async (e) => {
     e.preventDefault();
@@ -163,7 +180,47 @@ const LeadDetailModal = ({ isOpen, onClose, lead, token, user, onSuccess }) => {
                   {/* Service Branches */}
                   <div className="pt-2">
                     <p className="text-[10px] font-bold text-slate-400 uppercase mb-1.5">Service Branches</p>
-                    {lead.service_branches?.length > 0 ? (
+                    {editing ? (
+                      <div className="relative">
+                        <button type="button" onClick={() => setShowBranches(!showBranches)}
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-left text-xs font-medium text-slate-700 flex items-center justify-between">
+                          <span className="flex items-center gap-2">
+                            <MapPin size={12} className="text-slate-400" />
+                            {selectedBranches.length > 0 ? `${selectedBranches.length} branch${selectedBranches.length > 1 ? 'es' : ''} selected` : 'Select service branches'}
+                          </span>
+                          <ChevronDown size={12} className={`text-slate-400 transition-transform ${showBranches ? 'rotate-180' : ''}`} />
+                        </button>
+                        {showBranches && (
+                          <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                            {zoneGroups.length === 0 ? (
+                              <p className="p-3 text-xs text-slate-400">No zones available</p>
+                            ) : zoneGroups.map(group => (
+                              <div key={group._id}>
+                                <p className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase bg-slate-50">{group.name}</p>
+                                {group.branches.map(branch => (
+                                  <label key={branch.nepalcanId} className="flex items-center gap-2 px-3 py-2 hover:bg-red-50/50 cursor-pointer">
+                                    <input type="checkbox" checked={selectedBranches.some(b => b.branchId === branch.nepalcanId)}
+                                      onChange={() => toggleBranch(branch.nepalcanId, branch.name)}
+                                      className="w-3.5 h-3.5 rounded border-slate-300 text-red-600 focus:ring-red-500" />
+                                    <span className="text-xs font-medium text-slate-700">{branch.name}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {selectedBranches.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            {selectedBranches.map(b => (
+                              <span key={b.branchId} className="inline-flex items-center gap-1 px-2 py-1 bg-red-50 text-red-700 rounded-lg text-[10px] font-bold">
+                                {b.name}
+                                <button type="button" onClick={() => toggleBranch(b.branchId, b.name)} className="hover:text-red-900"><X size={10} /></button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : lead.service_branches?.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
                         {lead.service_branches.map((branch, i) => (
                           <span key={branch.branchId || i} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-red-50 text-red-700 rounded-lg text-[10px] font-bold border border-red-100">
@@ -182,7 +239,7 @@ const LeadDetailModal = ({ isOpen, onClose, lead, token, user, onSuccess }) => {
                         if (editData.phone && !/^\d{10}$/.test(editData.phone)) { setPhoneError('Must be 10 digits'); return; }
                         setPhoneError('');
                         try {
-                          await axios.patch(`${API_URL}/leads/${lead._id}`, editData, { headers: { Authorization: `Bearer ${token}` } });
+                          await axios.patch(`${API_URL}/leads/${lead._id}`, { ...editData, service_branches: selectedBranches }, { headers: { Authorization: `Bearer ${token}` } });
                           toast.success('Lead updated!');
                           const res = await axios.get(`${API_URL}/leads/${lead._id}`, { headers: { Authorization: `Bearer ${token}` } });
                           if (onSuccess && res.data?.data?.lead) onSuccess(res.data.data.lead);
