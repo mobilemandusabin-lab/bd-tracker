@@ -7,6 +7,7 @@ const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const path = require('path');
 const fs = require('fs');
+const archiver = require('archiver');
 
 // POST /extension/login — Extension login (any active user)
 exports.extensionLogin = async (req, res) => {
@@ -77,7 +78,7 @@ exports.getLatestVersion = async (req, res) => {
   }
 };
 
-// GET /extension/download
+// GET /extension/download — zips extension source on-the-fly
 exports.downloadExtension = async (req, res) => {
   try {
     const version = await ExtensionVersion.findOne({ is_latest: true }).sort({ created_at: -1 });
@@ -85,14 +86,31 @@ exports.downloadExtension = async (req, res) => {
       return res.status(404).json({ status: 'fail', message: 'No version found' });
     }
 
-    const zipPath = path.join(__dirname, '../../public/extension/extension.zip');
-    if (!fs.existsSync(zipPath)) {
-      return res.status(404).json({ status: 'fail', message: 'Extension package not found' });
+    const extDir = path.join(__dirname, '../../public/extension');
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="bd-tracker-extension-v${version.version}.zip"`);
+
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    archive.on('error', (err) => { throw err; });
+    archive.pipe(res);
+
+    const files = fs.readdirSync(extDir);
+    for (const file of files) {
+      const fullPath = path.join(extDir, file);
+      const stat = fs.statSync(fullPath);
+      if (stat.isDirectory()) {
+        archive.directory(fullPath, file);
+      } else if (!file.endsWith('.zip')) {
+        archive.file(fullPath, { name: file });
+      }
     }
 
-    res.download(zipPath, `bd-tracker-extension-v${version.version}.zip`);
+    await archive.finalize();
   } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
+    if (!res.headersSent) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
   }
 };
 
@@ -174,13 +192,9 @@ exports.logActivity = async (req, res) => {
 
     // Handle listing_created: new listing vs edit
     let effectiveEventType = event_type;
-    console.log('[BD Tracker] Received event:', event_type, 'product_id:', effectiveProductId, 'metadata.method:', metadata?.method);
     if (event_type === 'listing_created' && effectiveProductId) {
       const isPost = metadata?.method === 'POST';
-      console.log('[BD Tracker] isPost:', isPost);
       if (isPost) {
-        // POST = product created with packageType in one go → always listing_created
-        console.log('[BD Tracker] POST creation → keeping listing_created');
       } else {
         // PUT = check if this is a new listing or an edit
         const sevenMinAgo = new Date(Date.now() - 7 * 60 * 1000);
@@ -248,7 +262,6 @@ exports.logActivity = async (req, res) => {
     }
 
     // Create ExtensionEvent (single source of truth for extension analytics)
-    console.log('[BD Tracker] Storing event:', effectiveEventType, 'product_id:', effectiveProductId);
     const extensionEvent = await ExtensionEvent.create({
       event_type: effectiveEventType,
       product_id: effectiveProductId,
