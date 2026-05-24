@@ -58,19 +58,16 @@ exports.extensionLogin = async (req, res) => {
   }
 };
 
-// GET /extension/latest-version
+// GET /extension/latest-version — reads directly from manifest.json
 exports.getLatestVersion = async (req, res) => {
   try {
-    const version = await ExtensionVersion.findOne({ is_latest: true }).sort({ created_at: -1 });
-    if (!version) {
-      return res.status(404).json({ status: 'fail', message: 'No version found' });
-    }
+    const manifest = require('../../public/extension/manifest.json');
     res.status(200).json({
       status: 'success',
       data: {
-        version: version.version,
-        changelog: version.changelog,
-        created_at: version.created_at
+        version: manifest.version,
+        changelog: `Extension v${manifest.version}`,
+        created_at: new Date().toISOString()
       }
     });
   } catch (err) {
@@ -81,15 +78,14 @@ exports.getLatestVersion = async (req, res) => {
 // GET /extension/download — zips extension source on-the-fly
 exports.downloadExtension = async (req, res) => {
   try {
-    const version = await ExtensionVersion.findOne({ is_latest: true }).sort({ created_at: -1 });
-    if (!version) {
-      return res.status(404).json({ status: 'fail', message: 'No version found' });
-    }
+    const manifestPath = path.join(__dirname, '../../public/extension/manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+    const version = manifest.version || '1.0.0';
 
     const extDir = path.join(__dirname, '../../public/extension');
 
     res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', `attachment; filename="bd-tracker-extension-v${version.version}.zip"`);
+    res.setHeader('Content-Disposition', `attachment; filename="bd-tracker-extension-v${version}.zip"`);
 
     const archive = archiver('zip', { zlib: { level: 9 } });
     archive.on('error', (err) => { throw err; });
