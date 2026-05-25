@@ -7,7 +7,7 @@ import {
   ChevronLeft, ChevronRight, ArrowUpRight, ArrowDownRight, Minus,
   Users, Target, TrendingUp, TrendingDown, Activity, GitCompareArrows,
   X, BarChart3, ArrowLeft, Calendar, Loader2, AlertCircle, FileText,
-  ShieldCheck, Zap
+  ShieldCheck, Zap, GitBranch
 } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { API_URL } from '../config/api';
@@ -20,7 +20,8 @@ const ACTIVITY_ICONS = {
   meeting: CalendarDays,
   demo: Monitor,
   follow_up: Clock,
-  note: StickyNote
+  note: StickyNote,
+  status_change: GitBranch
 };
 
 const ACTIVITY_COLORS = {
@@ -30,7 +31,8 @@ const ACTIVITY_COLORS = {
   meeting: '#7c3aed',
   demo: '#ea580c',
   follow_up: '#0891b2',
-  note: '#64748b'
+  note: '#64748b',
+  status_change: '#9333ea'
 };
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];

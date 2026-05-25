@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import {
   X, Calendar, User, Tag, MapPin, Phone, Mail, History, Clock,
   MessageSquare, ShieldCheck, AlertCircle, Loader2, Send,
-  Landmark, CreditCard, Building2
+  Landmark, CreditCard, Building2, GitBranch, ArrowRightLeft
 } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { API_URL } from '../config/api';
@@ -45,11 +45,11 @@ const VendorDetailModal = ({ isOpen, onClose, vendor, token, user, onSuccess }) 
   if (!isOpen || !vendor) return null;
 
   const getActivityIcon = (type) => {
-    const map = { call: <Phone size={14} />, whatsapp: <MessageSquare size={14} />, email: <Mail size={14} />, meeting: <Calendar size={14} />, follow_up: <Clock size={14} /> };
+    const map = { call: <Phone size={14} />, whatsapp: <MessageSquare size={14} />, email: <Mail size={14} />, meeting: <Calendar size={14} />, follow_up: <Clock size={14} />, status_change: <ArrowRightLeft size={14} /> };
     return map[type] || <Tag size={14} />;
   };
   const getActivityColor = (type) => {
-    const map = { call: 'bg-blue-50 text-blue-600', whatsapp: 'bg-emerald-50 text-emerald-600', email: 'bg-indigo-50 text-indigo-600', meeting: 'bg-amber-50 text-amber-600', follow_up: 'bg-red-50 text-red-600' };
+    const map = { call: 'bg-blue-50 text-blue-600', whatsapp: 'bg-emerald-50 text-emerald-600', email: 'bg-indigo-50 text-indigo-600', meeting: 'bg-amber-50 text-amber-600', follow_up: 'bg-red-50 text-red-600', status_change: 'bg-purple-50 text-purple-600' };
     return map[type] || 'bg-slate-50 text-slate-600';
   };
 

@@ -1045,23 +1045,41 @@ exports.getAnalytics = async (req, res) => {
   }
 };
 
-// GET /dashboard/my-analytics — User-specific analytics
+// GET /dashboard/my-analytics — User-specific analytics (super_admin can view any user)
 exports.getMyAnalytics = async (req, res) => {
   try {
-    const userId = req.user._id;
-    const { period = 'all' } = req.query;
+    const { period = 'all', userId: targetUserId, startDate: customStartDate, endDate: customEndDate } = req.query;
+
+    // Super admin can view any user; others see only their own
+    const userId = (req.user.role === 'super_admin' && targetUserId) ? targetUserId : req.user._id;
+
+    // Fetch the target user's info for display
+    const User = require('../models/User');
+    const targetUser = await User.findById(userId).select('name email role').lean();
+
     const now = new Date();
     let startDate;
-    switch (period) {
-      case '30d': startDate = new Date(now - 30 * 24 * 60 * 60 * 1000); break;
-      case '90d': startDate = new Date(now - 90 * 24 * 60 * 60 * 1000); break;
-      case '6m': startDate = new Date(now - 180 * 24 * 60 * 60 * 1000); break;
-      case '1y': startDate = new Date(now - 365 * 24 * 60 * 60 * 1000); break;
-      case 'all': startDate = new Date(0); break;
-      default: startDate = new Date(0);
+    let endDate;
+    if (customStartDate && customEndDate) {
+      startDate = new Date(customStartDate);
+      endDate = new Date(customEndDate);
+      endDate.setHours(23, 59, 59, 999);
+    } else {
+      switch (period) {
+        case '30d': startDate = new Date(now - 30 * 24 * 60 * 60 * 1000); break;
+        case '90d': startDate = new Date(now - 90 * 24 * 60 * 60 * 1000); break;
+        case '6m': startDate = new Date(now - 180 * 24 * 60 * 60 * 1000); break;
+        case '1y': startDate = new Date(now - 365 * 24 * 60 * 60 * 1000); break;
+        case 'all': startDate = new Date(0); break;
+        default: startDate = new Date(0);
+      }
     }
 
-    const matchBase = { assigned_user: userId, created_at: { $gte: startDate } };
+    const dateFilter = customStartDate && customEndDate
+      ? { $gte: startDate, $lte: endDate }
+      : { $gte: startDate };
+
+    const matchBase = { assigned_user: userId, created_at: dateFilter };
 
     const [
       totalLeads,
@@ -1086,7 +1104,7 @@ exports.getMyAnalytics = async (req, res) => {
       Lead.countDocuments({ ...matchBase, lead_status: 'Lost' }),
 
       // Activity count
-      Activity.countDocuments({ user_id: userId, created_at: { $gte: startDate } }),
+      Activity.countDocuments({ user_id: userId, created_at: dateFilter }),
 
       // Monthly trends
       Lead.aggregate([
@@ -1110,7 +1128,7 @@ exports.getMyAnalytics = async (req, res) => {
 
       // Activity heatmap
       Activity.aggregate([
-        { $match: { user_id: userId, created_at: { $gte: startDate } } },
+        { $match: { user_id: userId, created_at: dateFilter } },
         { $group: { _id: { day: { $dayOfWeek: '$created_at' }, hour: { $hour: '$created_at' } }, count: { $sum: 1 } } }
       ]),
 
@@ -1132,7 +1150,7 @@ exports.getMyAnalytics = async (req, res) => {
           }
         },
         { $unwind: { path: '$lead', preserveNullAndEmptyArrays: false } },
-        { $match: { 'lead.assigned_user': userId, orderStatus: 'Delivered', createdAt: { $gte: startDate } } },
+        { $match: { 'lead.assigned_user': userId, orderStatus: 'Delivered', createdAt: dateFilter } },
         {
           $group: {
             _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } },
@@ -1154,7 +1172,7 @@ exports.getMyAnalytics = async (req, res) => {
       }).sort({ start_date: -1 }).lean(),
 
       // Activated vendors count for user
-      Lead.countDocuments({ assigned_user: userId, $or: [{ active_seller: true }, { lead_status: 'Active Seller' }], created_at: { $gte: startDate } })
+      Lead.countDocuments({ assigned_user: userId, $or: [{ active_seller: true }, { lead_status: 'Active Seller' }], created_at: dateFilter })
     ]);
 
     // Calculate goal progress using each goal's own date range
@@ -1205,6 +1223,7 @@ exports.getMyAnalytics = async (req, res) => {
       data: {
         period,
         userId,
+        targetUser,
         summary: {
           totalLeads,
           totalConverted,

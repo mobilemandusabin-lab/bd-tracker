@@ -13,7 +13,7 @@ const activitySchema = new mongoose.Schema({
   },
   activity_type: {
     type: String,
-    enum: ['call', 'whatsapp', 'email', 'meeting', 'demo', 'follow_up', 'note'],
+    enum: ['call', 'whatsapp', 'email', 'meeting', 'demo', 'follow_up', 'note', 'status_change'],
     required: [true, 'Please provide activity type']
   },
   description: {

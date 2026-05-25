@@ -5,7 +5,7 @@ import {
   BarChart3, TrendingUp, TrendingDown, Users, Target, DollarSign,
   Clock, Activity as ActivityIcon, Flame, ArrowUpRight, ArrowDownRight,
   Filter, Zap, AlertTriangle, Store, Trophy, PieChart, Camera, ShoppingBag,
-  User, CheckCircle2, Calendar
+  User, CheckCircle2, Calendar, ChevronDown, Search, X
 } from 'lucide-react';
 import { API_URL } from '../config/api';
 import {
@@ -19,9 +19,10 @@ const DailyReportPage = lazy(() => import('./DailyReportPage'));
 const NepalcanAnalyticsPage = lazy(() => import('./NepalcanAnalyticsPage'));
 const VendorSnapshotsPage = lazy(() => import('./VendorSnapshotsPage'));
 
-const TABS = [
+const ALL_TABS = [
   { key: 'overview', label: 'Overview', icon: BarChart3 },
   { key: 'my-analytics', label: 'My Analytics', icon: User },
+  { key: 'team-analytics', label: 'Team Analytics', icon: Users, superAdminOnly: true },
   { key: 'leaderboard', label: 'BD Leaderboard', icon: Trophy },
   { key: 'daily', label: 'Daily Report', icon: PieChart },
   { key: 'nepalcan', label: 'Nepalcan', icon: ShoppingBag },
@@ -726,11 +727,402 @@ const MyAnalyticsTab = () => {
   );
 };
 
+// ─── Team Analytics Tab (super_admin only) ───────────────────────────────
+const FUNNEL_ORDER = ['New', 'Contacted', 'Interested', 'Meeting Scheduled', 'Negotiation', 'Document Pending', 'Verification', 'Onboarding', 'Activated', 'Active Seller', 'Self Registered', 'Nepalcan', 'Lost'];
+
+const TeamAnalyticsTab = () => {
+  const { token } = useSelector((state) => state.auth);
+  const [users, setUsers] = useState([]);
+  const [selectedUserId, setSelectedUserId] = useState('');
+  const [period, setPeriod] = useState('all');
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [selectedStage, setSelectedStage] = useState(null);
+  const [stageLeads, setStageLeads] = useState([]);
+  const [stageLoading, setStageLoading] = useState(false);
+
+  // Fetch user list on mount
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        const res = await axios.get(`${API_URL}/users`, { headers: { Authorization: `Bearer ${token}` } });
+        setUsers(res.data.data.users || []);
+      } catch (err) {
+        console.error('Failed to fetch users:', err);
+      }
+    };
+    if (token) fetchUsers();
+  }, [token]);
+
+  // Fetch analytics when user or period changes
+  useEffect(() => {
+    if (!selectedUserId) { setData(null); return; }
+    const fetchAnalytics = async () => {
+      setLoading(true);
+      try {
+        const params = new URLSearchParams();
+        if (customStart && customEnd) {
+          params.append('startDate', customStart);
+          params.append('endDate', customEnd);
+        } else {
+          params.append('period', period);
+        }
+        params.append('userId', selectedUserId);
+        const res = await axios.get(`${API_URL}/dashboard/my-analytics?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setData(res.data.data);
+      } catch (err) {
+        console.error('Failed to fetch team analytics:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchAnalytics();
+  }, [token, selectedUserId, period, customStart, customEnd]);
+
+  const handleUserChange = (userId) => {
+    setSelectedUserId(userId);
+    setCustomStart('');
+    setCustomEnd('');
+    setPeriod('all');
+  };
+
+  const handlePeriodChange = (p) => {
+    setPeriod(p);
+    setCustomStart('');
+    setCustomEnd('');
+  };
+
+  const handleCustomDateApply = () => {
+    if (customStart && customEnd) {
+      setPeriod('custom');
+    }
+  };
+
+  const fetchStageLeads = async (stageName) => {
+    setSelectedStage(stageName);
+    setStageLoading(true);
+    try {
+      const params = new URLSearchParams({ type: 'lead', lead_status: stageName, assigned_user: selectedUserId });
+      const res = await axios.get(`${API_URL}/leads?${params.toString()}`, { headers: { Authorization: `Bearer ${token}` } });
+      setStageLeads(res.data.data.leads || []);
+    } catch { setStageLeads([]); }
+    finally { setStageLoading(false); }
+  };
+
+  const funnelData = useMemo(() => {
+    if (!data?.funnel) return [];
+    const funnelMap = {};
+    data.funnel.forEach(f => { funnelMap[f._id] = f.count; });
+    return FUNNEL_ORDER.map(s => ({ name: s, count: funnelMap[s] || 0 })).filter(d => d.count > 0);
+  }, [data?.funnel]);
+
+  const trendData = useMemo(() => {
+    if (!data?.monthlyTrends) return [];
+    return data.monthlyTrends.map(t => ({ name: `${MONTHS[t._id.month - 1]} ${t._id.year}`, created: t.created, converted: t.converted }));
+  }, [data?.monthlyTrends]);
+
+  const revenueTrendData = useMemo(() => {
+    if (!data?.revenueTrend) return [];
+    return data.revenueTrend.map(r => ({ name: `${MONTHS[r._id.month - 1]} ${r._id.year}`, revenue: r.revenue, orders: r.orders }));
+  }, [data?.revenueTrend]);
+
+  const heatmapData = useMemo(() => {
+    if (!data?.activityHeatmap) return [];
+    const grid = Array.from({ length: 7 }, () => Array(17).fill(0));
+    data.activityHeatmap.forEach(h => {
+      const day = h._id.day - 1;
+      const hour = h._id.hour - 6;
+      if (day >= 0 && day < 7 && hour >= 0 && hour < 17) grid[day][hour] = h.count;
+    });
+    return grid;
+  }, [data?.activityHeatmap]);
+
+  const selectedUser = users.find(u => u._id === selectedUserId);
+
+  return (
+    <div className="space-y-6">
+      {/* User Selector + Date Filters */}
+      <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm">
+        <div className="flex flex-col lg:flex-row gap-4">
+          {/* User Dropdown */}
+          <div className="flex-1">
+            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Select User</label>
+            <div className="relative">
+              <select
+                value={selectedUserId}
+                onChange={(e) => handleUserChange(e.target.value)}
+                className="w-full appearance-none bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 pr-10"
+              >
+                <option value="">Choose a team member...</option>
+                {users.map(u => (
+                  <option key={u._id} value={u._id}>{u.name} ({u.role})</option>
+                ))}
+              </select>
+              <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            </div>
+          </div>
+
+          {/* Period Buttons */}
+          <div>
+            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Period</label>
+            <div className="flex gap-1 flex-wrap">
+              {[['all', 'All Time'], ['30d', '30d'], ['90d', '90d'], ['6m', '6m'], ['1y', '1y']].map(([val, label]) => (
+                <button key={val} onClick={() => handlePeriodChange(val)}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${period === val && !customStart ? 'bg-red-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Custom Date Range */}
+          <div>
+            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Custom Range</label>
+            <div className="flex gap-2 items-center">
+              <input type="date" value={customStart} onChange={(e) => { setCustomStart(e.target.value); setPeriod('custom'); }}
+                className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500" />
+              <span className="text-slate-400 text-xs">to</span>
+              <input type="date" value={customEnd} onChange={(e) => { setCustomEnd(e.target.value); setPeriod('custom'); }}
+                className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* No User Selected */}
+      {!selectedUserId && (
+        <div className="bg-white rounded-2xl border border-slate-100 p-12 shadow-sm text-center">
+          <Users size={48} className="mx-auto text-slate-300 mb-4" />
+          <h3 className="text-lg font-bold text-slate-900 mb-2">Select a Team Member</h3>
+          <p className="text-sm text-slate-500">Choose a user from the dropdown above to view their analytics</p>
+        </div>
+      )}
+
+      {/* Loading */}
+      {loading && selectedUserId && (
+        <div className="bg-white rounded-2xl border border-slate-100 p-12 shadow-sm text-center">
+          <div className="animate-spin w-8 h-8 border-4 border-red-600 border-t-transparent rounded-full mx-auto mb-4" />
+          <p className="text-sm text-slate-500">Loading analytics...</p>
+        </div>
+      )}
+
+      {/* Analytics Content */}
+      {!loading && data && selectedUserId && (
+        <>
+          {/* User Info Header */}
+          {data.targetUser && (
+            <div className="flex items-center gap-3 bg-red-50 rounded-xl px-5 py-3 border border-red-100">
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
+                <User size={20} className="text-red-600" />
+              </div>
+              <div>
+                <p className="font-bold text-sm text-slate-900">{data.targetUser.name}</p>
+                <p className="text-xs text-slate-500">{data.targetUser.email} &middot; {data.targetUser.role}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Summary Cards Row 1 */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <MetricCard label="Total Leads" value={data.summary.totalLeads} icon={Users} color="blue" />
+            <MetricCard label="Converted" value={data.summary.totalConverted} icon={Target} color="green" />
+            <MetricCard label="Conv. Rate" value={`${data.summary.conversionRate}%`} icon={TrendingUp} color="purple" />
+            <MetricCard label="Revenue" value={`Rs. ${Number(data.summary.totalRevenue || 0).toLocaleString()}`} icon={DollarSign} color="yellow" />
+          </div>
+
+          {/* Summary Cards Row 2 */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <MetricCard label="Lost" value={data.summary.totalLost} icon={AlertTriangle} color="red" />
+            <MetricCard label="Avg Conv. Time" value={`${data.summary.avgConversionDays || 0}d`} icon={Clock} color="slate" />
+            <MetricCard label="Total Activities" value={data.summary.totalActivities} icon={ActivityIcon} color="orange" />
+            <MetricCard label="Active Goals" value={data.goals?.length || 0} icon={Flame} color="pink" />
+          </div>
+
+          {/* Goals vs Achieved */}
+          {data.goals?.length > 0 && (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm">
+              <div className="px-6 py-4 border-b border-slate-100">
+                <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2"><Flame size={16} className="text-red-500" /> Goals vs Achieved</h3>
+              </div>
+              <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {data.goals.map((goal) => (
+                  <div key={goal._id} className="bg-slate-50 rounded-xl p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-bold text-slate-900">{goal.title}</span>
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${goal.progress >= 100 ? 'bg-green-100 text-green-700' : goal.progress >= 50 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+                        {goal.progress}%
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-200 rounded-full h-2 mb-2">
+                      <div className="bg-red-600 h-2 rounded-full transition-all" style={{ width: `${goal.progress}%` }} />
+                    </div>
+                    <div className="flex justify-between text-xs text-slate-500">
+                      <span>Achieved: <span className="font-bold text-slate-900">{goal.currentValue?.toLocaleString()}</span></span>
+                      <span>Target: <span className="font-bold text-slate-900">{goal.target_value?.toLocaleString()}</span></span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Lead Funnel */}
+          {funnelData.length > 0 && (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm">
+              <div className="px-6 py-4 border-b border-slate-100">
+                <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2"><Flame size={16} className="text-red-500" /> Lead Funnel</h3>
+              </div>
+              <div className="p-6 space-y-3">
+                {funnelData.map((stage, i) => {
+                  const maxCount = Math.max(...funnelData.map(s => s.count));
+                  const pct = maxCount > 0 ? (stage.count / maxCount) * 100 : 0;
+                  return (
+                    <button key={stage.name} onClick={() => fetchStageLeads(stage.name)}
+                      className="w-full flex items-center gap-4 p-3 rounded-xl hover:bg-slate-50 transition-all group text-left">
+                      <div className="w-36 text-xs font-bold text-slate-600 truncate">{stage.name}</div>
+                      <div className="flex-1 bg-slate-100 rounded-full h-6 overflow-hidden">
+                        <div className="bg-gradient-to-r from-red-500 to-red-600 h-6 rounded-full flex items-center justify-end pr-3 transition-all"
+                          style={{ width: `${Math.max(pct, 5)}%` }}>
+                          <span className="text-[11px] font-bold text-white">{stage.count}</span>
+                        </div>
+                      </div>
+                      <ArrowUpRight size={14} className="text-slate-400 group-hover:text-red-600 transition-colors" />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Stage Leads Modal */}
+          {selectedStage && (
+            <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => { setSelectedStage(null); setStageLeads([]); }}>
+              <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+                  <div>
+                    <h3 className="font-bold text-slate-900">{selectedStage}</h3>
+                    <p className="text-xs text-slate-500">{stageLeads.length} leads</p>
+                  </div>
+                  <button onClick={() => { setSelectedStage(null); setStageLeads([]); }} className="p-2 hover:bg-slate-100 rounded-lg"><X size={16} /></button>
+                </div>
+                <div className="overflow-y-auto max-h-[60vh] p-6">
+                  {stageLoading ? <p className="text-center text-slate-500 text-sm py-8">Loading...</p> : stageLeads.length === 0 ? (
+                    <p className="text-center text-slate-500 text-sm py-8">No leads in this stage</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {stageLeads.map(lead => (
+                        <div key={lead._id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
+                          <div>
+                            <p className="text-sm font-bold text-slate-900">{lead.business_name || lead.contact_person || 'Unnamed'}</p>
+                            <p className="text-xs text-slate-500">{lead.lead_source} &middot; {lead.category || 'N/A'}</p>
+                          </div>
+                          <span className="text-xs font-bold text-slate-500">{lead.lead_status}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Charts Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Monthly Trends */}
+            {trendData.length > 0 && (
+              <SectionCard title="Monthly Trends" icon={TrendingUp}>
+                <ResponsiveContainer width="100%" height={300}>
+                  <AreaChart data={trendData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                    <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                    <YAxis tick={{ fontSize: 11 }} />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Area type="monotone" dataKey="created" stroke="#DC2626" fill="#FEE2E2" strokeWidth={2} name="Created" />
+                    <Area type="monotone" dataKey="converted" stroke="#16A34A" fill="#DCFCE7" strokeWidth={2} name="Converted" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </SectionCard>
+            )}
+
+            {/* Revenue Trend */}
+            {revenueTrendData.length > 0 && (
+              <SectionCard title="Revenue Trend" icon={DollarSign}>
+                <ResponsiveContainer width="100%" height={300}>
+                  <AreaChart data={revenueTrendData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                    <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                    <YAxis tick={{ fontSize: 11 }} />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Area type="monotone" dataKey="revenue" stroke="#D97706" fill="#FEF3C7" strokeWidth={2} name="Revenue (Rs.)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </SectionCard>
+            )}
+          </div>
+
+          {/* Activity Heatmap */}
+          {heatmapData.some(day => day.some(v => v > 0)) && (
+            <SectionCard title="Activity Heatmap" icon={ActivityIcon}>
+              <div className="overflow-x-auto">
+                <div className="grid grid-cols-[60px_repeat(17,1fr)] gap-1 text-center min-w-[600px]">
+                  <div />
+                  {Array.from({ length: 17 }, (_, i) => (
+                    <div key={i} className="text-[10px] font-bold text-slate-400">{i + 6}</div>
+                  ))}
+                  {heatmapData.map((day, dayIdx) => (
+                    <React.Fragment key={dayIdx}>
+                      <div className="text-[10px] font-bold text-slate-400 flex items-center justify-end pr-2">{DAYS[dayIdx]}</div>
+                      {day.map((count, hourIdx) => {
+                        const maxVal = Math.max(...heatmapData.flat());
+                        const intensity = maxVal > 0 ? count / maxVal : 0;
+                        return (
+                          <div key={hourIdx}
+                            className="aspect-square rounded-sm flex items-center justify-center text-[9px] font-bold transition-all"
+                            style={{
+                              backgroundColor: count > 0 ? `rgba(220, 38, 38, ${0.1 + intensity * 0.9})` : '#F8FAFC',
+                              color: intensity > 0.5 ? '#fff' : '#94A3B8'
+                            }}
+                            title={`${DAYS[dayIdx]} ${hourIdx + 6}:00 — ${count} activities`}>
+                            {count > 0 ? count : ''}
+                          </div>
+                        );
+                      })}
+                    </React.Fragment>
+                  ))}
+                </div>
+              </div>
+            </SectionCard>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
 const AnalyticsPage = () => {
+  const { user } = useSelector((state) => state.auth);
+
+  const tabs = useMemo(() =>
+    ALL_TABS.filter(t => !t.superAdminOnly || user?.role === 'super_admin'),
+    [user?.role]
+  );
+
   const [activeTab, setActiveTab] = useState(() => {
     const hash = window.location.hash.replace('#', '');
-    return TABS.find(t => t.key === hash)?.key || 'overview';
+    return tabs.find(t => t.key === hash)?.key || 'overview';
   });
+
+  // Reset tab if it becomes inaccessible (e.g. role change)
+  useEffect(() => {
+    if (!tabs.find(t => t.key === activeTab)) {
+      setActiveTab('overview');
+      window.location.hash = 'overview';
+    }
+  }, [tabs, activeTab]);
 
   const handleTabChange = (key) => {
     setActiveTab(key);
@@ -753,7 +1145,7 @@ const AnalyticsPage = () => {
 
       {/* Tab Bar */}
       <div className="flex gap-1 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-hide">
-        {TABS.map(tab => {
+        {tabs.map(tab => {
           const Icon = tab.icon;
           return (
             <button key={tab.key} onClick={() => handleTabChange(tab.key)}
@@ -771,7 +1163,8 @@ const AnalyticsPage = () => {
       {/* Tab Content */}
       {activeTab === 'overview' && <OverviewTab />}
       {activeTab === 'my-analytics' && <MyAnalyticsTab />}
-      {activeTab !== 'overview' && activeTab !== 'my-analytics' && (
+      {activeTab === 'team-analytics' && <TeamAnalyticsTab />}
+      {activeTab !== 'overview' && activeTab !== 'my-analytics' && activeTab !== 'team-analytics' && (
         <Suspense fallback={<TabLoading />}>
           {activeTab === 'leaderboard' && <BDLeaderboardPage embedded />}
           {activeTab === 'daily' && <DailyReportPage embedded />}

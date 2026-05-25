@@ -315,20 +315,30 @@ for (const vendorData of deliveredOrdersAgg) {
       const { _id: vendorLeadId, deliveredCount, totalAmount, lastOrderDate } = vendorData;
       if (!vendorLeadId) continue;
       
-      const updated = await Lead.findByIdAndUpdate(
-        vendorLeadId,
-        { 
-          delivered_order_count: deliveredCount,
-          active_seller: deliveredCount > 0,
-          last_order_date: lastOrderDate,
-          total_revenue: totalAmount,
-          lead_status: 'Active Seller'
-        },
-        { new: true }
-      );
-      
-      if (updated) {
-        console.log(`[Nepalcan Sync] Updated lead ${updated.business_name}: ${deliveredCount} delivered orders - Active Seller`);
+      const leadToUpdate = await Lead.findById(vendorLeadId);
+      if (leadToUpdate) {
+        const prevStatus = leadToUpdate.lead_status;
+        leadToUpdate.delivered_order_count = deliveredCount;
+        leadToUpdate.active_seller = deliveredCount > 0;
+        leadToUpdate.last_order_date = lastOrderDate;
+        leadToUpdate.total_revenue = totalAmount;
+        leadToUpdate.lead_status = 'Active Seller';
+        await leadToUpdate.save();
+
+        if (prevStatus && prevStatus !== 'Active Seller') {
+          const Activity = require('../models/Activity');
+          const syncUserId = userId || (await getDefaultSyncUser())?._id;
+          if (syncUserId) {
+            await Activity.create({
+              lead_id: leadToUpdate._id,
+              user_id: syncUserId,
+              activity_type: 'status_change',
+              description: `Pipeline changed (sync): ${prevStatus} → Active Seller`,
+              status: 'completed'
+            });
+          }
+        }
+        console.log(`[Nepalcan Sync] Updated lead ${leadToUpdate.business_name}: ${deliveredCount} delivered orders - Active Seller`);
       }
     }
 
@@ -371,17 +381,31 @@ for (const vendorData of deliveredOrdersAgg) {
       for (const vendorData of fixedOrdersAgg) {
         const { _id: vendorLeadId, deliveredCount, totalAmount, lastOrderDate } = vendorData;
         if (!vendorLeadId) continue;
-        
-        await Lead.findByIdAndUpdate(
-          vendorLeadId,
-          { 
-            delivered_order_count: deliveredCount,
-            active_seller: deliveredCount > 0,
-            last_order_date: lastOrderDate,
-            total_revenue: totalAmount,
-            lead_status: 'Active Seller'
+
+        const leadToUpdate = await Lead.findById(vendorLeadId);
+        if (leadToUpdate) {
+          const prevStatus = leadToUpdate.lead_status;
+          leadToUpdate.delivered_order_count = deliveredCount;
+          leadToUpdate.active_seller = deliveredCount > 0;
+          leadToUpdate.last_order_date = lastOrderDate;
+          leadToUpdate.total_revenue = totalAmount;
+          leadToUpdate.lead_status = 'Active Seller';
+          await leadToUpdate.save();
+
+          if (prevStatus && prevStatus !== 'Active Seller') {
+            const Activity = require('../models/Activity');
+            const syncUserId = userId || (await getDefaultSyncUser())?._id;
+            if (syncUserId) {
+              await Activity.create({
+                lead_id: leadToUpdate._id,
+                user_id: syncUserId,
+                activity_type: 'status_change',
+                description: `Pipeline changed (sync): ${prevStatus} → Active Seller`,
+                status: 'completed'
+              });
+            }
           }
-        );
+        }
       }
     }
   } catch (error) {
@@ -695,9 +719,26 @@ const leadData = {
            };
 
         if (existingLead) {
+          const previousStatus = existingLead.lead_status;
           Object.assign(existingLead, leadData);
           if (!existingLead.nepalcanId) existingLead.nepalcanId = _id;
           await existingLead.save();
+
+          // Log activity if pipeline status changed during sync
+          if (previousStatus && previousStatus !== existingLead.lead_status) {
+            const Activity = require('../models/Activity');
+            const syncUserId = userId || (await getDefaultSyncUser())?._id;
+            if (syncUserId) {
+              await Activity.create({
+                lead_id: existingLead._id,
+                user_id: syncUserId,
+                activity_type: 'status_change',
+                description: `Pipeline changed (sync): ${previousStatus} → ${existingLead.lead_status}`,
+                status: 'completed'
+              });
+            }
+          }
+
           updated++;
           console.log(`[Sync Vendor] Updated lead ${name}`);
         } else {
@@ -735,17 +776,31 @@ const durationMs = Date.now() - startTime;
       for (const vendorData of deliveredOrdersAgg) {
         const { _id: vendorLeadId, deliveredCount, totalAmount, lastOrderDate } = vendorData;
         if (!vendorLeadId) continue;
-        
-        await Lead.findByIdAndUpdate(
-          vendorLeadId,
-          { 
-            delivered_order_count: deliveredCount,
-            active_seller: deliveredCount > 0,
-            last_order_date: lastOrderDate,
-            total_revenue: totalAmount,
-            lead_status: 'Active Seller'
+
+        const leadToUpdate = await Lead.findById(vendorLeadId);
+        if (leadToUpdate) {
+          const prevStatus = leadToUpdate.lead_status;
+          leadToUpdate.delivered_order_count = deliveredCount;
+          leadToUpdate.active_seller = deliveredCount > 0;
+          leadToUpdate.last_order_date = lastOrderDate;
+          leadToUpdate.total_revenue = totalAmount;
+          leadToUpdate.lead_status = 'Active Seller';
+          await leadToUpdate.save();
+
+          if (prevStatus && prevStatus !== 'Active Seller') {
+            const Activity = require('../models/Activity');
+            const syncUserId = userId || (await getDefaultSyncUser())?._id;
+            if (syncUserId) {
+              await Activity.create({
+                lead_id: leadToUpdate._id,
+                user_id: syncUserId,
+                activity_type: 'status_change',
+                description: `Pipeline changed (sync): ${prevStatus} → Active Seller`,
+                status: 'completed'
+              });
+            }
           }
-        );
+        }
       }
 
       // Retroactively fix orders with null vendor_lead_id by matching vendor name

@@ -138,8 +138,8 @@ appEventEmitter.on('lead.status.changed', async ({ lead, user, previous_status }
   await Activity.create({
     lead_id: lead._id,
     user_id: user._id,
-    activity_type: 'follow_up',
-    description: `Lead status changed from ${previous_status} to ${lead.lead_status}`,
+    activity_type: 'status_change',
+    description: `Pipeline changed: ${previous_status} → ${lead.lead_status}`,
     status: 'completed'
   });
 
