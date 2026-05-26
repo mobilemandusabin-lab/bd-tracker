@@ -101,10 +101,20 @@ app.get('/api/cron/sync', async (req, res) => {
 
 // Serve Static Frontend in Production
 if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, '../../frontend/dist')));
-  
+  const distPath = path.join(__dirname, '../../frontend/dist');
+
+  // Hashed assets (JS/CSS/images) — cache forever, filenames change on rebuild
+  app.use(express.static(distPath, {
+    maxAge: '1y',
+    immutable: true,
+    index: false
+  }));
+
+  // All other routes — serve index.html with no-cache so browsers always get
+  // the latest HTML (and thus the latest chunk filenames) after a deploy
   app.get('*path', (req, res) => {
-    res.sendFile(path.resolve(__dirname, '../../frontend', 'dist', 'index.html'));
+    res.set('Cache-Control', 'no-cache');
+    res.sendFile(path.resolve(distPath, 'index.html'));
   });
 }
 
