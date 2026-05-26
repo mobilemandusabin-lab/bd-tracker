@@ -6,14 +6,16 @@ let deviceId = null;
 chrome.storage.local.get(['authToken', 'deviceId']).then((stored) => {
   authToken = stored.authToken || null;
   deviceId = stored.deviceId || generateDeviceId();
+  console.log(`[BD Tracker BG] 🔧 Initialized. Logged in: ${!!authToken}, deviceId: ${deviceId}`);
   if (authToken) {
     startHeartbeat();
   }
 });
 
 async function injectIntoExistingTabs() {
-  const urls = COMMERCE_PATTERNS.map(p => p.url_pattern);
+  const urls = ['https://commerce.thecanbrand.com/*', 'https://demo.commerce.thecanbrand.com/*'];
   const tabs = await chrome.tabs.query({ url: urls });
+  console.log(`[BD Tracker BG] 💉 Injecting into ${tabs.length} existing tabs`);
   for (const tab of tabs) {
     try {
       await chrome.scripting.executeScript({
@@ -24,11 +26,15 @@ async function injectIntoExistingTabs() {
         target: { tabId: tab.id },
         files: ['bridge.js']
       });
-    } catch (e) {}
+      console.log(`[BD Tracker BG] ✅ Injected into tab ${tab.id}: ${tab.url}`);
+    } catch (e) {
+      console.log(`[BD Tracker BG] ⚠️ Failed to inject into tab ${tab.id}: ${e.message}`);
+    }
   }
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
+  console.log(`[BD Tracker BG] 🚀 Extension installed/updated`);
   const stored = await chrome.storage.local.get(['authToken', 'deviceId', 'userName']);
   authToken = stored.authToken || null;
   deviceId = stored.deviceId || generateDeviceId();
@@ -46,6 +52,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 
 chrome.runtime.onStartup.addListener(async () => {
+  console.log(`[BD Tracker BG] 🌅 Browser started`);
   const stored = await chrome.storage.local.get(['authToken', 'deviceId']);
   authToken = stored.authToken || null;
   deviceId = stored.deviceId || generateDeviceId();
@@ -73,6 +80,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.storage.local.get(['authToken'], (stored) => {
       if (stored.authToken) {
         authToken = stored.authToken;
+        console.log(`[BD Tracker BG] 🔑 Login success, starting heartbeat`);
         startHeartbeat();
         registerDevice();
         checkForUpdates();
@@ -111,15 +119,67 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 async function handleEvent(message) {
   if (!authToken) {
+    console.log(`[BD Tracker BG] ⚠️ Event ignored — not logged in`);
     return;
   }
 
-  const dedupKey = message.data?.product_id || message.data?.product_name || message.data?.url || '';
-  
-  // Use a shorter window for creation events to allow rapid successive creations
-  const window = (message.event_type === 'listing_created' || message.event_type === 'product_created') ? 5000 : DEDUP_WINDOW;
+  const eventType = message.event_type;
+  const data = message.data || {};
 
-  if (isDuplicate(message.event_type, dedupKey, window)) {
+  console.log(`[BD Tracker BG] 📥 Received event: ${eventType}`, JSON.stringify({
+    product_id: data.product_id,
+    product_name: data.product_name,
+    workflow_state: data.workflow_state
+  }));
+
+  // ── session_ended: no dedup, log directly ──
+  if (eventType === 'session_ended') {
+    try {
+      console.log(`[BD Tracker BG] 📋 Session ended for ${data.product_id}:`, JSON.stringify({
+        final_state: data.final_state,
+        completed: data.completed,
+        total_duration: data.total_duration ? Math.round(data.total_duration / 60000) + 'min' : null,
+        active_duration: data.active_duration ? Math.round(data.active_duration / 60000) + 'min' : null,
+        total_events: data.total_events,
+        spec_count: data.spec_count
+      }));
+
+      const response = await fetch(`${CONFIG.API_BASE_URL}/extension/activity-log`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
+        body: JSON.stringify({
+          event_type: 'session_ended',
+          product_id: data.product_id,
+          vendor_id: null,
+          product_name: null,
+          product_sku: null,
+          qc_status: null,
+          pending_count: null,
+          metadata: data
+        })
+      });
+
+      if (!response.ok) {
+        console.log(`[BD Tracker BG] ❌ session_ended log failed: ${response.status}`);
+        if (response.status === 401) await handleLogout();
+      } else {
+        console.log(`[BD Tracker BG] ✅ session_ended logged for ${data.product_id}`);
+      }
+    } catch (err) {
+      console.log(`[BD Tracker BG] ❌ session_ended error: ${err.message}`);
+    }
+    return;
+  }
+
+  // ── Normal events: dedup + log ──
+  const dedupKey = data.product_id || data.product_name || data.url || '';
+  const dedupWindow = (eventType === 'listing_created' || eventType === 'product_created') ? 5000 : DEDUP_WINDOW;
+
+  if (isDuplicate(eventType, dedupKey, dedupWindow)) {
+    console.log(`[BD Tracker BG] 🔄 Duplicate event ignored: ${eventType} for ${dedupKey}`);
     return;
   }
 
@@ -131,29 +191,46 @@ async function handleEvent(message) {
         'Authorization': `Bearer ${authToken}`
       },
       body: JSON.stringify({
-        event_type: message.event_type,
-        product_id: message.data.product_id,
-        vendor_id: message.data.vendor_id,
-        product_name: message.data.product_name,
-        product_sku: message.data.product_sku,
-        qc_status: message.data.qc_status,
-        pending_count: message.data.pending_count,
-        metadata: message.data
+        event_type: eventType,
+        product_id: data.product_id,
+        vendor_id: data.vendor_id,
+        product_name: data.product_name,
+        product_sku: data.product_sku,
+        qc_status: data.qc_status,
+        pending_count: data.pending_count,
+        metadata: {
+          ...data,
+          // Include session context in metadata
+          workflow_state: data.workflow_state,
+          previous_state: data.previous_state,
+          session_duration: data.session_duration,
+          time_to_first_spec: data.time_to_first_spec,
+          time_to_listing: data.time_to_listing,
+          total_views: data.total_views,
+          spec_count: data.spec_count,
+          has_package_type: data.has_package_type,
+          tab_id: data.tab_id
+        }
       })
     });
 
     if (!response.ok) {
+      console.log(`[BD Tracker BG] ❌ Event log failed: ${response.status}`);
       if (response.status === 401) {
         await handleLogout();
       }
     } else {
-      await response.json();
+      const result = await response.json();
+      console.log(`[BD Tracker BG] ✅ Event logged: ${eventType} → ${result?.data?.event_id || 'ok'}`);
     }
-  } catch (err) {}
+  } catch (err) {
+    console.log(`[BD Tracker BG] ❌ Event log error: ${err.message}`);
+  }
 }
 
 async function handleLogin(message) {
   try {
+    console.log(`[BD Tracker BG] 🔑 Logging in...`);
     const response = await fetch(`${CONFIG.API_BASE_URL}/extension/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -175,16 +252,20 @@ async function handleLogin(message) {
       registerDevice();
       checkForUpdates();
 
+      console.log(`[BD Tracker BG] ✅ Login success: ${data.data?.user?.name}`);
       return { success: true, userName: data.data?.user?.name || message.email, team: data.data?.user?.team };
     } else {
+      console.log(`[BD Tracker BG] ❌ Login failed: ${data.message}`);
       return { success: false, message: data.message || 'Login failed' };
     }
   } catch (err) {
+    console.log(`[BD Tracker BG] ❌ Login error: ${err.message}`);
     return { success: false, message: `Network error: ${err.message}` };
   }
 }
 
 async function handleLogout() {
+  console.log(`[BD Tracker BG] 👋 Logging out`);
   authToken = null;
   stopHeartbeat();
   await chrome.storage.local.remove(['authToken', 'userName', 'userEmail']);
@@ -207,6 +288,7 @@ async function registerDevice() {
   if (!authToken || !deviceId) return;
 
   try {
+    console.log(`[BD Tracker BG] 📱 Registering device: ${deviceId}`);
     await fetch(`${CONFIG.API_BASE_URL}/extension/register`, {
       method: 'POST',
       headers: {
@@ -218,13 +300,16 @@ async function registerDevice() {
         extension_version: chrome.runtime.getManifest().version
       })
     });
-  } catch (err) {}
+  } catch (err) {
+    console.log(`[BD Tracker BG] ⚠️ Device registration failed: ${err.message}`);
+  }
 }
 
 async function sendHeartbeat() {
   if (!authToken || !deviceId) return;
 
   try {
+    console.log(`[BD Tracker BG] 💓 Sending heartbeat`);
     const response = await fetch(`${CONFIG.API_BASE_URL}/extension/heartbeat`, {
       method: 'POST',
       headers: {
@@ -236,10 +321,14 @@ async function sendHeartbeat() {
 
     if (response.ok) {
       await chrome.storage.local.set({ lastSync: new Date().toISOString() });
+      console.log(`[BD Tracker BG] ✅ Heartbeat success`);
     } else if (response.status === 401) {
+      console.log(`[BD Tracker BG] ❌ Heartbeat 401 — logging out`);
       await handleLogout();
     }
-  } catch (err) {}
+  } catch (err) {
+    console.log(`[BD Tracker BG] ❌ Heartbeat error: ${err.message}`);
+  }
 }
 
 async function checkForUpdates() {
@@ -257,15 +346,20 @@ async function checkForUpdates() {
           latestVersion: latestVersion,
           changelog: data.data.changelog || ''
         });
+        console.log(`[BD Tracker BG] 📦 Update available: ${currentVersion} → ${latestVersion}`);
       } else {
         await chrome.storage.local.set({ updateAvailable: false });
+        console.log(`[BD Tracker BG] ✅ Extension up to date: ${currentVersion}`);
       }
     }
-  } catch (err) {}
+  } catch (err) {
+    console.log(`[BD Tracker BG] ⚠️ Version check failed: ${err.message}`);
+  }
 }
 
 function startHeartbeat() {
   stopHeartbeat();
+  console.log(`[BD Tracker BG] 🫀 Starting heartbeat (${CONFIG.HEARTBEAT_INTERVAL / 60000}min interval)`);
   sendHeartbeat();
   checkForUpdates();
 
@@ -295,6 +389,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 });
 
 async function syncNow() {
+  console.log(`[BD Tracker BG] 🔄 Manual sync triggered`);
   await sendHeartbeat();
   await checkForUpdates();
   const stored = await chrome.storage.local.get(['lastSync']);
@@ -302,7 +397,9 @@ async function syncNow() {
 }
 
 function generateDeviceId() {
-  return 'ext_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
+  const id = 'ext_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
+  console.log(`[BD Tracker BG] 🆕 Generated device ID: ${id}`);
+  return id;
 }
 
 const recentEvents = new Map();
@@ -346,6 +443,8 @@ chrome.webRequest.onCompleted.addListener(
 
     if (matches.length === 0) return;
 
+    console.log(`[BD Tracker BG] 🔍 webRequest QC match: ${details.method} ${details.url}`);
+
     chrome.storage.local.get(['authToken'], async (stored) => {
       const token = stored.authToken || authToken;
       if (!token) return;
@@ -354,6 +453,7 @@ chrome.webRequest.onCompleted.addListener(
         const pid = extractProductIdFromUrl(details.url);
         const dedupKey = pid || details.url.split('?')[0];
         if (isDuplicate(matched.eventType, dedupKey)) {
+          console.log(`[BD Tracker BG] 🔄 webRequest QC duplicate ignored: ${matched.eventType}`);
           continue;
         }
         try {
@@ -373,7 +473,10 @@ chrome.webRequest.onCompleted.addListener(
               metadata: { source: 'webRequest', url: details.url, method: details.method }
             })
           });
-        } catch (err) {}
+          console.log(`[BD Tracker BG] ✅ webRequest QC logged: ${matched.eventType} for ${pid}`);
+        } catch (err) {
+          console.log(`[BD Tracker BG] ❌ webRequest QC error: ${err.message}`);
+        }
       }
     });
   },

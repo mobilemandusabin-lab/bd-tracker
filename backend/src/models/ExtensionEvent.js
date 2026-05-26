@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const extensionEventSchema = new mongoose.Schema({
   event_type: {
     type: String,
-    enum: ['listing_created', 'product_created', 'product_updated', 'product_viewed', 'qc_approved', 'qc_rejected', 'qc_pending', 'spec_added'],
+    enum: ['listing_created', 'product_created', 'product_updated', 'product_viewed', 'qc_approved', 'qc_rejected', 'qc_pending', 'spec_added', 'session_ended'],
     required: true
   },
   product_id: {
@@ -38,6 +38,14 @@ const extensionEventSchema = new mongoose.Schema({
   lead_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Lead',
+    default: null
+  },
+  workflow_state: {
+    type: String,
+    default: null
+  },
+  session_duration: {
+    type: Number,
     default: null
   },
   metadata: {

@@ -167,14 +167,14 @@ exports.heartbeat = async (req, res) => {
 // POST /extension/activity-log
 exports.logActivity = async (req, res) => {
   try {
-    const { event_type, product_id, vendor_id, product_name, qc_status, product_sku, pending_count, metadata } = req.body;
+    const { event_type, product_id, vendor_id, product_name, qc_status, product_sku, pending_count, metadata, workflow_state, session_duration } = req.body;
 
     // Verify required fields
     if (!event_type) {
       return res.status(400).json({ status: 'fail', message: 'event_type is required' });
     }
 
-    const validEvents = ['listing_created', 'product_created', 'product_updated', 'qc_approved', 'qc_rejected', 'qc_pending', 'spec_added'];
+    const validEvents = ['listing_created', 'product_created', 'product_updated', 'product_viewed', 'qc_approved', 'qc_rejected', 'qc_pending', 'spec_added', 'session_ended'];
     if (!validEvents.includes(event_type)) {
       return res.status(400).json({ status: 'fail', message: `Invalid event_type. Must be one of: ${validEvents.join(', ')}` });
     }
@@ -184,6 +184,33 @@ exports.logActivity = async (req, res) => {
     if (!effectiveProductId && metadata?.url) {
       const match = metadata.url.match(/\/products\/([a-f0-9]+)/);
       if (match) effectiveProductId = match[1];
+    }
+
+    // session_ended: log directly, no dedup
+    if (event_type === 'session_ended') {
+      const extensionEvent = await ExtensionEvent.create({
+        event_type: 'session_ended',
+        product_id: effectiveProductId,
+        vendor_id: vendor_id || null,
+        product_name: product_name || null,
+        product_sku: null,
+        qc_status: null,
+        pending_count: null,
+        user_id: req.user._id,
+        workflow_state: metadata?.workflow_state || metadata?.final_state || null,
+        session_duration: metadata?.total_duration || null,
+        metadata: metadata || {}
+      });
+      return res.status(201).json({
+        status: 'success',
+        data: {
+          event_id: extensionEvent._id,
+          event_type: 'session_ended',
+          product_id: effectiveProductId,
+          completed: metadata?.completed || false,
+          final_state: metadata?.final_state || null
+        }
+      });
     }
 
     // Handle listing_created: new listing vs edit
@@ -207,28 +234,6 @@ exports.logActivity = async (req, res) => {
           // Edit of existing listing: convert to product_updated
           effectiveEventType = 'product_updated';
         }
-      }
-    }
-
-    // Deduplicate: skip spec_added if a listing_created for the same product exists within 60 minutes
-    if (event_type === 'spec_added' && effectiveProductId) {
-      const sixtyMinAgo = new Date(Date.now() - 60 * 60 * 1000);
-      const recentListing = await ExtensionEvent.findOne({
-        event_type: 'listing_created',
-        product_id: effectiveProductId,
-        created_at: { $gte: sixtyMinAgo }
-      });
-      if (recentListing) {
-        return res.status(200).json({
-          status: 'success',
-          data: {
-            event_id: recentListing._id,
-            event_type: 'spec_added',
-            product_id: effectiveProductId,
-            duplicate: true,
-            message: 'Skipped — listing created within 60 min'
-          }
-        });
       }
     }
 
@@ -269,6 +274,8 @@ exports.logActivity = async (req, res) => {
       pending_count: pending_count || metadata?.pending_count || null,
       user_id: req.user._id,
       lead_id: lead_id || undefined,
+      workflow_state: workflow_state || metadata?.workflow_state || null,
+      session_duration: session_duration || metadata?.session_duration || null,
       metadata: metadata || {}
     });
 
@@ -295,6 +302,50 @@ exports.deleteQcPending = async (req, res) => {
     res.status(200).json({
       status: 'success',
       message: `Deleted ${result.deletedCount} qc_pending record(s)`
+    });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+// DELETE /extension/events/user/:userId — Delete all events for a specific user
+exports.deleteUserEvents = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { event_type } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({ status: 'fail', message: 'userId is required' });
+    }
+
+    const filter = { user_id: userId };
+    if (event_type) {
+      filter.event_type = event_type;
+    }
+
+    const result = await ExtensionEvent.deleteMany(filter);
+    res.status(200).json({
+      status: 'success',
+      message: event_type
+        ? `Deleted ${result.deletedCount} ${event_type} event(s) for user`
+        : `Deleted ${result.deletedCount} event(s) for user`
+    });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+// DELETE /extension/events/:eventId — Delete a single event
+exports.deleteEvent = async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const result = await ExtensionEvent.findByIdAndDelete(eventId);
+    if (!result) {
+      return res.status(404).json({ status: 'fail', message: 'Event not found' });
+    }
+    res.status(200).json({
+      status: 'success',
+      message: 'Event deleted'
     });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });

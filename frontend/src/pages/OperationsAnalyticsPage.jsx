@@ -65,6 +65,30 @@ const OperationsAnalyticsPage = () => {
     }
   };
 
+  const deleteUserEvents = async (userId, userName) => {
+    if (!confirm(`Delete ALL events for ${userName}? This cannot be undone.`)) return;
+    try {
+      await axios.delete(`${API_URL}/extension/events/user/${userId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      fetchAnalytics();
+    } catch (err) {
+      console.error('Error deleting user events:', err);
+    }
+  };
+
+  const deleteUserEventType = async (userId, userName, eventType) => {
+    if (!confirm(`Delete all ${eventType} events for ${userName}? This cannot be undone.`)) return;
+    try {
+      await axios.delete(`${API_URL}/extension/events/user/${userId}?event_type=${eventType}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      fetchAnalytics();
+    } catch (err) {
+      console.error('Error deleting user event type:', err);
+    }
+  };
+
   const eventTypes = [
     { key: 'listing_created', label: 'Products Listed', icon: Package, color: 'blue' },
     { key: 'qc_approved', label: 'QC Approved', icon: ShieldCheck, color: 'emerald' },
@@ -633,19 +657,34 @@ const OperationsAnalyticsPage = () => {
                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{user.team}</span>
                           )}
                         </div>
-                        <div className="text-right">
-                          <p className="text-2xl font-extrabold text-slate-900">{user.total}</p>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase">Total Events</p>
+                        <div className="flex items-center gap-3">
+                          <div className="text-right">
+                            <p className="text-2xl font-extrabold text-slate-900">{user.total}</p>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase">Total Events</p>
+                          </div>
+                          <button
+                            onClick={() => deleteUserEvents(user.id, user.name)}
+                            className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                            title={`Delete all events for ${user.name}`}
+                          >
+                            <Trash2 size={14} />
+                          </button>
                         </div>
                       </div>
                       <div className="grid grid-cols-5 gap-2 mb-3">
                         {eventTypes.map(({ key, label, color, global }) => {
                           const c = colorMap[color];
+                          const count = global ? (summary[key] ?? 0) : (user[key] || 0);
                           return (
-                            <div key={key} className={`p-2 rounded-lg ${c.bg} text-center`}>
-                              <p className={`text-lg font-extrabold ${c.text}`}>{global ? (summary[key] ?? '—') : (user[key] || 0)}</p>
+                            <button
+                              key={key}
+                              onClick={() => !global && count > 0 && deleteUserEventType(user.id, user.name, key)}
+                              className={`p-2 rounded-lg ${c.bg} text-center ${!global && count > 0 ? 'cursor-pointer hover:ring-2 hover:ring-red-300 transition-all' : ''}`}
+                              title={!global && count > 0 ? `Delete ${label} events for ${user.name}` : ''}
+                            >
+                              <p className={`text-lg font-extrabold ${c.text}`}>{count}</p>
                               <p className="text-[8px] font-bold text-slate-400 uppercase leading-tight mt-0.5">{label.split(' ').pop()}</p>
-                            </div>
+                            </button>
                           );
                         })}
                       </div>
@@ -693,6 +732,7 @@ const OperationsAnalyticsPage = () => {
                         <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Total</th>
                         <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Sessions</th>
                         <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Active</th>
+                        <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase"></th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
@@ -712,6 +752,15 @@ const OperationsAnalyticsPage = () => {
                             <td className="px-4 py-2.5 text-center font-bold text-slate-900">{user.total}</td>
                             <td className="px-4 py-2.5 text-center font-bold text-emerald-600">{userSession?.sessions || 0}</td>
                             <td className="px-4 py-2.5 text-center font-bold text-blue-600">{userSession?.active_hours || 0}h</td>
+                            <td className="px-4 py-2.5 text-center">
+                              <button
+                                onClick={() => deleteUserEvents(user.id, user.name)}
+                                className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                                title={`Delete all events for ${user.name}`}
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </td>
                           </tr>
                         );
                       })}

@@ -18,6 +18,8 @@ router.post('/activity-log', extensionController.logActivity);
 
 // Admin-only endpoints
 router.delete('/qc-pending', authMiddleware.restrictTo('super_admin', 'admin'), extensionController.deleteQcPending);
+router.delete('/events/user/:userId', authMiddleware.restrictTo('super_admin', 'admin'), extensionController.deleteUserEvents);
+router.delete('/events/:eventId', authMiddleware.restrictTo('super_admin', 'admin'), extensionController.deleteEvent);
 router.get('/devices', authMiddleware.restrictTo('super_admin', 'admin'), extensionController.getDevices);
 router.get('/stats', authMiddleware.restrictTo('super_admin', 'admin'), extensionController.getStats);
 router.get('/analytics', authMiddleware.restrictTo('super_admin', 'admin'), extensionController.getAnalytics);
