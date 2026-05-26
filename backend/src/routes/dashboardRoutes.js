@@ -10,6 +10,7 @@ router.get('/stats', dashboardController.getStats);
 router.get('/lead-growth', dashboardController.getLeadGrowth);
 router.get('/daily-call-report', authMiddleware.restrictTo('super_admin'), dashboardController.getDailyCallReport);
 router.get('/user-performance', authMiddleware.restrictTo('super_admin'), dashboardController.getUserPerformanceReport);
+router.get('/bd-tiers', dashboardController.getBDTiers);
 router.get('/bd-leaderboard', authMiddleware.restrictTo('super_admin', 'admin'), dashboardController.getBDLeaderboard);
 router.get('/bd-leaderboard-full', authMiddleware.restrictTo('super_admin', 'admin'), dashboardController.getBDLeaderboardFull);
 router.get('/bd-leaderboard/:bdId/drill-down', authMiddleware.restrictTo('super_admin', 'admin'), dashboardController.getBDDrillDown);

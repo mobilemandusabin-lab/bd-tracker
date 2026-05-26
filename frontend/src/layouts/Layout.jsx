@@ -5,7 +5,7 @@ import { logout } from '../store/authSlice';
 import {
   LayoutDashboard, Users, UserCheck, ClipboardList, BarChart3, LogOut,
   ShieldCheck, Settings, Menu, X, Target, MessageSquare,
-  ShoppingBag, Cog, Store, Package, ChevronRight, Puzzle, Activity
+  ShoppingBag, Cog, Store, Package, ChevronRight, Puzzle, Activity, Award
 } from 'lucide-react';
 import { cn } from '../utils/cn';
 import NotificationBell from '../components/NotificationBell';
@@ -67,6 +67,7 @@ const Layout = () => {
       label: 'Performance',
       items: [
         { to: '/goals', icon: Target, label: 'Goals' },
+        { to: '/bd-tiers', icon: Award, label: 'BD Tiers' },
         { to: '/tasks', icon: ClipboardList, label: 'Tasks' },
         ...(user?.role === 'admin' || user?.role === 'super_admin'
           ? [{ to: '/tickets', icon: MessageSquare, label: 'Tickets' }]

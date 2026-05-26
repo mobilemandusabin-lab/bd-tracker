@@ -300,6 +300,12 @@ const syncNepalcanOrders = async (token = null) => {
 
     console.log(`[Nepalcan Sync] Synced ${synced} orders`);
 
+    // Enrich active orders with tracking data from logistics API (before aggregation)
+    const trackingUpdates = await enrichOrdersWithTracking();
+    if (trackingUpdates > 0) {
+      console.log(`[Nepalcan Sync] Tracking enrichment updated ${trackingUpdates} orders`);
+    }
+
 // Update Lead records with active seller metrics
     const deliveredOrdersAgg = await NepalcanOrder.aggregate([
       { $match: { orderStatus: 'Delivered', vendor_lead_id: { $ne: null } } },
@@ -314,18 +320,20 @@ const syncNepalcanOrders = async (token = null) => {
 for (const vendorData of deliveredOrdersAgg) {
       const { _id: vendorLeadId, deliveredCount, totalAmount, lastOrderDate } = vendorData;
       if (!vendorLeadId) continue;
-      
+
       const leadToUpdate = await Lead.findById(vendorLeadId);
       if (leadToUpdate) {
-        const prevStatus = leadToUpdate.lead_status;
+        const previousNepalcanStatus = leadToUpdate.last_nepalcan_status;
         leadToUpdate.delivered_order_count = deliveredCount;
         leadToUpdate.active_seller = deliveredCount > 0;
         leadToUpdate.last_order_date = lastOrderDate;
         leadToUpdate.total_revenue = totalAmount;
         leadToUpdate.lead_status = 'Active Seller';
+        leadToUpdate.last_nepalcan_status = 'Active Seller';
+        if (!leadToUpdate.converted_at) leadToUpdate.converted_at = new Date();
         await leadToUpdate.save();
 
-        if (prevStatus && prevStatus !== 'Active Seller') {
+        if (previousNepalcanStatus && previousNepalcanStatus !== 'Active Seller') {
           const Activity = require('../models/Activity');
           const syncUserId = userId || (await getDefaultSyncUser())?._id;
           if (syncUserId) {
@@ -333,7 +341,7 @@ for (const vendorData of deliveredOrdersAgg) {
               lead_id: leadToUpdate._id,
               user_id: syncUserId,
               activity_type: 'status_change',
-              description: `Pipeline changed (sync): ${prevStatus} → Active Seller`,
+              description: `Pipeline changed (sync): ${previousNepalcanStatus} → Active Seller`,
               status: 'completed'
             });
           }
@@ -384,15 +392,17 @@ for (const vendorData of deliveredOrdersAgg) {
 
         const leadToUpdate = await Lead.findById(vendorLeadId);
         if (leadToUpdate) {
-          const prevStatus = leadToUpdate.lead_status;
+          const previousNepalcanStatus = leadToUpdate.last_nepalcan_status;
           leadToUpdate.delivered_order_count = deliveredCount;
           leadToUpdate.active_seller = deliveredCount > 0;
           leadToUpdate.last_order_date = lastOrderDate;
           leadToUpdate.total_revenue = totalAmount;
           leadToUpdate.lead_status = 'Active Seller';
+          leadToUpdate.last_nepalcan_status = 'Active Seller';
+          if (!leadToUpdate.converted_at) leadToUpdate.converted_at = new Date();
           await leadToUpdate.save();
 
-          if (prevStatus && prevStatus !== 'Active Seller') {
+          if (previousNepalcanStatus && previousNepalcanStatus !== 'Active Seller') {
             const Activity = require('../models/Activity');
             const syncUserId = userId || (await getDefaultSyncUser())?._id;
             if (syncUserId) {
@@ -400,7 +410,7 @@ for (const vendorData of deliveredOrdersAgg) {
                 lead_id: leadToUpdate._id,
                 user_id: syncUserId,
                 activity_type: 'status_change',
-                description: `Pipeline changed (sync): ${prevStatus} → Active Seller`,
+                description: `Pipeline changed (sync): ${previousNepalcanStatus} → Active Seller`,
                 status: 'completed'
               });
             }
@@ -429,10 +439,7 @@ for (const vendorData of deliveredOrdersAgg) {
     durationMs
   });
 
-  // Check delivered orders for returns via logistics API (non-blocking)
-  checkAndUpdateReturnedOrders().catch(err =>
-    console.error('[Returned Check] Background error:', err.message)
-  );
+  // Tracking enrichment already ran synchronously above — no background call needed
 
   return {
     synced,
@@ -461,70 +468,117 @@ const updateStaleOrders = async () => {
 const LOGISTICS_API = 'https://can-logistic-prod-84pie.ondigitalocean.app/api/public/marketplace-tracker';
 
 /**
- * Check delivered orders against the logistics API for returned status.
- * The commerce API doesn't include marketplaceProcesses, so we need
- * to check the logistics API to catch returned orders.
+ * Enrich all active orders with tracking data from the logistics API.
+ * This catches returned orders that disappear from the commerce API,
+ * and stores the full tracking timeline on each order.
  */
-const checkAndUpdateReturnedOrders = async () => {
+const enrichOrdersWithTracking = async () => {
   try {
-    // Check all active orders for returns (not just Delivered)
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-    const orders = await NepalcanOrder.find({
-      orderStatus: { $in: ['Pending', 'Processing', 'Shipped', 'Delivered'] },
-      lastSyncedAt: { $lt: oneHourAgo }
-    }).limit(200);
+    const activeOrders = await NepalcanOrder.find({
+      orderStatus: { $in: ['Pending', 'Processing', 'Shipped', 'Delivered'] }
+    });
 
-    if (orders.length === 0) {
-      console.log('[Returned Check] No delivered orders to recheck');
+    if (activeOrders.length === 0) {
+      console.log('[Tracking Enrichment] No active orders to check');
       return 0;
     }
 
-    console.log(`[Returned Check] Checking ${orders.length} delivered orders for returns...`);
+    console.log(`[Tracking Enrichment] Enriching ${activeOrders.length} active orders with tracking data...`);
     let updated = 0;
+    let returned = 0;
 
-    for (const order of orders) {
-      try {
-        const response = await axios.get(`${LOGISTICS_API}/${order.orderId}`, { timeout: 10000 });
-        const trackingData = response.data;
+    // Process in batches of 10 with delay to avoid rate limits
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < activeOrders.length; i += BATCH_SIZE) {
+      const batch = activeOrders.slice(i, i + BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map(async (order) => {
+          try {
+            const response = await axios.get(`${LOGISTICS_API}/${order.orderId}`, { timeout: 10000 });
+            const trackingData = response.data;
+            return { order, trackingData, error: null };
+          } catch (err) {
+            return { order, trackingData: null, error: err.response?.status || err.message };
+          }
+        })
+      );
 
+      for (const result of results) {
+        if (result.status !== 'fulfilled' || !result.value.trackingData) continue;
+        const { order, trackingData } = result.value;
+
+        let changed = false;
+
+        // Store full tracking data on the order
         if (trackingData?.marketplaceProcesses && Array.isArray(trackingData.marketplaceProcesses)) {
+          // Check for returned status
           const hasReturned = trackingData.marketplaceProcesses.some(
             p => p.process && p.process.toLowerCase() === 'returned'
           );
 
-          if (hasReturned) {
+          if (hasReturned && order.orderStatus !== 'Returned') {
             order.orderStatus = 'Returned';
             const alreadyHasReturned = order.statusHistory.some(h => h.status === 'Returned');
             if (!alreadyHasReturned) {
               order.statusHistory.push({ status: 'Returned', timestamp: new Date() });
             }
-            order.lastSyncedAt = new Date();
-            await order.save();
-            updated++;
-            console.log(`[Returned Check] Updated order ${order.orderId} → Returned`);
-          } else {
-            // Update lastSyncedAt so we don't recheck too soon
-            order.lastSyncedAt = new Date();
-            await order.save();
+            changed = true;
+            returned++;
+            console.log(`[Tracking Enrichment] Order ${order.orderId} → Returned`);
           }
+
+          // Check for other status updates from tracking (e.g. Delivered, Shipped)
+          if (!hasReturned) {
+            const processes = trackingData.marketplaceProcesses.map(p => p.process?.toLowerCase()).filter(Boolean);
+            if (processes.includes('delivered') && order.orderStatus !== 'Delivered' && order.orderStatus !== 'Returned') {
+              order.orderStatus = 'Delivered';
+              const alreadyHas = order.statusHistory.some(h => h.status === 'Delivered');
+              if (!alreadyHas) {
+                order.statusHistory.push({ status: 'Delivered', timestamp: new Date() });
+              }
+              changed = true;
+            } else if (processes.includes('shipped') && !['Shipped', 'Delivered', 'Returned'].includes(order.orderStatus)) {
+              order.orderStatus = 'Shipped';
+              const alreadyHas = order.statusHistory.some(h => h.status === 'Shipped');
+              if (!alreadyHas) {
+                order.statusHistory.push({ status: 'Shipped', timestamp: new Date() });
+              }
+              changed = true;
+            } else if (processes.includes('processing') && !['Processing', 'Shipped', 'Delivered', 'Returned'].includes(order.orderStatus)) {
+              order.orderStatus = 'Processing';
+              const alreadyHas = order.statusHistory.some(h => h.status === 'Processing');
+              if (!alreadyHas) {
+                order.statusHistory.push({ status: 'Processing', timestamp: new Date() });
+              }
+              changed = true;
+            }
+          }
+
+          // Store tracking processes on rawData for reference
+          if (!order.rawData) order.rawData = {};
+          order.rawData.trackingProcesses = trackingData.marketplaceProcesses;
         }
-      } catch (err) {
-        // Skip individual order errors (rate limits, timeouts, etc.)
-        if (err.response?.status === 404) {
-          // Order not found in logistics — mark as checked
-          order.lastSyncedAt = new Date();
+
+        order.lastSyncedAt = new Date();
+        if (changed) {
+          await order.save();
+          updated++;
+        } else {
+          // Still save lastSyncedAt
           await order.save();
         }
-        // For other errors (rate limit, timeout), skip silently
+      }
+
+      // Small delay between batches to avoid rate limiting
+      if (i + BATCH_SIZE < activeOrders.length) {
+        await new Promise(r => setTimeout(r, 200));
       }
     }
 
-    if (updated > 0) {
-      console.log(`[Returned Check] Updated ${updated} orders to Returned status`);
-    }
+    console.log(`[Tracking Enrichment] Updated ${updated} orders (${returned} returned)`);
     return updated;
   } catch (error) {
-    console.error('[Returned Check] Error:', error.message);
+    console.error('[Tracking Enrichment] Error:', error.message);
     return 0;
   }
 };
@@ -719,13 +773,19 @@ const leadData = {
            };
 
         if (existingLead) {
-          const previousStatus = existingLead.lead_status;
+          const previousNepalcanStatus = existingLead.last_nepalcan_status;
+          const newNepalcanStatus = leadData.lead_status;
           Object.assign(existingLead, leadData);
           if (!existingLead.nepalcanId) existingLead.nepalcanId = _id;
+          existingLead.last_nepalcan_status = newNepalcanStatus;
+          // Track activation date for Daily Report
+          if (newNepalcanStatus === 'Activated' && previousNepalcanStatus !== 'Activated' && !existingLead.converted_at) {
+            existingLead.converted_at = new Date();
+          }
           await existingLead.save();
 
-          // Log activity if pipeline status changed during sync
-          if (previousStatus && previousStatus !== existingLead.lead_status) {
+          // Only log activity if Nepalcan's own status changed (not our internal lead_status)
+          if (previousNepalcanStatus && previousNepalcanStatus !== newNepalcanStatus) {
             const Activity = require('../models/Activity');
             const syncUserId = userId || (await getDefaultSyncUser())?._id;
             if (syncUserId) {
@@ -733,7 +793,7 @@ const leadData = {
                 lead_id: existingLead._id,
                 user_id: syncUserId,
                 activity_type: 'status_change',
-                description: `Pipeline changed (sync): ${previousStatus} → ${existingLead.lead_status}`,
+                description: `Pipeline changed (sync): ${previousNepalcanStatus} → ${newNepalcanStatus}`,
                 status: 'completed'
               });
             }
@@ -744,6 +804,10 @@ const leadData = {
         } else {
           const creatorId = userId || (await getDefaultSyncUser())?._id;
           leadData.creator_id = creatorId;
+          leadData.last_nepalcan_status = leadData.lead_status;
+          if (leadData.lead_status === 'Activated') {
+            leadData.converted_at = new Date();
+          }
 
           const newLead = new Lead(leadData);
           await newLead.save();
@@ -779,15 +843,17 @@ const durationMs = Date.now() - startTime;
 
         const leadToUpdate = await Lead.findById(vendorLeadId);
         if (leadToUpdate) {
-          const prevStatus = leadToUpdate.lead_status;
+          const previousNepalcanStatus = leadToUpdate.last_nepalcan_status;
           leadToUpdate.delivered_order_count = deliveredCount;
           leadToUpdate.active_seller = deliveredCount > 0;
           leadToUpdate.last_order_date = lastOrderDate;
           leadToUpdate.total_revenue = totalAmount;
           leadToUpdate.lead_status = 'Active Seller';
+          leadToUpdate.last_nepalcan_status = 'Active Seller';
+          if (!leadToUpdate.converted_at) leadToUpdate.converted_at = new Date();
           await leadToUpdate.save();
 
-          if (prevStatus && prevStatus !== 'Active Seller') {
+          if (previousNepalcanStatus && previousNepalcanStatus !== 'Active Seller') {
             const Activity = require('../models/Activity');
             const syncUserId = userId || (await getDefaultSyncUser())?._id;
             if (syncUserId) {
@@ -795,7 +861,7 @@ const durationMs = Date.now() - startTime;
                 lead_id: leadToUpdate._id,
                 user_id: syncUserId,
                 activity_type: 'status_change',
-                description: `Pipeline changed (sync): ${prevStatus} → Active Seller`,
+                description: `Pipeline changed (sync): ${previousNepalcanStatus} → Active Seller`,
                 status: 'completed'
               });
             }
@@ -984,7 +1050,7 @@ const syncAllNepalcanData = async (userId = null) => {
 module.exports = {
   syncNepalcanOrders,
   updateStaleOrders,
-  checkAndUpdateReturnedOrders,
+  enrichOrdersWithTracking,
   getLastSyncLog,
   getRecentSyncLogs,
   loginToNepalcan,

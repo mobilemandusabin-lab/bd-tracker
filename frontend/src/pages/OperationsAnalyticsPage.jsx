@@ -4,7 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import {
   BarChart3, Package, ShieldCheck, ShieldX, Clock, FileText,
-  TrendingUp, Users, ChevronLeft, RefreshCw, Calendar, Trash2
+  TrendingUp, TrendingDown, Users, ChevronLeft, RefreshCw, Calendar, Trash2,
+  Trophy, AlertTriangle, Timer, Activity, ArrowUp, ArrowDown
 } from 'lucide-react';
 import { API_URL } from '../config/api';
 
@@ -230,24 +231,6 @@ const OperationsAnalyticsPage = () => {
             })}
           </div>
 
-          {/* Vendor Conversions */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="p-4 bg-white rounded-2xl border border-slate-100 shadow-sm text-center">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-2 bg-emerald-50 text-emerald-600">
-                <ShieldCheck size={18} />
-              </div>
-              <p className="text-2xl font-extrabold text-slate-900">{analytics?.vendorConversions?.activated ?? 0}</p>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Vendors Activated</p>
-            </div>
-            <div className="p-4 bg-white rounded-2xl border border-slate-100 shadow-sm text-center">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-2 bg-amber-50 text-amber-600">
-                <TrendingUp size={18} />
-              </div>
-              <p className="text-2xl font-extrabold text-slate-900">{analytics?.vendorConversions?.active_sellers ?? 0}</p>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">New Active Sellers</p>
-            </div>
-          </div>
-
           {/* Total Events Bar */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
             <div className="flex items-center justify-between mb-4">
@@ -334,6 +317,301 @@ const OperationsAnalyticsPage = () => {
           ) : (
             <EmptyState />
           )}
+
+          {/* QC Approval Rate */}
+          {(() => {
+            const qc = analytics?.qcStats || {};
+            const totalQc = (qc.approved || 0) + (qc.rejected || 0);
+            const approvalRate = totalQc > 0 ? Math.round(((qc.approved || 0) / totalQc) * 100) : 0;
+            const bulkTotal = (qc.bulk_approved || 0) + (qc.bulk_rejected || 0);
+            const indTotal = (qc.individual_approved || 0) + (qc.individual_rejected || 0);
+            return totalQc > 0 ? (
+              <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+                <h3 className="text-sm font-bold text-slate-700 mb-4">QC Approval Rate</h3>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="text-center">
+                    <div className="relative w-20 h-20 mx-auto mb-2">
+                      <svg className="w-20 h-20 -rotate-90" viewBox="0 0 36 36">
+                        <path className="text-slate-100" stroke="currentColor" strokeWidth="3" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                        <path className="text-emerald-500" stroke="currentColor" strokeWidth="3" fill="none" strokeDasharray={`${approvalRate}, 100`} d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                      </svg>
+                      <span className="absolute inset-0 flex items-center justify-center text-lg font-extrabold text-slate-900">{approvalRate}%</span>
+                    </div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">Approval Rate</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-2xl font-extrabold text-emerald-600">{qc.approved || 0}</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase mt-1">Total Approved</p>
+                    <p className="text-[10px] text-slate-300">({qc.rejected || 0} rejected)</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-2xl font-extrabold text-blue-600">{bulkTotal}</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase mt-1">Bulk QC</p>
+                    <p className="text-[10px] text-slate-300">({qc.bulk_approved || 0} approved, {qc.bulk_rejected || 0} rejected)</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-2xl font-extrabold text-violet-600">{indTotal}</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase mt-1">Individual QC</p>
+                    <p className="text-[10px] text-slate-300">({qc.individual_approved || 0} approved, {qc.individual_rejected || 0} rejected)</p>
+                  </div>
+                </div>
+              </div>
+            ) : null;
+          })()}
+
+          {/* Top Products */}
+          {analytics?.topProducts?.length > 0 && (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+              <div className="px-6 py-4 border-b border-slate-100">
+                <h3 className="text-sm font-bold text-slate-700">Top Products by Activity</h3>
+                <p className="text-[10px] text-slate-400 mt-0.5">Most active products during this period</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-50">
+                      <th className="px-4 py-2.5 text-left text-[10px] font-bold text-slate-400 uppercase">#</th>
+                      <th className="px-4 py-2.5 text-left text-[10px] font-bold text-slate-400 uppercase">Product</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Total</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Listings</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Specs</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Updates</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">QC Pass</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">QC Fail</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {analytics.topProducts.map((p, i) => (
+                      <tr key={p._id} className="hover:bg-slate-50">
+                        <td className="px-4 py-2.5 font-bold text-slate-400">{i + 1}</td>
+                        <td className="px-4 py-2.5 font-bold text-slate-900 max-w-xs truncate">{p._id}</td>
+                        <td className="px-4 py-2.5 text-center font-extrabold text-slate-900">{p.total}</td>
+                        <td className="px-4 py-2.5 text-center font-bold text-blue-600">{p.listings || 0}</td>
+                        <td className="px-4 py-2.5 text-center font-bold text-violet-600">{p.specs || 0}</td>
+                        <td className="px-4 py-2.5 text-center font-bold text-slate-500">{p.updates || 0}</td>
+                        <td className="px-4 py-2.5 text-center font-bold text-emerald-600">{p.qc_approved || 0}</td>
+                        <td className="px-4 py-2.5 text-center font-bold text-red-600">{p.qc_rejected || 0}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Top Vendors */}
+          {analytics?.topVendors?.length > 0 && (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+              <div className="px-6 py-4 border-b border-slate-100">
+                <h3 className="text-sm font-bold text-slate-700">Top Vendors by Activity</h3>
+                <p className="text-[10px] text-slate-400 mt-0.5">Vendors with most product activity</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-50">
+                      <th className="px-4 py-2.5 text-left text-[10px] font-bold text-slate-400 uppercase">#</th>
+                      <th className="px-4 py-2.5 text-left text-[10px] font-bold text-slate-400 uppercase">Vendor</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Total</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Products</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Listings</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">QC Pass</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">QC Fail</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Pass Rate</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {analytics.topVendors.map((v, i) => {
+                      const totalQc = (v.qc_approved || 0) + (v.qc_rejected || 0);
+                      const passRate = totalQc > 0 ? Math.round((v.qc_approved / totalQc) * 100) : null;
+                      return (
+                        <tr key={v._id} className="hover:bg-slate-50">
+                          <td className="px-4 py-2.5 font-bold text-slate-400">{i + 1}</td>
+                          <td className="px-4 py-2.5 font-bold text-slate-900 max-w-xs truncate">{v.vendor_name}</td>
+                          <td className="px-4 py-2.5 text-center font-extrabold text-slate-900">{v.total}</td>
+                          <td className="px-4 py-2.5 text-center font-bold text-slate-600">{v.product_count || 0}</td>
+                          <td className="px-4 py-2.5 text-center font-bold text-blue-600">{v.listings || 0}</td>
+                          <td className="px-4 py-2.5 text-center font-bold text-emerald-600">{v.qc_approved || 0}</td>
+                          <td className="px-4 py-2.5 text-center font-bold text-red-600">{v.qc_rejected || 0}</td>
+                          <td className="px-4 py-2.5 text-center font-bold text-slate-900">{passRate !== null ? `${passRate}%` : '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Best & Worst Days */}
+          {analytics?.bestWorst && Object.keys(analytics.bestWorst).length > 0 && (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+              <h3 className="text-sm font-bold text-slate-700 mb-4">Best & Worst Days</h3>
+              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+                {[
+                  { key: 'listed', label: 'Products Listed', color: 'blue' },
+                  { key: 'specs', label: 'Specs Added', color: 'violet' },
+                  { key: 'updated', label: 'Products Updated', color: 'slate' },
+                  { key: 'approved', label: 'QC Approved', color: 'emerald' },
+                  { key: 'rejected', label: 'QC Rejected', color: 'red' },
+                ].map(({ key, label, color }) => {
+                  const data = analytics.bestWorst[key];
+                  if (!data?.best) return null;
+                  return (
+                    <div key={key} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+                      <p className="text-xs font-bold text-slate-500 mb-3">{label}</p>
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <ArrowUp size={12} className="text-emerald-500" />
+                          <span className="text-[10px] text-slate-400 font-bold w-12">Best</span>
+                          <span className="text-xs font-bold text-slate-900">{data.best.date}</span>
+                          <span className={`ml-auto text-sm font-extrabold text-${color}-600`}>{data.best[key]}</span>
+                        </div>
+                        {data.worst && data.worst.date !== data.best.date && (
+                          <div className="flex items-center gap-2">
+                            <ArrowDown size={12} className="text-red-500" />
+                            <span className="text-[10px] text-slate-400 font-bold w-12">Lowest</span>
+                            <span className="text-xs font-bold text-slate-900">{data.worst.date}</span>
+                            <span className={`ml-auto text-sm font-extrabold text-slate-400`}>{data.worst[key]}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Hourly Activity Heatmap */}
+          {analytics?.hourlyActivity?.length > 0 && (() => {
+            const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            const maxCount = Math.max(...analytics.hourlyActivity.map(h => h.count));
+            const heatMap = {};
+            for (const h of analytics.hourlyActivity) {
+              heatMap[`${h.dow}-${h.hour}`] = h.count;
+            }
+            return (
+              <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+                <h3 className="text-sm font-bold text-slate-700 mb-1">Hourly Activity Heatmap</h3>
+                <p className="text-[10px] text-slate-400 mb-4">When extension events are captured (hours in server timezone)</p>
+                <div className="overflow-x-auto">
+                  <div className="min-w-[600px]">
+                    <div className="flex gap-0.5 mb-0.5">
+                      <div className="w-10" />
+                      {Array.from({ length: 24 }, (_, h) => (
+                        <div key={h} className="flex-1 text-center text-[8px] font-bold text-slate-400">{h}</div>
+                      ))}
+                    </div>
+                    {dayNames.map((day, dow) => {
+                      const realDow = dow + 1;
+                      return (
+                        <div key={dow} className="flex gap-0.5 mb-0.5">
+                          <div className="w-10 text-[10px] font-bold text-slate-500 flex items-center">{day}</div>
+                          {Array.from({ length: 24 }, (_, h) => {
+                            const count = heatMap[`${realDow}-${h}`] || 0;
+                            const intensity = maxCount > 0 ? count / maxCount : 0;
+                            const bg = count === 0 ? 'bg-slate-50' :
+                              intensity < 0.25 ? 'bg-emerald-100' :
+                              intensity < 0.5 ? 'bg-emerald-200' :
+                              intensity < 0.75 ? 'bg-emerald-400' : 'bg-emerald-600';
+                            return (
+                              <div
+                                key={h}
+                                className={`flex-1 aspect-square rounded-sm ${bg} cursor-default transition-colors`}
+                                title={`${day} ${h}:00 — ${count} events`}
+                              />
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                    <div className="flex items-center gap-2 mt-3 justify-end">
+                      <span className="text-[9px] text-slate-400">Less</span>
+                      {['bg-slate-50', 'bg-emerald-100', 'bg-emerald-200', 'bg-emerald-400', 'bg-emerald-600'].map((c) => (
+                        <div key={c} className={`w-3 h-3 rounded-sm ${c}`} />
+                      ))}
+                      <span className="text-[9px] text-slate-400">More</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* User Activity Sessions */}
+          {analytics?.userSessions?.length > 0 && (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+              <div className="px-6 py-4 border-b border-slate-100">
+                <h3 className="text-sm font-bold text-slate-700">User Activity Sessions</h3>
+                <p className="text-[10px] text-slate-400 mt-0.5">Active periods derived from event timestamps (1h gap = new session)</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-50">
+                      <th className="px-4 py-2.5 text-left text-[10px] font-bold text-slate-400 uppercase">User</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Sessions</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Active Hours</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Total Events</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">First Event</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Last Event</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {analytics.userSessions.map((u) => {
+                      const firstSession = u.session_details?.[0];
+                      const lastSession = u.session_details?.[u.session_details.length - 1];
+                      return (
+                        <tr key={u.user_id} className="hover:bg-slate-50">
+                          <td className="px-4 py-2.5">
+                            <div className="font-bold text-slate-900">{u.user_name}</div>
+                            {u.user_team && <div className="text-[10px] text-slate-400 uppercase">{u.user_team}</div>}
+                          </td>
+                          <td className="px-4 py-2.5 text-center font-bold text-slate-900">{u.sessions}</td>
+                          <td className="px-4 py-2.5 text-center font-bold text-emerald-600">{u.active_hours}h</td>
+                          <td className="px-4 py-2.5 text-center font-extrabold text-slate-900">{u.total_events}</td>
+                          <td className="px-4 py-2.5 text-center text-xs text-slate-500">
+                            {firstSession ? new Date(firstSession.start).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                          </td>
+                          <td className="px-4 py-2.5 text-center text-xs text-slate-500">
+                            {lastSession ? new Date(lastSession.end).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Session Details (expandable) */}
+              {analytics.userSessions.map((u) => (
+                u.session_details?.length > 0 && (
+                  <details key={`detail-${u.user_id}`} className="border-t border-slate-100">
+                    <summary className="px-6 py-3 text-xs font-bold text-slate-500 cursor-pointer hover:bg-slate-50">
+                      {u.user_name} — Session Details ({u.sessions} sessions)
+                    </summary>
+                    <div className="px-6 pb-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                        {u.session_details.map((s, i) => (
+                          <div key={i} className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg text-xs">
+                            <span className="font-bold text-slate-400">#{i + 1}</span>
+                            <span className="text-slate-600">
+                              {new Date(s.start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                              {' — '}
+                              {new Date(s.end).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            <span className="ml-auto font-bold text-slate-500">{s.duration_min}m</span>
+                            <span className="text-slate-400">({s.event_count} events)</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </details>
+                )
+              ))}
+            </div>
+          )}
         </>
       )}
 
@@ -344,33 +622,59 @@ const OperationsAnalyticsPage = () => {
             <>
               {/* User Cards */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {userRows.map((user) => (
-                  <div key={user.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-                    <div className="flex items-center justify-between mb-4">
-                      <div>
-                        <h3 className="text-base font-extrabold text-slate-900">{user.name}</h3>
-                        {user.team && (
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{user.team}</span>
-                        )}
+                {userRows.map((user) => {
+                  const userSession = analytics?.userSessions?.find(s => s.user_id === user.id);
+                  return (
+                    <div key={user.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <h3 className="text-base font-extrabold text-slate-900">{user.name}</h3>
+                          {user.team && (
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{user.team}</span>
+                          )}
+                        </div>
+                        <div className="text-right">
+                          <p className="text-2xl font-extrabold text-slate-900">{user.total}</p>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase">Total Events</p>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <p className="text-2xl font-extrabold text-slate-900">{user.total}</p>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase">Total Events</p>
+                      <div className="grid grid-cols-5 gap-2 mb-3">
+                        {eventTypes.map(({ key, label, color, global }) => {
+                          const c = colorMap[color];
+                          return (
+                            <div key={key} className={`p-2 rounded-lg ${c.bg} text-center`}>
+                              <p className={`text-lg font-extrabold ${c.text}`}>{global ? (summary[key] ?? '—') : (user[key] || 0)}</p>
+                              <p className="text-[8px] font-bold text-slate-400 uppercase leading-tight mt-0.5">{label.split(' ').pop()}</p>
+                            </div>
+                          );
+                        })}
                       </div>
-                    </div>
-                    <div className="grid grid-cols-5 gap-2">
-                      {eventTypes.map(({ key, label, color, global }) => {
-                        const c = colorMap[color];
-                        return (
-                          <div key={key} className={`p-2 rounded-lg ${c.bg} text-center`}>
-                            <p className={`text-lg font-extrabold ${c.text}`}>{global ? (summary[key] ?? '—') : (user[key] || 0)}</p>
-                            <p className="text-[8px] font-bold text-slate-400 uppercase leading-tight mt-0.5">{label.split(' ').pop()}</p>
+                      {/* Session Info */}
+                      {userSession && (
+                        <div className="flex items-center gap-4 pt-3 border-t border-slate-100">
+                          <div className="flex items-center gap-1.5">
+                            <Timer size={12} className="text-emerald-500" />
+                            <span className="text-[10px] font-bold text-slate-500">{userSession.sessions} session{userSession.sessions !== 1 ? 's' : ''}</span>
                           </div>
-                        );
-                      })}
+                          <div className="flex items-center gap-1.5">
+                            <Activity size={12} className="text-blue-500" />
+                            <span className="text-[10px] font-bold text-slate-500">{userSession.active_hours}h active</span>
+                          </div>
+                          {userSession.session_details?.[0] && (
+                            <div className="flex items-center gap-1.5 ml-auto">
+                              <Clock size={12} className="text-slate-400" />
+                              <span className="text-[10px] text-slate-400">
+                                {new Date(userSession.session_details[0].start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                                {' — '}
+                                {new Date(userSession.session_details[userSession.session_details.length - 1].end).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* User Comparison Table */}
@@ -387,23 +691,30 @@ const OperationsAnalyticsPage = () => {
                           <th key={key} className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">{label}</th>
                         ))}
                         <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Total</th>
+                        <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Sessions</th>
+                        <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Active</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
-                      {userRows.map((user) => (
-                        <tr key={user.id} className="hover:bg-slate-50">
-                          <td className="px-4 py-2.5">
-                            <div className="font-bold text-slate-900">{user.name}</div>
-                            {user.team && <div className="text-[10px] text-slate-400 uppercase">{user.team}</div>}
-                          </td>
-                          {eventTypes.map(({ key, color, global }) => (
-                            <td key={key} className={`px-4 py-2.5 text-center font-bold ${colorMap[color].text}`}>
-                              {global ? (summary[key] ?? '—') : (user[key] || 0)}
+                      {userRows.map((user) => {
+                        const userSession = analytics?.userSessions?.find(s => s.user_id === user.id);
+                        return (
+                          <tr key={user.id} className="hover:bg-slate-50">
+                            <td className="px-4 py-2.5">
+                              <div className="font-bold text-slate-900">{user.name}</div>
+                              {user.team && <div className="text-[10px] text-slate-400 uppercase">{user.team}</div>}
                             </td>
-                          ))}
-                          <td className="px-4 py-2.5 text-center font-bold text-slate-900">{user.total}</td>
-                        </tr>
-                      ))}
+                            {eventTypes.map(({ key, color, global }) => (
+                              <td key={key} className={`px-4 py-2.5 text-center font-bold ${colorMap[color].text}`}>
+                                {global ? (summary[key] ?? '—') : (user[key] || 0)}
+                              </td>
+                            ))}
+                            <td className="px-4 py-2.5 text-center font-bold text-slate-900">{user.total}</td>
+                            <td className="px-4 py-2.5 text-center font-bold text-emerald-600">{userSession?.sessions || 0}</td>
+                            <td className="px-4 py-2.5 text-center font-bold text-blue-600">{userSession?.active_hours || 0}h</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

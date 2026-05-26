@@ -1,5 +1,6 @@
 const VendorSnapshot = require('../models/VendorSnapshot');
 const { takeSnapshot } = require('../services/vendorSnapshotService');
+const { getNextSchedule } = require('../services/snapshotScheduler');
 
 // GET /api/v1/vendor-snapshots
 exports.getSnapshots = async (req, res) => {
@@ -41,6 +42,16 @@ exports.getLatestSnapshot = async (req, res) => {
       status: 'success',
       data: { weekly: latestWeekly, monthly: latestMonthly }
     });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+// GET /api/v1/vendor-snapshots/next-schedule
+exports.getNextSchedule = async (req, res) => {
+  try {
+    const schedule = getNextSchedule();
+    res.status(200).json({ status: 'success', data: schedule });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
   }

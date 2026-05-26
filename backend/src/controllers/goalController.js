@@ -96,7 +96,7 @@ exports.getAllGoals = async (req, res) => {
           currentValue = revData[0]?.total || 0;
           break;
         case 'activated_vendors':
-          currentValue = await Lead.countDocuments({ assigned_user: goalUserId, $or: [{ active_seller: true }, { lead_status: 'Active Seller' }], created_at: goalDateFilter });
+          currentValue = await Lead.countDocuments({ assigned_user: goalUserId, $or: [{ active_seller: true }, { lead_status: 'Active Seller' }], converted_at: goalDateFilter });
           break;
         case 'activities':
         case 'calls':

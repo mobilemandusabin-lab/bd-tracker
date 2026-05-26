@@ -10,7 +10,7 @@ async function checkAndTakeSnapshots() {
 
   const today = new Date();
   const bsToday = new NepaliDate(today);
-  const isSunday = bsToday.getDay() === 0;
+  const isFriday = bsToday.getDay() === 5;
 
   // Check if tomorrow is a different BS month (i.e., today is last day of month)
   const tomorrow = new Date(today);
@@ -19,7 +19,7 @@ async function checkAndTakeSnapshots() {
   const isLastDayOfMonth = bsTomorrow.getMonth() !== bsToday.getMonth()
     || bsTomorrow.getYear() !== bsToday.getYear();
 
-  if (isSunday) {
+  if (isFriday) {
     try {
       const snapshot = await VendorSnapshot.captureSnapshot('weekly');
       results.snapshots.push({ type: 'weekly', nepaliDate: snapshot.nepaliDate });
@@ -43,8 +43,8 @@ async function checkAndTakeSnapshots() {
     }
   }
 
-  if (!isSunday && !isLastDayOfMonth) {
-    console.log('[Snapshot] No snapshot needed today (not Sunday or month-end)');
+  if (!isFriday && !isLastDayOfMonth) {
+    console.log('[Snapshot] No snapshot needed today (not Friday or month-end)');
     results.message = 'No snapshot needed today';
   }
 

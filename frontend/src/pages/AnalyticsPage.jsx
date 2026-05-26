@@ -421,6 +421,328 @@ const OverviewTab = () => {
           </div>
         </SectionCard>
       )}
+
+      {/* Pipeline Stage Velocity */}
+      {data.stageVelocity?.length > 0 && (
+        <SectionCard title="Pipeline Stage Velocity" icon={Clock}>
+          <p className="text-[10px] text-slate-400 mb-4">Avg days leads spend in each stage (created → last updated)</p>
+          <div className="space-y-2">
+            {data.stageVelocity.map((s) => {
+              const days = Math.round(s.avgDaysInStage || 0);
+              const maxDays = Math.max(...data.stageVelocity.map(v => v.avgDaysInStage || 0), 1);
+              const barWidth = Math.min(((s.avgDaysInStage || 0) / maxDays) * 100, 100);
+              return (
+                <div key={s._id} className="flex items-center gap-3">
+                  <span className="text-xs font-bold text-slate-600 w-32 truncate">{s._id}</span>
+                  <div className="flex-1 bg-slate-100 rounded-full h-6 relative overflow-hidden">
+                    <div className="h-full rounded-full bg-gradient-to-r from-red-500 to-red-400 transition-all" style={{ width: `${barWidth}%` }} />
+                    <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-slate-700">{days}d avg</span>
+                  </div>
+                  <span className="text-xs font-bold text-slate-400 w-12 text-right">{s.count}</span>
+                </div>
+              );
+            })}
+          </div>
+          {data.stageVelocityConverted?.length > 0 && (
+            <div className="mt-4 pt-4 border-t border-slate-100">
+              <p className="text-[10px] font-bold text-slate-500 mb-2">Conversion Time Distribution (leads that converted)</p>
+              <div className="flex gap-1 items-end h-16">
+                {data.stageVelocityConverted.map((b, i) => {
+                  const maxBucket = Math.max(...data.stageVelocityConverted.map(x => x.count), 1);
+                  const h = Math.max((b.count / maxBucket) * 100, 8);
+                  const labels = ['<7d', '7-14d', '14-30d', '30-60d', '60-90d', '90-180d', '180-365d', '1y+'];
+                  return (
+                    <div key={i} className="flex-1 flex flex-col items-center">
+                      <span className="text-[9px] font-bold text-slate-500">{b.count}</span>
+                      <div className="w-full bg-emerald-400 rounded-t" style={{ height: `${h}%` }} />
+                      <span className="text-[8px] text-slate-400 mt-1 truncate w-full text-center">{labels[i] || ''}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </SectionCard>
+      )}
+
+      {/* Loss Analysis Deep Dive */}
+      {data.lossAnalysis && (
+        <SectionCard title="Loss Analysis Deep Dive" icon={AlertTriangle}>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Loss by BD */}
+            {data.lossAnalysis.byBD?.length > 0 && (
+              <div>
+                <p className="text-[10px] font-bold text-slate-500 mb-2">Lost Leads by BD</p>
+                <div className="space-y-1.5">
+                  {data.lossAnalysis.byBD.slice(0, 5).map((b) => {
+                    const maxLoss = data.lossAnalysis.byBD[0]?.count || 1;
+                    return (
+                      <div key={b._id} className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-slate-600 w-24 truncate">{b.name || 'Unknown'}</span>
+                        <div className="flex-1 bg-red-50 rounded-full h-5 overflow-hidden">
+                          <div className="h-full bg-red-400 rounded-full" style={{ width: `${(b.count / maxLoss) * 100}%` }} />
+                        </div>
+                        <span className="text-[10px] font-bold text-red-600 w-8 text-right">{b.count}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {/* Loss by Source */}
+            {data.lossAnalysis.bySource?.length > 0 && (
+              <div>
+                <p className="text-[10px] font-bold text-slate-500 mb-2">Lost Leads by Source</p>
+                <div className="space-y-1.5">
+                  {data.lossAnalysis.bySource.slice(0, 5).map((s) => {
+                    const maxLoss = data.lossAnalysis.bySource[0]?.count || 1;
+                    return (
+                      <div key={s._id} className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-slate-600 w-24 truncate">{s._id || 'Unknown'}</span>
+                        <div className="flex-1 bg-amber-50 rounded-full h-5 overflow-hidden">
+                          <div className="h-full bg-amber-400 rounded-full" style={{ width: `${(s.count / maxLoss) * 100}%` }} />
+                        </div>
+                        <span className="text-[10px] font-bold text-amber-600 w-8 text-right">{s.count}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {/* Loss by Category */}
+            {data.lossAnalysis.byCategory?.length > 0 && (
+              <div>
+                <p className="text-[10px] font-bold text-slate-500 mb-2">Lost Leads by Category</p>
+                <div className="space-y-1.5">
+                  {data.lossAnalysis.byCategory.slice(0, 5).map((c) => {
+                    const maxLoss = data.lossAnalysis.byCategory[0]?.count || 1;
+                    return (
+                      <div key={c._id} className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-slate-600 w-24 truncate">{c._id}</span>
+                        <div className="flex-1 bg-violet-50 rounded-full h-5 overflow-hidden">
+                          <div className="h-full bg-violet-400 rounded-full" style={{ width: `${(c.count / maxLoss) * 100}%` }} />
+                        </div>
+                        <span className="text-[10px] font-bold text-violet-600 w-8 text-right">{c.count}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {/* Time to Loss */}
+            {data.lossAnalysis.timeline?.length > 0 && (
+              <div>
+                <p className="text-[10px] font-bold text-slate-500 mb-2">Time to Loss Distribution</p>
+                <div className="flex gap-1 items-end h-16">
+                  {data.lossAnalysis.timeline.map((b, i) => {
+                    const maxB = Math.max(...data.lossAnalysis.timeline.map(x => x.count), 1);
+                    const h = Math.max((b.count / maxB) * 100, 8);
+                    const labels = ['<7d', '7-14d', '14-30d', '30-60d', '60-90d', '90-180d', '180-365d', '1y+'];
+                    return (
+                      <div key={i} className="flex-1 flex flex-col items-center">
+                        <span className="text-[9px] font-bold text-slate-500">{b.count}</span>
+                        <div className="w-full bg-red-300 rounded-t" style={{ height: `${h}%` }} />
+                        <span className="text-[8px] text-slate-400 mt-1 truncate w-full text-center">{labels[i] || ''}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </SectionCard>
+      )}
+
+      {/* Lead Source ROI */}
+      {data.sourceROI?.length > 0 && (
+        <SectionCard title="Lead Source ROI" icon={DollarSign}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-50">
+                  <th className="px-3 py-2 text-left text-[10px] font-bold text-slate-400 uppercase">Source</th>
+                  <th className="px-3 py-2 text-center text-[10px] font-bold text-slate-400 uppercase">Total</th>
+                  <th className="px-3 py-2 text-center text-[10px] font-bold text-slate-400 uppercase">Converted</th>
+                  <th className="px-3 py-2 text-center text-[10px] font-bold text-slate-400 uppercase">Lost</th>
+                  <th className="px-3 py-2 text-center text-[10px] font-bold text-slate-400 uppercase">Conv Rate</th>
+                  <th className="px-3 py-2 text-center text-[10px] font-bold text-slate-400 uppercase">Revenue</th>
+                  <th className="px-3 py-2 text-center text-[10px] font-bold text-slate-400 uppercase">Orders</th>
+                  <th className="px-3 py-2 text-center text-[10px] font-bold text-slate-400 uppercase">Avg Score</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {data.sourceROI.map((s) => (
+                  <tr key={s._id} className="hover:bg-slate-50">
+                    <td className="px-3 py-2 font-bold text-slate-900">{s._id || 'Unknown'}</td>
+                    <td className="px-3 py-2 text-center font-bold text-slate-600">{s.total}</td>
+                    <td className="px-3 py-2 text-center font-bold text-emerald-600">{s.converted}</td>
+                    <td className="px-3 py-2 text-center font-bold text-red-600">{s.lost}</td>
+                    <td className="px-3 py-2 text-center font-bold text-slate-900">{s.conversionRate?.toFixed(1)}%</td>
+                    <td className="px-3 py-2 text-center font-bold text-emerald-700">Rs. {(s.revenue || 0).toLocaleString()}</td>
+                    <td className="px-3 py-2 text-center font-bold text-slate-600">{s.orders || 0}</td>
+                    <td className="px-3 py-2 text-center font-bold text-slate-600">{Math.round(s.avgLeadScore || 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </SectionCard>
+      )}
+
+      {/* Sync Health */}
+      {data.syncHealth && data.syncHealth.total > 0 && (
+        <SectionCard title="Sync Health" icon={ActivityIcon}>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+            <div className="text-center">
+              <p className="text-2xl font-extrabold text-slate-900">{data.syncHealth.total}</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase">Total Syncs</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-extrabold text-emerald-600">{data.syncHealth.successful}</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase">Successful</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-extrabold text-red-600">{data.syncHealth.failed}</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase">Failed</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-extrabold text-blue-600">{Math.round((data.syncHealth.avgDurationMs || 0) / 1000)}s</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase">Avg Duration</p>
+            </div>
+          </div>
+          {data.syncTimeline?.length > 0 && (
+            <div>
+              <p className="text-[10px] font-bold text-slate-500 mb-2">Sync Success Rate Over Time</p>
+              <ResponsiveContainer width="100%" height={120}>
+                <AreaChart data={data.syncTimeline.map(t => ({ ...t, rate: t.total > 0 ? Math.round((t.successful / t.total) * 100) : 0 }))}>
+                  <defs>
+                    <linearGradient id="syncGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#10B981" stopOpacity={0.3} />
+                      <stop offset="100%" stopColor="#10B981" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="_id" tick={{ fontSize: 9 }} />
+                  <YAxis domain={[0, 100]} tick={{ fontSize: 9 }} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Area type="monotone" dataKey="rate" stroke="#10B981" fill="url(#syncGrad)" name="Success %" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </SectionCard>
+      )}
+
+      {/* BD Self-Comparison (super_admin only) */}
+      {user?.role === 'super_admin' && data.bdComparison?.users?.length > 0 && data.bdComparison?.teamAvg && (
+        <SectionCard title="BD Performance Comparison" icon={Users}>
+          <p className="text-[10px] text-slate-400 mb-4">Each BD vs team average — values normalized to radar chart</p>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Team Average Card */}
+            <div className="p-4 bg-slate-50 rounded-xl">
+              <p className="text-xs font-bold text-slate-700 mb-3">Team Average</p>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div><span className="text-slate-400">Leads:</span> <span className="font-bold">{data.bdComparison.teamAvg.totalLeads}</span></div>
+                <div><span className="text-slate-400">Converted:</span> <span className="font-bold">{data.bdComparison.teamAvg.converted}</span></div>
+                <div><span className="text-slate-400">Conv Rate:</span> <span className="font-bold">{data.bdComparison.teamAvg.conversionRate}%</span></div>
+                <div><span className="text-slate-400">Activities:</span> <span className="font-bold">{data.bdComparison.teamAvg.activities}</span></div>
+                <div><span className="text-slate-400">Revenue:</span> <span className="font-bold">Rs. {data.bdComparison.teamAvg.revenue?.toLocaleString()}</span></div>
+                <div><span className="text-slate-400">Avg Score:</span> <span className="font-bold">{data.bdComparison.teamAvg.avgLeadScore}</span></div>
+              </div>
+            </div>
+            {/* BD Rankings */}
+            <div>
+              <p className="text-xs font-bold text-slate-700 mb-2">BD Rankings</p>
+              <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                {[...data.bdComparison.users].sort((a, b) => b.conversionRate - a.conversionRate).map((bd, i) => (
+                  <div key={bd.user_id} className="flex items-center gap-2 p-2 bg-white border border-slate-100 rounded-lg">
+                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold ${i === 0 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>{i + 1}</span>
+                    <span className="text-xs font-bold text-slate-700 flex-1 truncate">{bd.user_name || 'User'}</span>
+                    <span className="text-[10px] font-bold text-emerald-600">{bd.conversionRate}%</span>
+                    <span className="text-[10px] text-slate-400">{bd.converted}/{bd.totalLeads}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          {/* Per-BD Comparison Table */}
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-50">
+                  <th className="px-3 py-2 text-left text-[10px] font-bold text-slate-400 uppercase">BD</th>
+                  <th className="px-3 py-2 text-center text-[10px] font-bold text-slate-400 uppercase">Leads</th>
+                  <th className="px-3 py-2 text-center text-[10px] font-bold text-slate-400 uppercase">Conv</th>
+                  <th className="px-3 py-2 text-center text-[10px] font-bold text-slate-400 uppercase">Rate</th>
+                  <th className="px-3 py-2 text-center text-[10px] font-bold text-slate-400 uppercase">Activities</th>
+                  <th className="px-3 py-2 text-center text-[10px] font-bold text-slate-400 uppercase">Revenue</th>
+                  <th className="px-3 py-2 text-center text-[10px] font-bold text-slate-400 uppercase">vs Avg</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {data.bdComparison.users.map((bd) => {
+                  const diff = bd.conversionRate - data.bdComparison.teamAvg.conversionRate;
+                  return (
+                    <tr key={bd.user_id} className="hover:bg-slate-50">
+                      <td className="px-3 py-2 font-bold text-slate-900">{bd.user_name}</td>
+                      <td className="px-3 py-2 text-center font-bold text-slate-600">{bd.totalLeads}</td>
+                      <td className="px-3 py-2 text-center font-bold text-emerald-600">{bd.converted}</td>
+                      <td className="px-3 py-2 text-center font-bold text-slate-900">{bd.conversionRate}%</td>
+                      <td className="px-3 py-2 text-center font-bold text-blue-600">{bd.activities}</td>
+                      <td className="px-3 py-2 text-center font-bold text-emerald-700">Rs. {bd.revenue?.toLocaleString()}</td>
+                      <td className={`px-3 py-2 text-center font-bold ${diff > 0 ? 'text-emerald-600' : diff < 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                        {diff > 0 ? '+' : ''}{diff.toFixed(1)}%
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </SectionCard>
+      )}
+
+      {/* Customer Cohort Retention */}
+      {data.customerCohorts?.length > 0 && (
+        <SectionCard title="Customer Cohort Retention" icon={TrendingUp}>
+          <p className="text-[10px] text-slate-400 mb-4">First order month → repeat purchase rate</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-50">
+                  <th className="px-3 py-2 text-left text-[10px] font-bold text-slate-400 uppercase">Cohort</th>
+                  <th className="px-3 py-2 text-center text-[10px] font-bold text-slate-400 uppercase">Customers</th>
+                  <th className="px-3 py-2 text-center text-[10px] font-bold text-slate-400 uppercase">Repeat</th>
+                  <th className="px-3 py-2 text-center text-[10px] font-bold text-slate-400 uppercase">Retention</th>
+                  <th className="px-3 py-2 text-center text-[10px] font-bold text-slate-400 uppercase">Avg Orders</th>
+                  <th className="px-3 py-2 text-center text-[10px] font-bold text-slate-400 uppercase">Avg Spent</th>
+                  <th className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase">Visual</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {data.customerCohorts.map((c) => (
+                  <tr key={c._id} className="hover:bg-slate-50">
+                    <td className="px-3 py-2 font-bold text-slate-900">{c._id}</td>
+                    <td className="px-3 py-2 text-center font-bold text-slate-600">{c.totalCustomers}</td>
+                    <td className="px-3 py-2 text-center font-bold text-emerald-600">{c.repeatCustomers}</td>
+                    <td className="px-3 py-2 text-center font-bold text-slate-900">{c.retentionRate?.toFixed(0)}%</td>
+                    <td className="px-3 py-2 text-center font-bold text-slate-600">{c.avgOrders?.toFixed(1)}</td>
+                    <td className="px-3 py-2 text-center font-bold text-emerald-700">Rs. {Math.round(c.avgSpent || 0).toLocaleString()}</td>
+                    <td className="px-3 py-2">
+                      <div className="w-full bg-slate-100 rounded-full h-4 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500"
+                          style={{ width: `${Math.min(c.retentionRate || 0, 100)}%` }}
+                        />
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </SectionCard>
+      )}
     </div>
   );
 };

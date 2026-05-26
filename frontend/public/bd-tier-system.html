@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BD Tier & Score System</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-alt: #f8fafc;
+    --bg-card: #ffffff;
+    --border: #e2e8f0;
+    --text: #0f172a;
+    --text-secondary: #64748b;
+    --text-muted: #94a3b8;
+    --rookie: #6b7280;
+    --rookie-bg: #f9fafb;
+    --rookie-light: #f3f4f6;
+    --riser: #3b82f6;
+    --riser-bg: #eff6ff;
+    --riser-light: #dbeafe;
+    --hunter: #10b981;
+    --hunter-bg: #ecfdf5;
+    --hunter-light: #d1fae5;
+    --ace: #f59e0b;
+    --ace-bg: #fffbeb;
+    --ace-light: #fef3c7;
+    --elite: #8b5cf6;
+    --elite-bg: #f5f3ff;
+    --elite-light: #ede9fe;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f172a;
+      --bg-alt: #1e293b;
+      --bg-card: #1e293b;
+      --border: #334155;
+      --text: #f1f5f9;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --rookie-bg: #1e293b;
+      --rookie-light: #374151;
+      --riser-bg: #1e293b;
+      --riser-light: #1e3a5f;
+      --hunter-bg: #1e293b;
+      --hunter-light: #064e3b;
+      --ace-bg: #1e293b;
+      --ace-light: #78350f;
+      --elite-bg: #1e293b;
+      --elite-light: #4c1d95;
+    }
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    padding: 24px;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  h1 { font-size: 24px; font-weight: 800; margin-bottom: 4px; }
+  .subtitle { color: var(--text-secondary); font-size: 14px; margin-bottom: 32px; }
+
+  /* Tier Cards */
+  .tier-card { border: 2px solid var(--border); border-radius: 12px; margin-bottom: 12px; overflow: hidden; transition: border-color 0.2s; background: var(--bg-card); }
+  .tier-card[data-tier="rookie"] { --tier-color: var(--rookie); --tier-bg: var(--rookie-bg); --tier-light: var(--rookie-light); }
+  .tier-card[data-tier="riser"] { --tier-color: var(--riser); --tier-bg: var(--riser-bg); --tier-light: var(--riser-light); }
+  .tier-card[data-tier="hunter"] { --tier-color: var(--hunter); --tier-bg: var(--hunter-bg); --tier-light: var(--hunter-light); }
+  .tier-card[data-tier="ace"] { --tier-color: var(--ace); --tier-bg: var(--ace-bg); --tier-light: var(--ace-light); }
+  .tier-card[data-tier="elite"] { --tier-color: var(--elite); --tier-bg: var(--elite-bg); --tier-light: var(--elite-light); }
+  .tier-card.active { border-color: var(--tier-color); }
+
+  .tier-header { display: flex; align-items: center; padding: 16px 20px; cursor: pointer; user-select: none; background: var(--tier-bg); gap: 12px; }
+  .tier-icon { font-size: 28px; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; background: var(--tier-light); border-radius: 10px; flex-shrink: 0; }
+  .tier-info { flex: 1; min-width: 0; }
+  .tier-name { font-size: 16px; font-weight: 700; color: var(--tier-color); }
+  .tier-range { font-size: 13px; color: var(--text-secondary); font-weight: 500; }
+  .tier-badge { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; padding: 3px 10px; border-radius: 20px; background: var(--tier-light); color: var(--tier-color); flex-shrink: 0; }
+  .tier-badge.current-badge { background: var(--tier-color); color: #fff; }
+  .chevron { width: 20px; height: 20px; color: var(--text-muted); transition: transform 0.2s; flex-shrink: 0; }
+  .tier-card.expanded .chevron { transform: rotate(180deg); }
+  .tier-body { display: none; padding: 0 20px 20px; border-top: 1px solid var(--border); }
+  .tier-card.expanded .tier-body { display: block; }
+  .tier-section { margin-top: 16px; }
+  .tier-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-muted); margin-bottom: 8px; }
+  .target-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .target-item { background: var(--bg-alt); border-radius: 8px; padding: 12px; text-align: center; }
+  .target-value { font-size: 20px; font-weight: 800; color: var(--text); }
+  .target-label { font-size: 11px; color: var(--text-secondary); font-weight: 500; margin-top: 2px; }
+  .points-list { display: flex; flex-direction: column; gap: 6px; }
+  .points-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: var(--bg-alt); border-radius: 8px; font-size: 13px; }
+  .points-item-label { color: var(--text-secondary); }
+  .points-item-value { font-weight: 700; color: var(--tier-color); }
+  .perks-list { display: flex; flex-direction: column; gap: 6px; }
+  .perk-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px; background: var(--bg-alt); border-radius: 8px; font-size: 13px; color: var(--text-secondary); }
+  .perk-check { color: var(--tier-color); font-weight: 700; flex-shrink: 0; }
+
+  /* Simulator */
+  .simulator { border: 2px solid var(--border); border-radius: 12px; padding: 24px; margin-top: 40px; background: var(--bg-card); }
+  .simulator-title { font-size: 18px; font-weight: 800; margin-bottom: 4px; }
+  .simulator-subtitle { font-size: 13px; color: var(--text-secondary); margin-bottom: 24px; }
+  .slider-group { margin-bottom: 20px; }
+  .slider-label { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .slider-label-text { font-size: 13px; font-weight: 600; color: var(--text); }
+  .slider-value { font-size: 14px; font-weight: 800; color: var(--text); min-width: 80px; text-align: right; }
+
+  input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 6px; background: var(--border); border-radius: 3px; outline: none; cursor: pointer; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; border-radius: 50%; background: var(--text); cursor: pointer; border: 3px solid var(--bg-card); }
+  input[type="range"]::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; background: var(--text); cursor: pointer; border: 3px solid var(--bg-card); }
+
+  /* Results */
+  .results { margin-top: 28px; padding-top: 24px; border-top: 2px solid var(--border); }
+  .score-display { text-align: center; margin-bottom: 24px; }
+  .score-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 4px; }
+  .score-number { font-size: 56px; font-weight: 900; line-height: 1; color: var(--text); font-variant-numeric: tabular-nums; }
+  .tier-badge-large { display: inline-flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 800; padding: 8px 20px; border-radius: 24px; margin-top: 12px; }
+
+  .breakdown-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 24px; }
+  @media (max-width: 600px) { .breakdown-grid { grid-template-columns: repeat(2, 1fr); } .target-grid { grid-template-columns: 1fr; } }
+
+  .breakdown-card { background: var(--bg-alt); border-radius: 10px; padding: 14px; text-align: center; }
+  .breakdown-icon { font-size: 20px; margin-bottom: 4px; }
+  .breakdown-points { font-size: 24px; font-weight: 800; color: var(--text); }
+  .breakdown-label { font-size: 11px; color: var(--text-secondary); font-weight: 500; margin-top: 2px; }
+  .breakdown-detail { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+
+  /* Progress */
+  .progress-section { margin-bottom: 20px; }
+  .progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .progress-tier-label { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+  .progress-remaining { font-size: 12px; color: var(--text-muted); }
+  .progress-bar-track { height: 12px; background: var(--border); border-radius: 6px; overflow: hidden; }
+  .progress-bar-fill { height: 100%; border-radius: 6px; transition: width 0.3s ease, background 0.3s ease; }
+  .progress-message { font-size: 13px; color: var(--text-secondary); margin-top: 8px; text-align: center; font-weight: 500; }
+
+  /* Tier path */
+  .tier-path { display: flex; align-items: center; justify-content: center; gap: 4px; margin-top: 16px; flex-wrap: wrap; }
+  .tier-path-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--border); transition: all 0.3s; }
+  .tier-path-dot.earned { border-color: transparent; }
+  .tier-path-line { width: 24px; height: 2px; background: var(--border); transition: background 0.3s; }
+  .tier-path-line.earned { background: var(--hunter); }
+</style>
+</head>
+<body>
+
+<h1>BD Tier & Score System</h1>
+<p class="subtitle">Track your performance, earn points, and climb the ranks</p>
+
+<div id="tiers-container"></div>
+
+<div class="simulator">
+  <div class="simulator-title">Score Simulator</div>
+  <div class="simulator-subtitle">Adjust the sliders to see how your monthly performance translates to points</div>
+
+  <div class="slider-group">
+    <div class="slider-label">
+      <span class="slider-label-text">Leads Assigned</span>
+      <span class="slider-value" id="leads-val">0</span>
+    </div>
+    <input type="range" id="leads-slider" min="0" max="80" value="0">
+  </div>
+
+  <div class="slider-group">
+    <div class="slider-label">
+      <span class="slider-label-text">Activities Logged (calls, meetings, demos, emails)</span>
+      <span class="slider-value" id="activities-val">0</span>
+    </div>
+    <input type="range" id="activities-slider" min="0" max="200" value="0">
+  </div>
+
+  <div class="slider-group">
+    <div class="slider-label">
+      <span class="slider-label-text">Leads Activated (Converted)</span>
+      <span class="slider-value" id="activated-val">0</span>
+    </div>
+    <input type="range" id="activated-slider" min="0" max="50" value="0">
+  </div>
+
+  <div class="slider-group">
+    <div class="slider-label">
+      <span class="slider-label-text">Revenue (&#8377; Lakhs)</span>
+      <span class="slider-value" id="revenue-val">0</span>
+    </div>
+    <input type="range" id="revenue-slider" min="0" max="100" value="0">
+  </div>
+
+  <div class="slider-group">
+    <div class="slider-label">
+      <span class="slider-label-text">Follow-ups Completed On Time</span>
+      <span class="slider-value" id="followups-val">0</span>
+    </div>
+    <input type="range" id="followups-slider" min="0" max="60" value="0">
+  </div>
+
+  <div class="slider-group">
+    <div class="slider-label">
+      <span class="slider-label-text">Months of Streak (target hit)</span>
+      <span class="slider-value" id="streak-val">0</span>
+    </div>
+    <input type="range" id="streak-slider" min="0" max="6" value="0">
+  </div>
+
+  <div class="results" id="results">
+    <div class="score-display">
+      <div class="score-label">Total Score</div>
+      <div class="score-number" id="total-score">0</div>
+      <div class="tier-badge-large" id="tier-badge-large">
+        <span id="tier-badge-icon"></span>
+        <span id="tier-badge-name"></span>
+      </div>
+    </div>
+
+    <div class="breakdown-grid">
+      <div class="breakdown-card">
+        <div class="breakdown-icon">&#128203;</div>
+        <div class="breakdown-points" id="bp-leads">0</div>
+        <div class="breakdown-label">Lead Points</div>
+        <div class="breakdown-detail" id="bp-leads-detail">0 leads &times; 5</div>
+      </div>
+      <div class="breakdown-card">
+        <div class="breakdown-icon">&#128222;</div>
+        <div class="breakdown-points" id="bp-activities">0</div>
+        <div class="breakdown-label">Activity Points</div>
+        <div class="breakdown-detail" id="bp-activities-detail">0 activities &times; 3</div>
+      </div>
+      <div class="breakdown-card">
+        <div class="breakdown-icon">&#9989;</div>
+        <div class="breakdown-points" id="bp-activated">0</div>
+        <div class="breakdown-label">Activation Points</div>
+        <div class="breakdown-detail" id="bp-activated-detail">0 activated &times; 40</div>
+      </div>
+      <div class="breakdown-card">
+        <div class="breakdown-icon">&#128176;</div>
+        <div class="breakdown-points" id="bp-revenue">0</div>
+        <div class="breakdown-label">Revenue Points</div>
+        <div class="breakdown-detail" id="bp-revenue-detail">&#8377;0L &times; 8</div>
+      </div>
+      <div class="breakdown-card">
+        <div class="breakdown-icon">&#128205;</div>
+        <div class="breakdown-points" id="bp-followups">0</div>
+        <div class="breakdown-label">Follow-up Points</div>
+        <div class="breakdown-detail" id="bp-followups-detail">0 follow-ups &times; 5</div>
+      </div>
+      <div class="breakdown-card">
+        <div class="breakdown-icon">&#128293;</div>
+        <div class="breakdown-points" id="bp-bonus">0</div>
+        <div class="breakdown-label">Bonus Points</div>
+        <div class="breakdown-detail" id="bp-bonus-detail">Streak + Conv. bonus</div>
+      </div>
+    </div>
+
+    <div class="progress-section">
+      <div class="progress-header">
+        <span class="progress-tier-label" id="progress-tier-label">Rookie</span>
+        <span class="progress-remaining" id="progress-remaining"></span>
+      </div>
+      <div class="progress-bar-track">
+        <div class="progress-bar-fill" id="progress-bar-fill"></div>
+      </div>
+      <div class="progress-message" id="progress-message"></div>
+    </div>
+
+    <div class="tier-path" id="tier-path"></div>
+  </div>
+</div>
+
+<script>
+const TIERS = [
+  {
+    id: 'rookie', name: 'Rookie', icon: '\u{1F331}',
+    min: 0, max: 999,
+    color: 'var(--rookie)', bg: 'var(--rookie-bg)', light: 'var(--rookie-light)',
+    targets: { leads: 10, activations: 3, convRate: '20%', activities: 30, followups: 8 },
+    points: { lead: 5, activity: 3, activation: 40, revenue: '8 per \u20B91L', followup: 5, streak: 75, bonus35: 40, bonus50: 80 },
+    perks: [
+      'Basic CRM access & lead dashboard',
+      'Weekly 1:1 with team lead',
+      'Access to sales playbook & templates',
+      'Standard lead assignment priority'
+    ]
+  },
+  {
+    id: 'riser', name: 'Riser', icon: '\u{1F4C8}',
+    min: 1000, max: 2499,
+    color: 'var(--riser)', bg: 'var(--riser-bg)', light: 'var(--riser-light)',
+    targets: { leads: 25, activations: 8, convRate: '30%', activities: 60, followups: 18 },
+    points: { lead: 5, activity: 3, activation: 40, revenue: '8 per \u20B91L', followup: 5, streak: 75, bonus35: 40, bonus50: 80 },
+    perks: [
+      'Priority lead assignment (1.5x volume)',
+      'Monthly team spotlight recognition',
+      'Access to premium vendor leads pool',
+      'Eligible for quarterly bonus program'
+    ]
+  },
+  {
+    id: 'hunter', name: 'Hunter', icon: '\u26A1',
+    min: 2500, max: 4999,
+    color: 'var(--hunter)', bg: 'var(--hunter-bg)', light: 'var(--hunter-light)',
+    targets: { leads: 40, activations: 15, convRate: '40%', activities: 100, followups: 30 },
+    points: { lead: 5, activity: 3, activation: 40, revenue: '8 per \u20B91L', followup: 5, streak: 75, bonus35: 40, bonus50: 80 },
+    perks: [
+      'Premium lead assignment (2x volume)',
+      'Direct access to enterprise vendor leads',
+      'Monthly performance bonus eligibility',
+      'Featured in company leaderboard'
+    ]
+  },
+  {
+    id: 'ace', name: 'Ace', icon: '\u{1F3C6}',
+    min: 5000, max: 8999,
+    color: 'var(--ace)', bg: 'var(--ace-bg)', light: 'var(--ace-light)',
+    targets: { leads: 55, activations: 25, convRate: '50%', activities: 140, followups: 40 },
+    points: { lead: 5, activity: 3, activation: 40, revenue: '8 per \u20B91L', followup: 5, streak: 75, bonus35: 40, bonus50: 80 },
+    perks: [
+      'Top-tier lead allocation (3x volume)',
+      'VIP vendor relationship management',
+      'Quarterly strategy meeting invite',
+      'Mentorship role for Rookie & Riser BDs'
+    ]
+  },
+  {
+    id: 'elite', name: 'Elite', icon: '\u{1F451}',
+    min: 9000, max: Infinity,
+    color: 'var(--elite)', bg: 'var(--elite-bg)', light: 'var(--elite-light)',
+    targets: { leads: 70, activations: 40, convRate: '60%', activities: 180, followups: 50 },
+    points: { lead: 5, activity: 3, activation: 40, revenue: '8 per \u20B91L', followup: 5, streak: 75, bonus35: 40, bonus50: 80 },
+    perks: [
+      'Unlimited premium lead access',
+      'Named account ownership on top vendors',
+      'Annual strategy offsite participation',
+      'Revenue share on top-performing accounts'
+    ]
+  }
+];
+
+function formatNumber(n) {
+  return n.toLocaleString('en-IN');
+}
+
+function getTier(score) {
+  for (let i = TIERS.length - 1; i >= 0; i--) {
+    if (score >= TIERS[i].min) return TIERS[i];
+  }
+  return TIERS[0];
+}
+
+function getTierIndex(score) {
+  for (let i = TIERS.length - 1; i >= 0; i--) {
+    if (score >= TIERS[i].min) return i;
+  }
+  return 0;
+}
+
+function calcScore(leads, activities, activated, revenue, followups, streak) {
+  const leadPts = leads * 5;
+  const activityPts = activities * 3;
+  const activatedPts = activated * 40;
+  const revenuePts = revenue * 8;
+  const followupPts = followups * 5;
+  const streakPts = streak * 75;
+
+  const convRate = leads > 0 ? (activated / leads) * 100 : 0;
+  let convBonus = 0;
+  if (convRate >= 50) convBonus = 80;
+  else if (convRate >= 35) convBonus = 40;
+
+  return {
+    leadPts, activityPts, activatedPts, revenuePts, followupPts, streakPts, convBonus,
+    total: leadPts + activityPts + activatedPts + revenuePts + followupPts + streakPts + convBonus,
+    convRate
+  };
+}
+
+function renderTiers() {
+  const container = document.getElementById('tiers-container');
+  container.innerHTML = TIERS.map((tier) => `
+    <div class="tier-card" data-tier="${tier.id}" id="tier-${tier.id}">
+      <div class="tier-header" onclick="toggleTier('${tier.id}')">
+        <div class="tier-icon">${tier.icon}</div>
+        <div class="tier-info">
+          <div class="tier-name">${tier.name}</div>
+          <div class="tier-range">${formatNumber(tier.min)} &ndash; ${tier.max === Infinity ? '9,999+' : formatNumber(tier.max)} pts</div>
+        </div>
+        <span class="tier-badge" id="badge-${tier.id}"></span>
+        <svg class="chevron" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
+        </svg>
+      </div>
+      <div class="tier-body">
+        <div class="tier-section">
+          <div class="tier-section-title">Monthly Targets</div>
+          <div class="target-grid">
+            <div class="target-item">
+              <div class="target-value">${tier.targets.leads}</div>
+              <div class="target-label">Leads Assigned</div>
+            </div>
+            <div class="target-item">
+              <div class="target-value">${tier.targets.activations}</div>
+              <div class="target-label">Activations</div>
+            </div>
+            <div class="target-item">
+              <div class="target-value">${tier.targets.convRate}</div>
+              <div class="target-label">Conversion Rate</div>
+            </div>
+            <div class="target-item">
+              <div class="target-value">${tier.targets.activities}</div>
+              <div class="target-label">Activities</div>
+            </div>
+            <div class="target-item">
+              <div class="target-value">${tier.targets.followups}</div>
+              <div class="target-label">Follow-ups Done</div>
+            </div>
+          </div>
+        </div>
+        <div class="tier-section">
+          <div class="tier-section-title">Points per Action</div>
+          <div class="points-list">
+            <div class="points-item">
+              <span class="points-item-label">Lead assigned</span>
+              <span class="points-item-value">+${tier.points.lead} pts</span>
+            </div>
+            <div class="points-item">
+              <span class="points-item-label">Activity logged (call/meeting/demo/email)</span>
+              <span class="points-item-value">+${tier.points.activity} pts</span>
+            </div>
+            <div class="points-item">
+              <span class="points-item-label">Lead activated (converted)</span>
+              <span class="points-item-value">+${tier.points.activation} pts</span>
+            </div>
+            <div class="points-item">
+              <span class="points-item-label">Revenue</span>
+              <span class="points-item-value">+${tier.points.revenue}</span>
+            </div>
+            <div class="points-item">
+              <span class="points-item-label">Follow-up completed on time</span>
+              <span class="points-item-value">+${tier.points.followup} pts</span>
+            </div>
+            <div class="points-item">
+              <span class="points-item-label">Monthly streak (target hit)</span>
+              <span class="points-item-value">+${tier.points.streak} pts</span>
+            </div>
+            <div class="points-item">
+              <span class="points-item-label">Conv. rate &gt; 35%</span>
+              <span class="points-item-value">+${tier.points.bonus35} pts</span>
+            </div>
+            <div class="points-item">
+              <span class="points-item-label">Conv. rate &gt; 50%</span>
+              <span class="points-item-value">+${tier.points.bonus50} pts</span>
+            </div>
+          </div>
+        </div>
+        <div class="tier-section">
+          <div class="tier-section-title">Perks & Rewards</div>
+          <div class="perks-list">
+            ${tier.perks.map(p => `
+              <div class="perk-item">
+                <span class="perk-check">\u2713</span>
+                <span>${p}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function toggleTier(id) {
+  document.getElementById(`tier-${id}`).classList.toggle('expanded');
+}
+
+function updateSimulator() {
+  const leads = parseInt(document.getElementById('leads-slider').value);
+  const activities = parseInt(document.getElementById('activities-slider').value);
+  const activated = parseInt(document.getElementById('activated-slider').value);
+  const revenue = parseInt(document.getElementById('revenue-slider').value);
+  const followups = parseInt(document.getElementById('followups-slider').value);
+  const streak = parseInt(document.getElementById('streak-slider').value);
+
+  document.getElementById('leads-val').textContent = formatNumber(leads);
+  document.getElementById('activities-val').textContent = formatNumber(activities);
+  document.getElementById('activated-val').textContent = formatNumber(activated);
+  document.getElementById('revenue-val').textContent = '\u20B9' + formatNumber(revenue) + 'L';
+  document.getElementById('followups-val').textContent = formatNumber(followups);
+  document.getElementById('streak-val').textContent = streak;
+
+  const score = calcScore(leads, activities, activated, revenue, followups, streak);
+  const tier = getTier(score.total);
+  const tierIdx = getTierIndex(score.total);
+
+  document.getElementById('total-score').textContent = formatNumber(score.total);
+
+  const badge = document.getElementById('tier-badge-large');
+  badge.style.background = tier.light;
+  badge.style.color = tier.color;
+  document.getElementById('tier-badge-icon').textContent = tier.icon;
+  document.getElementById('tier-badge-name').textContent = tier.name;
+
+  document.getElementById('bp-leads').textContent = formatNumber(score.leadPts);
+  document.getElementById('bp-leads-detail').textContent = formatNumber(leads) + ' leads \u00D7 5';
+  document.getElementById('bp-activities').textContent = formatNumber(score.activityPts);
+  document.getElementById('bp-activities-detail').textContent = formatNumber(activities) + ' activities \u00D7 3';
+  document.getElementById('bp-activated').textContent = formatNumber(score.activatedPts);
+  document.getElementById('bp-activated-detail').textContent = formatNumber(activated) + ' activated \u00D7 40';
+  document.getElementById('bp-revenue').textContent = formatNumber(score.revenuePts);
+  document.getElementById('bp-revenue-detail').textContent = '\u20B9' + formatNumber(revenue) + 'L \u00D7 8';
+  document.getElementById('bp-followups').textContent = formatNumber(score.followupPts);
+  document.getElementById('bp-followups-detail').textContent = formatNumber(followups) + ' follow-ups \u00D7 5';
+  document.getElementById('bp-bonus').textContent = formatNumber(score.streakPts + score.convBonus);
+  const bonusParts = [];
+  if (streak > 0) bonusParts.push(streak + '\u00D775 streak');
+  if (score.convBonus > 0) bonusParts.push('+' + score.convBonus + ' conv');
+  document.getElementById('bp-bonus-detail').textContent = bonusParts.length ? bonusParts.join(' + ') : 'No bonus';
+
+  const tierProgress = tier.max === Infinity ? 100 : ((score.total - tier.min) / (tier.max - tier.min + 1)) * 100;
+
+  document.getElementById('progress-tier-label').textContent = tier.icon + ' ' + tier.name;
+  document.getElementById('progress-tier-label').style.color = tier.color;
+
+  const nextTier = TIERS[tierIdx + 1];
+  const remaining = nextTier ? nextTier.min - score.total : 0;
+  document.getElementById('progress-remaining').textContent = nextTier
+    ? formatNumber(remaining) + ' pts to ' + nextTier.name
+    : 'Maximum tier reached!';
+
+  const fill = document.getElementById('progress-bar-fill');
+  fill.style.width = Math.min(tierProgress, 100) + '%';
+  fill.style.background = tier.color;
+
+  const pct = Math.round(tierProgress);
+  if (nextTier) {
+    document.getElementById('progress-message').textContent =
+      'You\u2019re ' + pct + '% through ' + tier.name + '. ' + formatNumber(remaining) + ' pts to ' + nextTier.name + '!';
+  } else {
+    document.getElementById('progress-message').textContent =
+      '\u{1F451} You\u2019ve reached the top! ' + formatNumber(score.total) + ' total points.';
+  }
+
+  TIERS.forEach(t => {
+    const card = document.getElementById('tier-' + t.id);
+    const b = document.getElementById('badge-' + t.id);
+    if (t.id === tier.id) {
+      card.classList.add('active');
+      b.textContent = 'Current';
+      b.classList.add('current-badge');
+    } else {
+      card.classList.remove('active');
+      b.textContent = score.total >= t.min ? 'Earned' : '';
+      b.classList.remove('current-badge');
+    }
+  });
+
+  const pathContainer = document.getElementById('tier-path');
+  pathContainer.innerHTML = TIERS.map((t, i) => {
+    const earned = score.total >= t.min;
+    const dot = '<div class="tier-path-dot' + (earned ? ' earned' : '') + '" style="' + (earned ? 'background:' + t.color : '') + '" title="' + t.name + '"></div>';
+    const line = i < TIERS.length - 1
+      ? '<div class="tier-path-line' + (score.total >= TIERS[i+1].min ? ' earned' : '') + '"></div>'
+      : '';
+    return dot + line;
+  }).join('');
+}
+
+['leads-slider', 'activities-slider', 'activated-slider', 'revenue-slider', 'followups-slider', 'streak-slider'].forEach(id => {
+  document.getElementById(id).addEventListener('input', updateSimulator);
+});
+
+renderTiers();
+updateSimulator();
+</script>
+</body>
+</html>

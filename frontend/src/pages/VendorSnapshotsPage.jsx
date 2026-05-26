@@ -1,10 +1,47 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import axios from 'axios';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { Store, ShieldCheck, Package, Calendar, TrendingUp, TrendingDown, ArrowUpRight, ArrowDownRight, RefreshCw, Loader2, AlertCircle, Camera } from 'lucide-react';
+import { Store, ShieldCheck, Package, Calendar, TrendingUp, TrendingDown, ArrowUpRight, ArrowDownRight, RefreshCw, Loader2, AlertCircle, Camera, Clock } from 'lucide-react';
 import { formatNepaliDate, formatNepaliDateLong, getNepaliMonthName } from '../utils/nepaliDate';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
+
+function formatCountdown(ms) {
+  if (ms <= 0) return { days: 0, hours: 0, minutes: 0, seconds: 0 };
+  const totalSeconds = Math.floor(ms / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return { days, hours, minutes, seconds };
+}
+
+function CountdownDisplay({ targetDate, label, light }) {
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const msLeft = new Date(targetDate).getTime() - now;
+  const { days, hours, minutes, seconds } = formatCountdown(msLeft);
+  const isDue = msLeft <= 3600000 && msLeft > 0;
+
+  const colorClass = light
+    ? (isDue ? 'text-yellow-200' : 'text-red-100')
+    : (isDue ? 'text-red-600' : 'text-slate-500');
+
+  return (
+    <div className={`flex items-center gap-2 ${colorClass}`}>
+      <Clock size={12} />
+      <span className="text-[10px] font-semibold">{label}: </span>
+      <span className="text-xs font-bold tabular-nums">
+        {days > 0 ? `${days}d ` : ''}{String(hours).padStart(2, '0')}:{String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
+      </span>
+    </div>
+  );
+}
 
 const StatCard = ({ icon: Icon, label, value, subValue, iconBg = 'bg-red-50' }) => (
   <div className="bg-white border border-slate-100 rounded-2xl p-4 lg:p-5 shadow-sm hover:shadow-md transition-shadow">
@@ -50,6 +87,7 @@ export default function VendorSnapshotsPage({ embedded }) {
   const [snapshots, setSnapshots] = useState([]);
   const [latestSnapshots, setLatestSnapshots] = useState(null);
   const [comparisonData, setComparisonData] = useState([]);
+  const [nextSchedule, setNextSchedule] = useState({ weekly: null, monthly: null });
   const [snapshotType, setSnapshotType] = useState('weekly');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -58,26 +96,28 @@ export default function VendorSnapshotsPage({ embedded }) {
   const token = localStorage.getItem('token');
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [snapshotsRes, latestRes, compareRes] = await Promise.all([
+      const [snapshotsRes, latestRes, compareRes, scheduleRes] = await Promise.all([
         axios.get(`${API_URL}/vendor-snapshots?type=${snapshotType}&limit=24`, { headers }),
         axios.get(`${API_URL}/vendor-snapshots/latest`, { headers }),
-        axios.get(`${API_URL}/vendor-snapshots/compare?type=${snapshotType}&count=12`, { headers })
+        axios.get(`${API_URL}/vendor-snapshots/compare?type=${snapshotType}&count=12`, { headers }),
+        axios.get(`${API_URL}/vendor-snapshots/next-schedule`, { headers })
       ]);
       setSnapshots(snapshotsRes.data.data.snapshots);
       setLatestSnapshots(latestRes.data.data);
       setComparisonData(compareRes.data.data.snapshots);
+      setNextSchedule(scheduleRes.data.data);
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to load snapshots');
     } finally {
       setLoading(false);
     }
-  };
+  }, [snapshotType]);
 
-  useEffect(() => { fetchData(); }, [snapshotType]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   const handleCapture = async () => {
     setCapturing(true);
@@ -127,6 +167,14 @@ export default function VendorSnapshotsPage({ embedded }) {
                 <p className="text-red-200 text-sm font-medium">
                   Weekly and monthly vendor metrics comparison in Nepali calendar
                 </p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
+                  {nextSchedule.weekly?.targetDate && (
+                    <CountdownDisplay targetDate={nextSchedule.weekly.targetDate} label="Auto weekly" light />
+                  )}
+                  {nextSchedule.monthly?.targetDate && (
+                    <CountdownDisplay targetDate={nextSchedule.monthly.targetDate} label="Auto monthly" light />
+                  )}
+                </div>
                 {latest && (
                   <p className="text-red-100 text-xs font-semibold mt-2">
                     Latest: {latest.nepaliDate} ({snapshotType})
@@ -147,21 +195,31 @@ export default function VendorSnapshotsPage({ embedded }) {
       )}
 
       {embedded && (
-        <div className="flex items-center justify-between">
-          <div className="flex gap-2">
-            {['weekly', 'monthly'].map(t => (
-              <button key={t} onClick={() => setSnapshotType(t)}
-                className={`px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl transition-all
-                  ${snapshotType === t ? 'bg-red-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-500 hover:border-red-300'}`}>
-                {t}
-              </button>
-            ))}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex gap-2">
+              {['weekly', 'monthly'].map(t => (
+                <button key={t} onClick={() => setSnapshotType(t)}
+                  className={`px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl transition-all
+                    ${snapshotType === t ? 'bg-red-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-500 hover:border-red-300'}`}>
+                  {t}
+                </button>
+              ))}
+            </div>
+            <button onClick={handleCapture} disabled={capturing}
+              className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-xl text-xs font-bold hover:bg-red-700 disabled:opacity-50 transition-all">
+              {capturing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              {capturing ? 'Capturing...' : 'Capture'}
+            </button>
           </div>
-          <button onClick={handleCapture} disabled={capturing}
-            className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-xl text-xs font-bold hover:bg-red-700 disabled:opacity-50 transition-all">
-            {capturing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-            {capturing ? 'Capturing...' : 'Capture'}
-          </button>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {nextSchedule.weekly?.targetDate && (
+              <CountdownDisplay targetDate={nextSchedule.weekly.targetDate} label="Auto weekly" />
+            )}
+            {nextSchedule.monthly?.targetDate && (
+              <CountdownDisplay targetDate={nextSchedule.monthly.targetDate} label="Auto monthly" />
+            )}
+          </div>
         </div>
       )}
 
@@ -209,7 +267,7 @@ export default function VendorSnapshotsPage({ embedded }) {
                 : 'bg-white text-slate-600 border border-slate-200 hover:bg-red-50 hover:text-red-600'
             }`}
           >
-            {type === 'weekly' ? 'Weekly (Sunday)' : 'Monthly (Month-end)'}
+            {type === 'weekly' ? 'Weekly (Friday)' : 'Monthly (Month-end)'}
           </button>
         ))}
       </div>
@@ -317,7 +375,7 @@ export default function VendorSnapshotsPage({ embedded }) {
                   <td colSpan={5} className="px-5 py-12 text-center">
                     <Camera size={40} className="mx-auto text-slate-200 mb-3" />
                     <p className="text-sm font-bold text-slate-400">No snapshot data yet</p>
-                    <p className="text-xs text-slate-400 mt-1">Snapshots are taken every Sunday and month-end</p>
+                    <p className="text-xs text-slate-400 mt-1">Snapshots are taken every Friday and month-end</p>
                   </td>
                 </tr>
               )}

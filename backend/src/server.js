@@ -8,12 +8,14 @@ connectDB();
 const app = require('./app');
 const seedPipelineStages = require('./services/pipelineStageSeeder');
 const seedExtensionVersion = require('./services/extensionSeeder');
+const { startSnapshotScheduler } = require('./services/snapshotScheduler');
 
 const port = process.env.PORT || 5000;
 const server = app.listen(port, '0.0.0.0', async () => {
   console.log(`App running on port ${port}...`);
   await seedPipelineStages();
   await seedExtensionVersion();
+  startSnapshotScheduler();
 
   // Run full sync on startup (after 30s to let DB connect)
   setTimeout(async () => {

@@ -111,6 +111,10 @@ const leadSchema = new mongoose.Schema({
     unique: true,
     sparse: true
   },
+  last_nepalcan_status: {
+    type: String,
+    default: null
+  },
   service_branches: [{
     branchId: { type: String },
     name: { type: String }

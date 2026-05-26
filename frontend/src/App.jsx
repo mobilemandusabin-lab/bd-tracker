@@ -17,6 +17,7 @@ import PipelineSettingsPage from './pages/PipelineSettingsPage';
 import VendorManagementPage from './pages/VendorManagementPage';
 import ActiveSellersPage from './pages/ActiveSellersPage';
 import AnalyticsPage from './pages/AnalyticsPage';
+import BDTierPage from './pages/BDTierPage';
 import BDLeaderboardDetailPage from './pages/BDLeaderboardDetailPage';
 import ExtensionPage from './pages/ExtensionPage';
 import OperationsAnalyticsPage from './pages/OperationsAnalyticsPage';
@@ -75,6 +76,7 @@ function App() {
               </ProtectedRoute>
             } />
             <Route path="goals" element={<GoalsPage />} />
+            <Route path="bd-tiers" element={<BDTierPage />} />
             <Route path="users" element={
               <ProtectedRoute roles={['super_admin', 'admin']}>
                 <UsersPage />

@@ -9,6 +9,7 @@ router.use(restrictTo('super_admin'));
 
 router.get('/', vendorSnapshotController.getSnapshots);
 router.get('/latest', vendorSnapshotController.getLatestSnapshot);
+router.get('/next-schedule', vendorSnapshotController.getNextSchedule);
 router.get('/compare', vendorSnapshotController.getComparison);
 router.post('/capture', vendorSnapshotController.triggerSnapshot);
 router.delete('/', vendorSnapshotController.deleteSnapshots);

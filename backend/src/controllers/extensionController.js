@@ -456,17 +456,137 @@ exports.getAnalytics = async (req, res) => {
     ).sort({ created_at: -1 }).lean();
     const latestPendingCount = latestPendingEvent?.pending_count ?? null;
 
-    // Vendor conversions: activated + new active sellers in date range
+    // Lead model for vendor name lookups
     const Lead = require('../models/Lead');
-    const [activatedToday, activeSellersToday] = await Promise.all([
-      Lead.countDocuments({
-        lead_status: 'Activated',
-        updated_at: { $gte: startDate, $lte: endDate }
-      }),
-      Lead.countDocuments({
-        lead_status: 'Active Seller',
-        updated_at: { $gte: startDate, $lte: endDate }
-      })
+
+    // QC Approval Rate (bulk vs individual)
+    const qcStats = await ExtensionEvent.aggregate([
+      { $match: { ...matchFilter, event_type: { $in: ['qc_approved', 'qc_rejected'] } } },
+      {
+        $group: {
+          _id: null,
+          approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, 1, 0] } },
+          rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, 1, 0] } },
+          bulk_approved: { $sum: { $cond: [{ $and: [{ $eq: ['$event_type', 'qc_approved'] }, { $eq: ['$metadata.bulk', true] }] }, 1, 0] } },
+          bulk_rejected: { $sum: { $cond: [{ $and: [{ $eq: ['$event_type', 'qc_rejected'] }, { $eq: ['$metadata.bulk', true] }] }, 1, 0] } },
+          individual_approved: { $sum: { $cond: [{ $and: [{ $eq: ['$event_type', 'qc_approved'] }, { $ne: ['$metadata.bulk', true] }] }, 1, 0] } },
+          individual_rejected: { $sum: { $cond: [{ $and: [{ $eq: ['$event_type', 'qc_rejected'] }, { $ne: ['$metadata.bulk', true] }] }, 1, 0] } }
+        }
+      }
+    ]);
+
+    // Top Products by event count
+    const topProducts = await ExtensionEvent.aggregate([
+      { $match: { ...matchFilter, product_name: { $ne: null } } },
+      {
+        $group: {
+          _id: '$product_name',
+          total: { $sum: 1 },
+          listings: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, 1, 0] } },
+          specs: { $sum: { $cond: [{ $eq: ['$event_type', 'spec_added'] }, 1, 0] } },
+          updates: { $sum: { $cond: [{ $eq: ['$event_type', 'product_updated'] }, 1, 0] } },
+          qc_approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, 1, 0] } },
+          qc_rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, 1, 0] } }
+        }
+      },
+      { $sort: { total: -1 } },
+      { $limit: 10 }
+    ]);
+
+    // Top Vendors by event count
+    const topVendors = await ExtensionEvent.aggregate([
+      { $match: { ...matchFilter, vendor_id: { $ne: null } } },
+      {
+        $group: {
+          _id: '$vendor_id',
+          total: { $sum: 1 },
+          listings: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, 1, 0] } },
+          qc_approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, 1, 0] } },
+          qc_rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, 1, 0] } },
+          products: { $addToSet: '$product_name' }
+        }
+      },
+      { $addFields: { product_count: { $size: '$products' } } },
+      { $sort: { total: -1 } },
+      { $limit: 10 }
+    ]);
+
+    // Lookup vendor names from Leads
+    const vendorIds = topVendors.map(v => v._id).filter(Boolean);
+    const vendorLeads = await Lead.find({ nepalcanId: { $in: vendorIds } })
+      .select('nepalcanId business_name')
+      .lean();
+    const vendorNameMap = {};
+    for (const lead of vendorLeads) {
+      vendorNameMap[lead.nepalcanId] = lead.business_name;
+    }
+    const topVendorsWithNames = topVendors.map(v => ({
+      ...v,
+      vendor_name: vendorNameMap[v._id] || v._id
+    }));
+
+    // User Activity Sessions (derive from events — gap > 1 hour = new session)
+    const userSessions = await ExtensionEvent.aggregate([
+      { $match: matchFilter },
+      { $sort: { user_id: 1, created_at: 1 } },
+      {
+        $group: {
+          _id: '$user_id',
+          events: { $push: { type: '$event_type', time: '$created_at' } }
+        }
+      },
+      {
+        $lookup: {
+          from: 'users',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'user'
+        }
+      },
+      { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } }
+    ]);
+
+    const SESSION_GAP_MS = 60 * 60 * 1000; // 1 hour
+    const userSessionsResult = userSessions.map(u => {
+      const sessions = [];
+      let currentSession = null;
+      for (const ev of u.events) {
+        if (!currentSession || (ev.time - currentSession.end) > SESSION_GAP_MS) {
+          if (currentSession) sessions.push(currentSession);
+          currentSession = { start: ev.time, end: ev.time, event_count: 1 };
+        } else {
+          currentSession.end = ev.time;
+          currentSession.event_count++;
+        }
+      }
+      if (currentSession) sessions.push(currentSession);
+      const activeHours = sessions.reduce((sum, s) => sum + (s.end - s.start) / 3600000, 0);
+      return {
+        user_id: u._id,
+        user_name: u.user?.name || 'Unknown',
+        user_team: u.user?.team || '',
+        sessions: sessions.length,
+        total_events: u.events.length,
+        active_hours: Math.round(activeHours * 10) / 10,
+        session_details: sessions.map(s => ({
+          start: s.start,
+          end: s.end,
+          duration_min: Math.round((s.end - s.start) / 60000),
+          event_count: s.event_count
+        }))
+      };
+    }).sort((a, b) => b.total_events - a.total_events);
+
+    // Hourly Activity Heatmap (hour × day_of_week)
+    const hourlyActivity = await ExtensionEvent.aggregate([
+      { $match: matchFilter },
+      {
+        $group: {
+          _id: { hour: { $hour: '$created_at' }, dow: { $dayOfWeek: '$created_at' } },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { '_id.dow': 1, '_id.hour': 1 } }
     ]);
 
     // Build summary
@@ -499,6 +619,19 @@ exports.getAnalytics = async (req, res) => {
       updated: dailyByDate[date]?.product_updated || 0,
     }));
 
+    // Best/Worst days — compute from dailyComparison
+    const bestWorst = {};
+    const metricKeys = ['listed', 'specs', 'updated', 'approved', 'rejected'];
+    for (const key of metricKeys) {
+      const validDays = dailyComparison.filter(d => (d[key] || 0) > 0);
+      if (validDays.length > 0) {
+        const sorted = [...validDays].sort((a, b) => (b[key] || 0) - (a[key] || 0));
+        bestWorst[key] = { best: sorted[0], worst: sorted[sorted.length - 1] };
+      } else {
+        bestWorst[key] = { best: null, worst: null };
+      }
+    }
+
     res.status(200).json({
       status: 'success',
       data: {
@@ -515,10 +648,12 @@ exports.getAnalytics = async (req, res) => {
           spec_added: summary.spec_added || 0,
           total: Object.values(summary).reduce((a, b) => a + b, 0)
         },
-        vendorConversions: {
-          activated: activatedToday,
-          active_sellers: activeSellersToday
-        },
+        qcStats: qcStats[0] || { approved: 0, rejected: 0, bulk_approved: 0, bulk_rejected: 0, individual_approved: 0, individual_rejected: 0 },
+        topProducts,
+        topVendors: topVendorsWithNames,
+        bestWorst,
+        hourlyActivity: hourlyActivity.map(h => ({ hour: h._id.hour, dow: h._id.dow, count: h.count })),
+        userSessions: userSessionsResult,
         dailyComparison,
         dailyEvents,
         dailyPendingCounts,
