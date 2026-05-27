@@ -12,6 +12,21 @@ const LeadActionModal = ({ isOpen, onClose, lead, token, onSuccess }) => {
   const [followUpDate, setFollowUpDate] = useState('');
   const [followUpTime, setFollowUpTime] = useState('');
   const [activityType, setActivityType] = useState('call');
+  const [leadStages, setLeadStages] = useState([]);
+  const [vendorStages, setVendorStages] = useState([]);
+
+  useEffect(() => {
+    if (isOpen && token) {
+      const headers = { Authorization: `Bearer ${token}` };
+      Promise.all([
+        fetch('/api/v1/settings/pipeline?category=lead', { headers }).then(r => r.json()),
+        fetch('/api/v1/settings/pipeline?category=vendor', { headers }).then(r => r.json())
+      ]).then(([leadData, vendorData]) => {
+        setLeadStages(leadData.data?.stages?.map(s => s.name) || []);
+        setVendorStages(vendorData.data?.stages?.map(s => s.name) || []);
+      }).catch(() => {});
+    }
+  }, [isOpen, token]);
 
   useEffect(() => {
     if (lead) {
@@ -55,8 +70,8 @@ const LeadActionModal = ({ isOpen, onClose, lead, token, onSuccess }) => {
     } finally { setLoading(false); }
   };
 
-  const leadStatuses = ['New', 'Contacted', 'Interested', 'Meeting Scheduled'];
-  const vendorStatuses = ['Negotiation', 'Document Pending', 'Verification', 'Onboarding', 'Activated', 'Active Seller', 'Lost', 'Self Registered'];
+  const leadStatuses = leadStages.length > 0 ? leadStages : ['New', 'Contacted', 'Interested', 'Meeting Scheduled'];
+  const vendorStatuses = vendorStages.length > 0 ? vendorStages : ['Negotiation', 'Document Pending', 'Verification', 'Onboarding', 'Activated', 'Active Seller', 'Lost', 'Self Registered'];
   const isVendor = lead.type === 'vendor' || vendorStatuses.includes(lead.lead_status);
   const statuses = isVendor ? vendorStatuses : leadStatuses;
   const activityTypes = [

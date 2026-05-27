@@ -6,17 +6,17 @@ const { requirePermission } = require('../middlewares/permissionMiddleware');
 const router = express.Router();
 
 router.use(authMiddleware.protect);
-router.use(requirePermission('pipeline.manage'));
 
+// GET is available to all authenticated users (for filters/dropdowns)
 router.route('/')
   .get(pipelineStageController.getAllStages)
-  .post(pipelineStageController.createStage);
+  .post(requirePermission('pipeline.manage'), pipelineStageController.createStage);
 
-router.patch('/reorder', pipelineStageController.reorderStages);
+router.patch('/reorder', requirePermission('pipeline.manage'), pipelineStageController.reorderStages);
 
 router.route('/:id')
   .get(pipelineStageController.getStage)
-  .patch(pipelineStageController.updateStage)
-  .delete(pipelineStageController.deleteStage);
+  .patch(requirePermission('pipeline.manage'), pipelineStageController.updateStage)
+  .delete(requirePermission('pipeline.manage'), pipelineStageController.deleteStage);
 
 module.exports = router;

@@ -7,6 +7,7 @@ import { API_URL } from '../config/api';
 const GoalModal = ({ isOpen, onClose, onSuccess, token, goal }) => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [allStages, setAllStages] = useState([]);
   const isEdit = !!goal;
   const [formData, setFormData] = useState({
     title: '', description: '', target_value: 0, unit: 'leads',
@@ -16,9 +17,14 @@ const GoalModal = ({ isOpen, onClose, onSuccess, token, goal }) => {
 
   useEffect(() => {
     if (isOpen && token) {
-      axios.get(`${API_URL}/users`, { headers: { Authorization: `Bearer ${token}` } })
+      const headers = { Authorization: `Bearer ${token}` };
+      axios.get(`${API_URL}/users`, { headers })
         .then(res => setUsers(res.data.data.users))
         .catch(err => console.error('Error fetching users:', err));
+      fetch('/api/v1/settings/pipeline', { headers })
+        .then(r => r.json())
+        .then(d => setAllStages(d.data?.stages || []))
+        .catch(() => {});
     }
   }, [isOpen, token]);
 
@@ -117,8 +123,8 @@ const GoalModal = ({ isOpen, onClose, onSuccess, token, goal }) => {
               <label className="text-xs font-bold text-slate-500">Pipeline Stage</label>
               <select name="pipeline_stage" required value={formData.pipeline_stage} onChange={handleChange} className={inputClass}>
                 <option value="all">All Stages</option>
-                {['New','Contacted','Interested','Meeting Scheduled','Negotiation','Document Pending','Verification','Onboarding','Activated','Active Seller'].map(s =>
-                  <option key={s} value={s}>{s}</option>
+                {allStages.map(s =>
+                  <option key={s._id} value={s.name}>{s.name}</option>
                 )}
               </select>
             </div>

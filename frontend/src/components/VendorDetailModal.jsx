@@ -67,7 +67,7 @@ const VendorDetailModal = ({ isOpen, onClose, vendor, token, user, onSuccess }) 
                 <div className="flex items-center gap-3">
                   <h2 className="text-lg font-extrabold uppercase tracking-tight truncate">{lead?.business_name || 'Vendor'}</h2>
                   {(() => {
-                    const VENDOR_STATUSES = ['Negotiation', 'Document Pending', 'Verification', 'Onboarding', 'Activated', 'Active Seller', 'Lost', 'Self Registered'];
+                    const VENDOR_STATUSES = ['Negotiation', 'Document Pending', 'Verification', 'Onboarding', 'Activated', 'Active Seller', 'Lost', 'Self Registered', 'Proposal Dropped'];
                     const isVendor = VENDOR_STATUSES.includes(lead?.lead_status);
                     return (
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider shrink-0 ${isVendor ? 'bg-red-500/30 text-red-100 border border-red-400/30' : 'bg-blue-500/30 text-blue-100 border border-blue-400/30'}`}>

@@ -13,5 +13,6 @@ router.patch('/followup/:activity_id/cancel', activityController.handleEarlyCall
 router.get('/lead/:leadId', activityController.getActivitiesByLead);
 router.get('/pending-followups', activityController.getPendingFollowups);
 router.get('/today', activityController.getTodayFollowups);
+router.get('/auto-followups', activityController.getAutoFollowUps);
 
 module.exports = router;

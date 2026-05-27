@@ -382,13 +382,114 @@ exports.getTodayFollowups = async (req, res) => {
       };
     }));
 
-    res.status(200).json({ 
-      status: 'success', 
-      results: enriched.length, 
-      data: { followUps: enriched.filter(item => item !== null) } 
+    res.status(200).json({
+      status: 'success',
+      results: enriched.length,
+      data: { followUps: enriched.filter(item => item !== null) }
     });
   } catch (err) {
     console.error('Error in getTodayFollowups:', err);
     res.status(400).json({ status: 'fail', message: err.message });
+  }
+};
+
+// Auto follow-ups: stale leads/vendors needing attention
+exports.getAutoFollowUps = async (req, res) => {
+  try {
+    const now = new Date();
+    const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const excludedStatuses = ['Activated', 'Active Seller', 'Lost'];
+
+    // Base query for role-based filtering
+    const baseFilter = {};
+    if (req.user.role !== 'super_admin' && req.user.role !== 'admin') {
+      baseFilter.assigned_user = req.user._id;
+    } else if (req.user.role === 'admin') {
+      // Admin sees all (same as getTodayFollowups)
+    }
+
+    // Rule 1: Proposal Dropped — no activity in 3 days
+    const proposalDroppedQuery = {
+      ...baseFilter,
+      lead_status: 'Proposal Dropped',
+      $or: [
+        { last_activity_at: { $lt: threeDaysAgo } },
+        { last_activity_at: null, created_at: { $lt: threeDaysAgo } }
+      ]
+    };
+
+    // Rule 2: Stale leads/vendors — no activity in 7 days
+    const staleQuery = {
+      ...baseFilter,
+      lead_status: { $nin: [...excludedStatuses, 'Proposal Dropped'] },
+      $or: [
+        { last_activity_at: { $lt: sevenDaysAgo } },
+        { last_activity_at: null, created_at: { $lt: sevenDaysAgo } }
+      ]
+    };
+
+    // Filter by type if requested
+    const { type } = req.query;
+    if (type && ['lead', 'vendor'].includes(type)) {
+      proposalDroppedQuery.type = type;
+      staleQuery.type = type;
+    }
+
+    const [proposalDroppedLeads, staleLeads] = await Promise.all([
+      Lead.find(proposalDroppedQuery)
+        .populate('assigned_user', 'name email')
+        .sort('last_activity_at')
+        .lean(),
+      Lead.find(staleQuery)
+        .populate('assigned_user', 'name email')
+        .sort('last_activity_at')
+        .lean()
+    ]);
+
+    const formatResult = (lead, autoType) => {
+      const manager = lead.assigned_user;
+      const daysSinceActivity = lead.last_activity_at
+        ? Math.floor((now - new Date(lead.last_activity_at)) / (24 * 60 * 60 * 1000))
+        : Math.floor((now - new Date(lead.created_at)) / (24 * 60 * 60 * 1000));
+
+      return {
+        _id: lead._id,
+        display_business_name: lead.business_name || 'Unknown',
+        display_contact_person: lead.contact_person || 'N/A',
+        display_phone: lead.phone || 'N/A',
+        display_location: lead.location || 'N/A',
+        display_category: lead.category || 'N/A',
+        display_status: lead.lead_status || 'New',
+        display_manager_name: manager?.name || 'Unassigned',
+        display_message: autoType === 'proposal_dropped'
+          ? `Proposal dropped — ${daysSinceActivity} days with no activity. Follow up!`
+          : `No activity in ${daysSinceActivity} days. Needs attention.`,
+        display_scheduled_for: null,
+        display_time: null,
+        is_overdue: true,
+        hasActivity: false,
+        auto_followup_type: autoType,
+        days_since_activity: daysSinceActivity,
+        lead_status: lead.lead_status,
+        manager: manager ? { _id: manager._id, name: manager.name, email: manager.email } : null,
+        assigned_user: manager,
+        lead_id: lead._id
+      };
+    };
+
+    const results = [
+      ...proposalDroppedLeads.map(l => formatResult(l, 'proposal_dropped')),
+      ...staleLeads.map(l => formatResult(l, 'stale_7day'))
+    ];
+
+    res.status(200).json({
+      status: 'success',
+      results: results.length,
+      data: { followUps: results }
+    });
+  } catch (err) {
+    console.error('Error in getAutoFollowUps:', err);
+    res.status(500).json({ status: 'fail', message: err.message });
   }
 };

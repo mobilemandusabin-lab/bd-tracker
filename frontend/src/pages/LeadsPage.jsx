@@ -26,6 +26,7 @@ const StatusBadge = ({ status }) => {
       case 'Document Pending': return 'bg-amber-50 text-amber-600 border-amber-100';
       case 'Activated': return 'bg-red-600 text-white border-red-700';
       case 'Self Registered': return 'bg-purple-50 text-purple-600 border-purple-100';
+      case 'Proposal Dropped': return 'bg-rose-50 text-rose-600 border-rose-100';
       default: return 'bg-slate-50 text-slate-600 border-slate-100';
     }
   };
@@ -71,9 +72,12 @@ const LeadsPage = () => {
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('accepted');
   const [todayFollowups, setTodayFollowups] = useState([]);
+  const [autoFollowups, setAutoFollowups] = useState([]);
+  const [autoFollowupLoading, setAutoFollowupLoading] = useState(false);
   const [followupLoading, setFollowupLoading] = useState(false);
   const [pipelineFilter, setPipelineFilter] = useState('all');
   const [sortOption, setSortOption] = useState('newest');
+  const [pipelineStages, setPipelineStages] = useState([]);
   const leadsContainerRef = useRef(null);
   const desktopSentinelRef = useRef(null);
   const mobileSentinelRef = useRef(null);
@@ -123,6 +127,15 @@ const LeadsPage = () => {
       dispatch(fetchLeads({ page: 1, limit, type: 'lead' }));
     }
   }, [activeTab, dispatch, searchQuery]);
+
+  // Fetch pipeline stages for filter dropdown
+  useEffect(() => {
+    const headers = { Authorization: `Bearer ${token}` };
+    fetch('/api/v1/settings/pipeline?category=lead', { headers })
+      .then(r => r.json())
+      .then(d => setPipelineStages(d.data?.stages || []))
+      .catch(() => {});
+  }, [token]);
 
   // Handle tab changes - reset search
   useEffect(() => {
@@ -222,6 +235,22 @@ const LeadsPage = () => {
     }
   }, [token, user]);
 
+  // Fetch auto follow-ups (stale leads)
+  const fetchAutoFollowups = useCallback(async () => {
+    if (!user || !token) return;
+    setAutoFollowupLoading(true);
+    try {
+      const res = await axios.get(`${API_URL}/activities/auto-followups`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setAutoFollowups(res.data.data?.followUps || []);
+    } catch (err) {
+      console.error('Error fetching auto followups:', err);
+    } finally {
+      setAutoFollowupLoading(false);
+    }
+  }, [token, user]);
+
   // Check if a lead has upcoming follow-ups
   const hasUpcomingFollowup = useCallback((leadId) => {
     return todayFollowups.some(f => f._id === leadId || f.lead_id?._id === leadId);
@@ -230,8 +259,9 @@ const LeadsPage = () => {
   useEffect(() => {
     if (user && token) {
       fetchTodayFollowups();
+      fetchAutoFollowups();
     }
-  }, [fetchTodayFollowups, user, token]);
+  }, [fetchTodayFollowups, fetchAutoFollowups, user, token]);
 
   // Fetch users for bulk upload modal
   useEffect(() => {
@@ -610,13 +640,9 @@ const LeadsPage = () => {
             className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-100 font-bold text-sm"
           >
             <option value="all">All Stages</option>
-            <option value="New">New</option>
-            <option value="Contacted">Contacted</option>
-            <option value="Interested">Interested</option>
-            <option value="Meeting Scheduled">Meeting Scheduled</option>
-            <option value="Negotiation">Negotiation</option>
-            <option value="Lost">Lost</option>
-            <option value="Self Registered">Self Registered</option>
+            {pipelineStages.map(stage => (
+              <option key={stage._id} value={stage.name}>{stage.name}</option>
+            ))}
           </select>
         </div>
         <div className="md:col-span-3">
@@ -630,6 +656,64 @@ const LeadsPage = () => {
           </select>
         </div>
       </div>
+
+      {/* Auto Follow-up Section */}
+      {activeTab === 'followup' && autoFollowups.length > 0 && (
+        <div className="bg-white rounded-2xl border border-amber-200 shadow-sm overflow-hidden">
+          <div className="px-5 py-3 bg-amber-50 border-b border-amber-200 flex items-center gap-2">
+            <AlertCircle size={16} className="text-amber-600" />
+            <h3 className="text-xs font-black text-amber-700 uppercase tracking-wider">Auto Follow-up ({autoFollowups.length})</h3>
+          </div>
+          <div className="overflow-x-auto" style={{ maxHeight: '250px', overflowY: 'auto' }}>
+            <table className="w-full text-left table-fixed">
+              <thead>
+                <tr className="bg-amber-50/50 border-b border-amber-100">
+                  <th className="w-[20%] px-5 py-2 text-[9px] font-black text-amber-600 uppercase tracking-widest">Enterprise</th>
+                  <th className="w-[12%] px-5 py-2 text-[9px] font-black text-amber-600 uppercase tracking-widest">Contact</th>
+                  <th className="w-[10%] px-5 py-2 text-[9px] font-black text-amber-600 uppercase tracking-widest">Pipeline</th>
+                  <th className="w-[30%] px-5 py-2 text-[9px] font-black text-amber-600 uppercase tracking-widest">Reason</th>
+                  <th className="w-[13%] px-5 py-2 text-[9px] font-black text-amber-600 uppercase tracking-widest">Manager</th>
+                  <th className="w-[10%] px-5 py-2 text-[9px] font-black text-amber-600 uppercase tracking-widest text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-amber-50">
+                {autoFollowups.map((item) => (
+                  <tr key={item._id} className="hover:bg-amber-50/40 transition-colors">
+                    <td className="px-5 py-2.5">
+                      <div className="font-bold text-slate-900 text-sm truncate">{item.display_business_name}</div>
+                      <div className="flex items-center gap-1 text-[9px] font-bold text-slate-400 mt-0.5 uppercase truncate">
+                        <MapPin size={8} className="text-amber-400" /> {item.display_location}
+                      </div>
+                    </td>
+                    <td className="px-5 py-2.5">
+                      <div className="text-xs font-bold text-slate-700 truncate">{item.display_contact_person}</div>
+                      <div className="text-[9px] font-bold text-slate-400 uppercase">{item.display_phone}</div>
+                    </td>
+                    <td className="px-5 py-2.5"><StatusBadge status={item.display_status} /></td>
+                    <td className="px-5 py-2.5">
+                      <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-md", item.auto_followup_type === 'proposal_dropped' ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700")}>
+                        {item.auto_followup_type === 'proposal_dropped' ? '3-Day Drop' : '7-Day Stale'}
+                      </span>
+                      <p className="text-[10px] font-medium text-slate-600 mt-1 italic line-clamp-1">{item.display_message}</p>
+                    </td>
+                    <td className="px-5 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <div className="w-5 h-5 bg-amber-500 rounded-md flex items-center justify-center text-[7px] font-black text-white">{item.display_manager_name[0]}</div>
+                        <span className="text-[10px] font-bold text-slate-700 truncate">{item.display_manager_name}</span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-2.5 text-right">
+                      <button onClick={() => { setSelectedLead({ _id: item._id, ...item }); setIsDetailModalOpen(true); }} className="p-1.5 bg-white border border-amber-200 text-amber-400 hover:text-amber-600 hover:border-amber-300 rounded-lg transition-all">
+                        <ExternalLink size={12} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Leads Table */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">

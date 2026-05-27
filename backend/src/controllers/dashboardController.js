@@ -1344,7 +1344,7 @@ exports.getBDTiers = async (req, res) => {
     const dateFilter = { $gte: startDate, $lte: endDate };
 
     // Get all active BD users
-    const bdUsers = await User.find({ role: { $in: ['user', 'admin'] }, status: 'active' })
+    const bdUsers = await User.find({ role: { $ne: 'super_admin' }, status: 'active' })
       .select('name role team').lean();
 
     // Get leads per user (BD leads only, no vendor/listing/QC)

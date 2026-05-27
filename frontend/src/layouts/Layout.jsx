@@ -56,14 +56,20 @@ const Layout = () => {
     {
       label: 'Overview',
       items: [
-        { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-        { to: '/analytics', icon: BarChart3, label: 'Analytics' },
+        ...(hasPermission('dashboard.view')
+          ? [{ to: '/', icon: LayoutDashboard, label: 'Dashboard' }]
+          : []),
+        ...(hasPermission('analytics.view')
+          ? [{ to: '/analytics', icon: BarChart3, label: 'Analytics' }]
+          : []),
       ]
     },
     {
       label: 'Sales Pipeline',
       items: [
-        { to: '/leads', icon: Users, label: 'Leads' },
+        ...(hasPermission('leads.view')
+          ? [{ to: '/leads', icon: Users, label: 'Leads' }]
+          : []),
         ...(hasPermission('vendors.view')
           ? [{ to: '/vendors', icon: Store, label: 'Vendors' }]
           : []),
@@ -75,9 +81,15 @@ const Layout = () => {
     {
       label: 'Performance',
       items: [
-        { to: '/goals', icon: Target, label: 'Goals' },
-        { to: '/bd-tiers', icon: Award, label: 'BD Tiers' },
-        { to: '/tasks', icon: ClipboardList, label: 'Tasks' },
+        ...(hasPermission('goals.view')
+          ? [{ to: '/goals', icon: Target, label: 'Goals' }]
+          : []),
+        ...(hasPermission('bd-tiers.view')
+          ? [{ to: '/bd-tiers', icon: Award, label: 'BD Tiers' }]
+          : []),
+        ...(hasPermission('tasks.view')
+          ? [{ to: '/tasks', icon: ClipboardList, label: 'Tasks' }]
+          : []),
         ...(hasPermission('tickets.view')
           ? [{ to: '/tickets', icon: MessageSquare, label: 'Tickets' }]
           : []),

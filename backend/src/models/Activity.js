@@ -44,6 +44,18 @@ const activitySchema = new mongoose.Schema({
   }
 });
 
+// Update parent Lead's last_activity_at whenever an Activity is saved
+activitySchema.post('save', async function(doc) {
+  if (doc.lead_id) {
+    try {
+      const Lead = require('./Lead');
+      await Lead.findByIdAndUpdate(doc.lead_id, { $set: { last_activity_at: doc.created_at || new Date() } });
+    } catch (err) {
+      // Don't fail the Activity save if Lead update fails
+    }
+  }
+});
+
 // Indexes for common queries
 activitySchema.index({ created_at: -1 });
 activitySchema.index({ user_id: 1, created_at: -1 });

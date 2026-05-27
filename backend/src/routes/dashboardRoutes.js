@@ -27,4 +27,28 @@ router.get('/week-compare', requirePermission('dashboard.week-compare'), dashboa
 router.post('/sync-all', requirePermission('sync.manage'), dashboardController.triggerFullSync);
 router.get('/sync-logs', requirePermission('sync.manage'), dashboardController.getSyncLogs);
 
+// One-time backfill: set last_activity_at from most recent Activity
+router.post('/backfill-last-activity', async (req, res) => {
+  if (req.user.role !== 'super_admin') return res.status(403).json({ status: 'fail', message: 'Super admin only' });
+  const Activity = require('../models/Activity');
+  const Lead = require('../models/Lead');
+  try {
+    const leads = await Lead.find({}).select('_id').lean();
+    let updated = 0;
+    for (const lead of leads) {
+      const lastActivity = await Activity.findOne({ lead_id: lead._id })
+        .sort({ created_at: -1 })
+        .select('created_at')
+        .lean();
+      if (lastActivity) {
+        await Lead.findByIdAndUpdate(lead._id, { $set: { last_activity_at: lastActivity.created_at } });
+        updated++;
+      }
+    }
+    res.json({ status: 'success', message: `Updated ${updated} leads`, updated });
+  } catch (err) {
+    res.status(500).json({ status: 'fail', message: err.message });
+  }
+});
+
 module.exports = router;

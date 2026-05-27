@@ -71,9 +71,13 @@ const leadSchema = new mongoose.Schema({
     enum: [
       'New', 'Contacted', 'Interested', 'Meeting Scheduled',
       'Negotiation', 'Document Pending', 'Verification',
-      'Onboarding', 'Activated', 'Active Seller', 'Lost', 'Self Registered', 'Nepalcan'
+      'Onboarding', 'Activated', 'Active Seller', 'Lost', 'Self Registered', 'Nepalcan', 'Proposal Dropped'
     ],
     default: 'New'
+  },
+  last_activity_at: {
+    type: Date,
+    default: null
   },
   drop_reason: {
     type: String,
@@ -262,6 +266,7 @@ leadSchema.index({ created_at: -1 });
 leadSchema.index({ converted_at: -1 });
 leadSchema.index({ drop_date: -1 });
 leadSchema.index({ updated_at: -1 });
+leadSchema.index({ last_activity_at: -1 });
 leadSchema.index({ business_name: 'text', contact_person: 'text' });
 
 const Lead = mongoose.model('Lead', leadSchema);
