@@ -1,11 +1,12 @@
 const express = require('express');
 const pipelineStageController = require('../controllers/pipelineStageController');
 const authMiddleware = require('../middlewares/authMiddleware');
+const { requirePermission } = require('../middlewares/permissionMiddleware');
 
 const router = express.Router();
 
 router.use(authMiddleware.protect);
-router.use(authMiddleware.restrictTo('super_admin'));
+router.use(requirePermission('pipeline.manage'));
 
 router.route('/')
   .get(pipelineStageController.getAllStages)

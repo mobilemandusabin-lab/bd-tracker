@@ -1239,7 +1239,24 @@ exports.getAnalytics = async (req, res) => {
           currentValue = revData[0]?.total || 0;
           break;
         case 'activated_vendors':
-          currentValue = await Lead.countDocuments({ assigned_user: goalUserId, $or: [{ active_seller: true }, { lead_status: 'Active Seller' }], converted_at: goalDateFilter });
+          const activatedAgg = await Activity.aggregate([
+            { $match: { activity_type: 'status_change', description: { $regex: /→ Activated$/, $not: /Active Seller → Activated/ }, created_at: goalDateFilter } },
+            { $lookup: { from: 'leads', localField: 'lead_id', foreignField: '_id', as: 'lead' } },
+            { $unwind: '$lead' },
+            { $match: { 'lead.assigned_user': goalUserId } },
+            { $count: 'total' }
+          ]);
+          currentValue = activatedAgg[0]?.total || 0;
+          break;
+        case 'active_sellers':
+          const activeSellerAgg = await Activity.aggregate([
+            { $match: { activity_type: 'status_change', description: { $regex: /→ Active Seller$/ }, created_at: goalDateFilter } },
+            { $lookup: { from: 'leads', localField: 'lead_id', foreignField: '_id', as: 'lead' } },
+            { $unwind: '$lead' },
+            { $match: { 'lead.assigned_user': goalUserId } },
+            { $count: 'total' }
+          ]);
+          currentValue = activeSellerAgg[0]?.total || 0;
           break;
         case 'activities':
         case 'calls':
@@ -1630,7 +1647,24 @@ exports.getMyAnalytics = async (req, res) => {
           currentValue = revData[0]?.total || 0;
           break;
         case 'activated_vendors':
-          currentValue = await Lead.countDocuments({ assigned_user: userId, $or: [{ active_seller: true }, { lead_status: 'Active Seller' }], converted_at: goalDateFilter });
+          const myActivatedAgg = await Activity.aggregate([
+            { $match: { activity_type: 'status_change', description: { $regex: /→ Activated$/, $not: /Active Seller → Activated/ }, created_at: goalDateFilter } },
+            { $lookup: { from: 'leads', localField: 'lead_id', foreignField: '_id', as: 'lead' } },
+            { $unwind: '$lead' },
+            { $match: { 'lead.assigned_user': userId } },
+            { $count: 'total' }
+          ]);
+          currentValue = myActivatedAgg[0]?.total || 0;
+          break;
+        case 'active_sellers':
+          const myActiveSellerAgg = await Activity.aggregate([
+            { $match: { activity_type: 'status_change', description: { $regex: /→ Active Seller$/ }, created_at: goalDateFilter } },
+            { $lookup: { from: 'leads', localField: 'lead_id', foreignField: '_id', as: 'lead' } },
+            { $unwind: '$lead' },
+            { $match: { 'lead.assigned_user': userId } },
+            { $count: 'total' }
+          ]);
+          currentValue = myActiveSellerAgg[0]?.total || 0;
           break;
         case 'activities':
         case 'calls':

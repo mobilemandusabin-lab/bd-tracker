@@ -13,7 +13,7 @@ import TasksPage from './pages/TasksPage';
 import TicketsPage from './pages/TicketsPage';
 import NepalcanSalesPage from './pages/NepalcanSalesPage';
 import NepalcanOrderDetailPage from './pages/NepalcanOrderDetailPage';
-import PipelineSettingsPage from './pages/PipelineSettingsPage';
+import SettingsPage from './pages/SettingsPage';
 import VendorManagementPage from './pages/VendorManagementPage';
 import ActiveSellersPage from './pages/ActiveSellersPage';
 import AnalyticsPage from './pages/AnalyticsPage';
@@ -71,43 +71,43 @@ function App() {
             <Route path="leads" element={<LeadsPage />} />
             <Route path="vendors" element={<VendorManagementPage />} />
             <Route path="active-sellers" element={
-              <ProtectedRoute roles={['super_admin', 'admin']}>
+              <ProtectedRoute permissions={['leads.view']}>
                 <ActiveSellersPage />
               </ProtectedRoute>
             } />
             <Route path="goals" element={<GoalsPage />} />
             <Route path="bd-tiers" element={<BDTierPage />} />
             <Route path="users" element={
-              <ProtectedRoute roles={['super_admin', 'admin']}>
+              <ProtectedRoute permissions={['users.view']}>
                 <UsersPage />
               </ProtectedRoute>
             } />
             <Route path="tasks" element={<TasksPage />} />
             <Route path="tickets" element={<TicketsPage />} />
             <Route path="nepalcan-sales" element={
-              <ProtectedRoute roles={['super_admin']}>
+              <ProtectedRoute permissions={['nepalcan.view']}>
                 <NepalcanSalesPage />
               </ProtectedRoute>
             } />
             <Route path="nepalcan-sales/:orderId" element={
-              <ProtectedRoute roles={['super_admin']}>
+              <ProtectedRoute permissions={['nepalcan.view']}>
                 <NepalcanOrderDetailPage />
               </ProtectedRoute>
             } />
-            <Route path="settings/pipeline" element={
-              <ProtectedRoute roles={['super_admin']}>
-                <PipelineSettingsPage />
+            <Route path="settings" element={
+              <ProtectedRoute permissions={['pipeline.manage', 'users.view']}>
+                <SettingsPage />
               </ProtectedRoute>
             } />
             <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="analytics/leaderboard/:bdId" element={<BDLeaderboardDetailPage />} />
             <Route path="extension" element={
-              <ProtectedRoute roles={['super_admin', 'admin']}>
+              <ProtectedRoute permissions={['extension.view']}>
                 <ExtensionPage />
               </ProtectedRoute>
             } />
             <Route path="operations-analytics" element={
-              <ProtectedRoute roles={['super_admin', 'admin']}>
+              <ProtectedRoute permissions={['extension.admin']}>
                 <OperationsAnalyticsPage />
               </ProtectedRoute>
             } />

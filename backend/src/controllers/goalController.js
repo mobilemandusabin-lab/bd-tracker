@@ -83,7 +83,7 @@ exports.getAllGoals = async (req, res) => {
           currentValue = await Lead.countDocuments(goalMatch);
           break;
         case 'conversions':
-          currentValue = await Lead.countDocuments({ ...goalMatch, lead_status: { $in: ['Activated', 'Active Seller'] } });
+          currentValue = await Lead.countDocuments({ assigned_user: goalUserId, lead_status: { $in: ['Activated', 'Active Seller'] }, converted_at: goalDateFilter });
           break;
         case 'revenue':
           const revData = await NepalcanOrder.aggregate([
@@ -96,7 +96,25 @@ exports.getAllGoals = async (req, res) => {
           currentValue = revData[0]?.total || 0;
           break;
         case 'activated_vendors':
-          currentValue = await Lead.countDocuments({ assigned_user: goalUserId, $or: [{ active_seller: true }, { lead_status: 'Active Seller' }], converted_at: goalDateFilter });
+          // Match upgrades to Activated (not downgrades from Active Seller)
+          const activatedAgg = await Activity.aggregate([
+            { $match: { activity_type: 'status_change', description: { $regex: /→ Activated$/, $not: /Active Seller → Activated/ }, created_at: goalDateFilter } },
+            { $lookup: { from: 'leads', localField: 'lead_id', foreignField: '_id', as: 'lead' } },
+            { $unwind: '$lead' },
+            { $match: { 'lead.assigned_user': goalUserId } },
+            { $count: 'total' }
+          ]);
+          currentValue = activatedAgg[0]?.total || 0;
+          break;
+        case 'active_sellers':
+          const activeSellerAgg = await Activity.aggregate([
+            { $match: { activity_type: 'status_change', description: { $regex: /→ Active Seller$/ }, created_at: goalDateFilter } },
+            { $lookup: { from: 'leads', localField: 'lead_id', foreignField: '_id', as: 'lead' } },
+            { $unwind: '$lead' },
+            { $match: { 'lead.assigned_user': goalUserId } },
+            { $count: 'total' }
+          ]);
+          currentValue = activeSellerAgg[0]?.total || 0;
           break;
         case 'activities':
         case 'calls':

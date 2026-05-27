@@ -1,6 +1,7 @@
 const express = require('express');
 const leadController = require('../controllers/leadController');
 const authMiddleware = require('../middlewares/authMiddleware');
+const { requirePermission } = require('../middlewares/permissionMiddleware');
 const multer = require('multer');
 
 const router = express.Router();
@@ -27,26 +28,26 @@ router.use(authMiddleware.protect);
 
 router.route('/')
   .get(leadController.getAllLeads)
-  .post(authMiddleware.restrictTo('super_admin', 'admin', 'user'), leadController.createLead);
+  .post(requirePermission('leads.create'), leadController.createLead);
 
 // Bulk upload route
 router.post('/bulk-upload',
-  authMiddleware.restrictTo('super_admin', 'admin'),
+  requirePermission('leads.upload'),
   upload.single('file'),
   leadController.bulkUploadLeads
 );
 
-router.get('/check-duplicity', leadController.checkDuplicity);
+router.get('/check-duplicity', requirePermission('leads.check-duplicity'), leadController.checkDuplicity);
 router.patch('/:id/accept', leadController.acceptAssignment);
-router.get('/unassigned/nepalcan', authMiddleware.restrictTo('super_admin', 'admin'), leadController.getUnassignedNepalcanLeads);
-router.get('/category/:category', authMiddleware.restrictTo('super_admin', 'admin'), leadController.getLeadsByCategory);
+router.get('/unassigned/nepalcan', requirePermission('leads.view'), leadController.getUnassignedNepalcanLeads);
+router.get('/category/:category', requirePermission('leads.view'), leadController.getLeadsByCategory);
 
 // Active sellers route - must come before /:id route
-router.get('/active-sellers', authMiddleware.restrictTo('super_admin', 'admin'), leadController.getActiveSellers);
+router.get('/active-sellers', requirePermission('leads.view'), leadController.getActiveSellers);
 
 router.route('/:id')
   .get(leadController.getLead)
-  .patch(authMiddleware.restrictTo('super_admin', 'admin', 'user'), leadController.updateLead)
-  .delete(authMiddleware.restrictTo('super_admin', 'admin'), leadController.deleteLead);
+  .patch(requirePermission('leads.update'), leadController.updateLead)
+  .delete(requirePermission('leads.delete'), leadController.deleteLead);
 
 module.exports = router;

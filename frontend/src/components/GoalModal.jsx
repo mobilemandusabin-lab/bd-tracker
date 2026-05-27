@@ -108,6 +108,7 @@ const GoalModal = ({ isOpen, onClose, onSuccess, token, goal }) => {
                 <option value="conversions">Conversions</option>
                 <option value="revenue">Revenue</option>
                 <option value="activated_vendors">Activated Vendors</option>
+                <option value="active_sellers">Active Sellers</option>
                 <option value="activities">Activities</option>
                 <option value="calls">Calls</option>
               </select>

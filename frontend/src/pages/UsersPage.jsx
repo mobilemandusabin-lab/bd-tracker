@@ -13,6 +13,7 @@ import { API_URL } from '../config/api';
 
 const UserModal = ({ isOpen, onClose, onSuccess, token, editingUser = null, currentUser }) => {
   const [loading, setLoading] = useState(false);
+  const [roles, setRoles] = useState([]);
   const [formData, setFormData] = useState({
     name: '', email: '', password: '', role: 'user', team: '', status: 'active'
   });
@@ -31,6 +32,14 @@ const UserModal = ({ isOpen, onClose, onSuccess, token, editingUser = null, curr
       setFormData({ name: '', email: '', password: '', role: 'user', team: '', status: 'active' });
     }
   }, [editingUser, isOpen]);
+
+  useEffect(() => {
+    if (isOpen) {
+      axios.get(`${API_URL}/roles`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(res => setRoles(res.data.data.roles || []))
+        .catch(() => {});
+    }
+  }, [isOpen, token]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -61,14 +70,9 @@ const UserModal = ({ isOpen, onClose, onSuccess, token, editingUser = null, curr
 
   if (!isOpen) return null;
 
-  const availableRoles = [
-    { value: 'user', label: 'User (BD Team)' },
-    { value: 'admin', label: 'Admin (Manager)' },
-    { value: 'viewer', label: 'Viewer (Finance)' },
-    { value: 'super_admin', label: 'Super Admin' }
-  ].filter(role => {
+  const availableRoles = roles.filter(role => {
     if (currentUser?.role === 'admin') {
-      return role.value !== 'super_admin' && role.value !== 'viewer';
+      return role.name !== 'super_admin' && role.name !== 'viewer';
     }
     return true;
   });
@@ -127,7 +131,9 @@ const UserModal = ({ isOpen, onClose, onSuccess, token, editingUser = null, curr
                 className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-100 focus:border-red-300 outline-none font-medium text-sm"
               >
                 {availableRoles.map(role => (
-                  <option key={role.value} value={role.value}>{role.label}</option>
+                  <option key={role.name} value={role.name}>
+                    {role.name.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                  </option>
                 ))}
               </select>
             </div>
@@ -381,7 +387,7 @@ const UsersPage = () => {
             <div className="pt-3 border-t border-slate-50 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Shield size={12} className="text-red-500" />
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{user.role}</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{user.role?.replace('_', ' ')}</span>
                 {user.team && (
                   <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${user.team === 'qc' ? 'bg-blue-50 text-blue-600' : user.team === 'listing' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500'}`}>
                     {user.team}

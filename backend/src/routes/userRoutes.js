@@ -1,17 +1,18 @@
 const express = require('express');
 const userController = require('../controllers/userController');
 const authMiddleware = require('../middlewares/authMiddleware');
+const { requirePermission } = require('../middlewares/permissionMiddleware');
 
 const router = express.Router();
 
 router.use(authMiddleware.protect);
 
 router.route('/')
-  .get(authMiddleware.restrictTo('super_admin', 'admin'), userController.getAllUsers)
-  .post(authMiddleware.restrictTo('super_admin', 'admin'), userController.createUser);
+  .get(requirePermission('users.view'), userController.getAllUsers)
+  .post(requirePermission('users.create'), userController.createUser);
 
 router.route('/:id')
-  .patch(authMiddleware.restrictTo('super_admin', 'admin'), userController.updateUser)
-  .delete(authMiddleware.restrictTo('super_admin', 'admin'), userController.deleteUser);
+  .patch(requirePermission('users.update'), userController.updateUser)
+  .delete(requirePermission('users.delete'), userController.deleteUser);
 
 module.exports = router;

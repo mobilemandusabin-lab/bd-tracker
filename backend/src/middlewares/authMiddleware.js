@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { getPermissionsForRole } = require('./permissionMiddleware');
 
 // Role hierarchy: higher number = more privileges
 const ROLE_HIERARCHY = {
@@ -37,7 +38,11 @@ exports.protect = async (req, res, next) => {
       return res.status(401).json({ status: 'fail', message: 'User no longer exists' });
     }
 
+    // Load user's permissions from their role
+    const userPermissions = await getPermissionsForRole(currentUser.role);
+
     req.user = currentUser;
+    req.userPermissions = userPermissions;
     next();
   } catch (err) {
     res.status(401).json({ status: 'fail', message: 'Invalid token' });

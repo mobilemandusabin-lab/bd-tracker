@@ -20,6 +20,7 @@ const pipelineStageRoutes = require('./routes/pipelineStageRoutes');
 const vendorSnapshotRoutes = require('./routes/vendorSnapshotRoutes');
 const deliveryZoneRoutes = require('./routes/deliveryZoneRoutes');
 const extensionRoutes = require('./routes/extensionRoutes');
+const roleRoutes = require('./routes/roleRoutes');
 
 const app = express();
 
@@ -82,6 +83,7 @@ app.use('/api/v1/settings/pipeline', pipelineStageRoutes);
 app.use('/api/v1/vendor-snapshots', vendorSnapshotRoutes);
 app.use('/api/v1/delivery-zones', deliveryZoneRoutes);
 app.use('/api/v1/extension', extensionRoutes);
+app.use('/api/v1/roles', roleRoutes);
 
 // Vercel cron endpoint — no auth required, protected by CRON_SECRET
 app.get('/api/cron/sync', async (req, res) => {

@@ -138,17 +138,7 @@ const PipelineSettingsPage = () => {
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
-      {/* Header */}
-      <div>
-        <div className="flex items-center gap-2 mb-2">
-          <div className="w-1 h-6 bg-red-600 rounded-full" />
-          <span className="text-[10px] font-bold text-red-600 uppercase tracking-widest">Configuration</span>
-        </div>
-        <h1 className="text-2xl lg:text-3xl font-extrabold text-slate-900 tracking-tight">Pipeline Settings</h1>
-        <p className="text-sm text-slate-500 mt-1">Manage pipeline stages and delivery zones</p>
-      </div>
-
-      {/* Tabs */}
+      {/* Pipeline Tabs */}
       <div className="flex border-b border-slate-200">
         {[
           { key: 'lead', label: 'Lead Stages' },

@@ -311,6 +311,8 @@ exports.updateLead = async (req, res) => {
     // Add logic for tracking activated leads
     if (req.body.lead_status === 'Activated' && previousStatus !== 'Activated') {
       req.body.converted_at = Date.now();
+    } else if (req.body.lead_status === 'Active Seller' && previousStatus !== 'Active Seller') {
+      if (!oldLead.converted_at) req.body.converted_at = Date.now();
     } else if (req.body.lead_status === 'Lost' && previousStatus !== 'Lost') {
       req.body.drop_date = Date.now();
     }

@@ -22,7 +22,7 @@ const goalSchema = new mongoose.Schema({
   unit: {
     type: String,
     default: 'leads',
-    enum: ['leads', 'conversions', 'revenue', 'activities', 'calls', 'activated_vendors']
+    enum: ['leads', 'conversions', 'revenue', 'activities', 'calls', 'activated_vendors', 'active_sellers']
   },
   pipeline_stage: {
     type: String,

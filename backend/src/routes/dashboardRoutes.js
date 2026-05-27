@@ -1,6 +1,7 @@
 const express = require('express');
 const dashboardController = require('../controllers/dashboardController');
 const authMiddleware = require('../middlewares/authMiddleware');
+const { requirePermission } = require('../middlewares/permissionMiddleware');
 
 const router = express.Router();
 
@@ -8,22 +9,22 @@ router.use(authMiddleware.protect);
 
 router.get('/stats', dashboardController.getStats);
 router.get('/lead-growth', dashboardController.getLeadGrowth);
-router.get('/daily-call-report', authMiddleware.restrictTo('super_admin'), dashboardController.getDailyCallReport);
-router.get('/user-performance', authMiddleware.restrictTo('super_admin'), dashboardController.getUserPerformanceReport);
+router.get('/daily-call-report', requirePermission('dashboard.daily-report'), dashboardController.getDailyCallReport);
+router.get('/user-performance', requirePermission('dashboard.user-performance'), dashboardController.getUserPerformanceReport);
 router.get('/bd-tiers', dashboardController.getBDTiers);
-router.get('/bd-leaderboard', authMiddleware.restrictTo('super_admin', 'admin'), dashboardController.getBDLeaderboard);
-router.get('/bd-leaderboard-full', authMiddleware.restrictTo('super_admin', 'admin'), dashboardController.getBDLeaderboardFull);
-router.get('/bd-leaderboard/:bdId/drill-down', authMiddleware.restrictTo('super_admin', 'admin'), dashboardController.getBDDrillDown);
-router.get('/export-report', authMiddleware.restrictTo('super_admin'), dashboardController.getFullExportReport);
-router.post('/bulk-upload', authMiddleware.restrictTo('super_admin'), dashboardController.bulkUploadLeads);
+router.get('/bd-leaderboard', requirePermission('analytics.leaderboard'), dashboardController.getBDLeaderboard);
+router.get('/bd-leaderboard-full', requirePermission('analytics.leaderboard'), dashboardController.getBDLeaderboardFull);
+router.get('/bd-leaderboard/:bdId/drill-down', requirePermission('analytics.leaderboard'), dashboardController.getBDDrillDown);
+router.get('/export-report', requirePermission('analytics.export'), dashboardController.getFullExportReport);
+router.post('/bulk-upload', requirePermission('leads.upload'), dashboardController.bulkUploadLeads);
 router.get('/analytics', dashboardController.getAnalytics);
 router.get('/my-analytics', dashboardController.getMyAnalytics);
-router.get('/day-detail', authMiddleware.restrictTo('super_admin'), dashboardController.getDayDetail);
-router.get('/day-compare', authMiddleware.restrictTo('super_admin'), dashboardController.getDayCompare);
-router.get('/week-compare', authMiddleware.restrictTo('super_admin'), dashboardController.getWeekCompare);
+router.get('/day-detail', requirePermission('dashboard.day-detail'), dashboardController.getDayDetail);
+router.get('/day-compare', requirePermission('dashboard.day-compare'), dashboardController.getDayCompare);
+router.get('/week-compare', requirePermission('dashboard.week-compare'), dashboardController.getWeekCompare);
 
-// Sync endpoints (super_admin only)
-router.post('/sync-all', authMiddleware.restrictTo('super_admin'), dashboardController.triggerFullSync);
-router.get('/sync-logs', authMiddleware.restrictTo('super_admin'), dashboardController.getSyncLogs);
+// Sync endpoints
+router.post('/sync-all', requirePermission('sync.manage'), dashboardController.triggerFullSync);
+router.get('/sync-logs', requirePermission('sync.manage'), dashboardController.getSyncLogs);
 
 module.exports = router;

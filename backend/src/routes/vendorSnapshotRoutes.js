@@ -1,11 +1,12 @@
 const express = require('express');
-const { protect, restrictTo } = require('../middlewares/authMiddleware');
+const { protect } = require('../middlewares/authMiddleware');
+const { requirePermission } = require('../middlewares/permissionMiddleware');
 const vendorSnapshotController = require('../controllers/vendorSnapshotController');
 
 const router = express.Router();
 
 router.use(protect);
-router.use(restrictTo('super_admin'));
+router.use(requirePermission('vendors.snapshots'));
 
 router.get('/', vendorSnapshotController.getSnapshots);
 router.get('/latest', vendorSnapshotController.getLatestSnapshot);

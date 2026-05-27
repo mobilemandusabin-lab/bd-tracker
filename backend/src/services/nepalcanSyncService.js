@@ -351,15 +351,15 @@ for (const vendorData of deliveredOrdersAgg) {
     }
 
     // Retroactively fix orders with null vendor_lead_id by matching vendor name
-    const ordersToFix = await NepalcanOrder.find({ 
-      orderStatus: 'Delivered', 
+    const ordersToFix = await NepalcanOrder.find({
+      orderStatus: 'Delivered',
       vendor_lead_id: null,
       vendor: { $exists: true, $ne: null }
     });
 
     if (ordersToFix.length > 0) {
       console.log(`[Nepalcan Sync] Fixing ${ordersToFix.length} orders with missing vendor_lead_id`);
-      
+
       for (const order of ordersToFix) {
         const vendorLead = await Lead.findOne({
           $or: [
@@ -367,20 +367,20 @@ for (const vendorData of deliveredOrdersAgg) {
             { nepalcanId: order.vendor }
           ]
         });
-        
+
         if (vendorLead) {
           order.vendor_lead_id = vendorLead._id;
           await order.save();
           console.log(`[Nepalcan Sync] Fixed order ${order.orderId} -> ${vendorLead.business_name}`);
         }
       }
-      
+
       // Re-run aggregation now that orders are fixed
       const fixedOrdersAgg = await NepalcanOrder.aggregate([
         { $match: { orderStatus: 'Delivered', vendor_lead_id: { $ne: null } } },
-        { $group: { 
-          _id: '$vendor_lead_id', 
-          deliveredCount: { $sum: 1 }, 
+        { $group: {
+          _id: '$vendor_lead_id',
+          deliveredCount: { $sum: 1 },
           totalAmount: { $sum: '$totalAmount' },
           lastOrderDate: { $max: '$updatedAt' }
         } }
@@ -775,12 +775,33 @@ const leadData = {
         if (existingLead) {
           const previousNepalcanStatus = existingLead.last_nepalcan_status;
           const newNepalcanStatus = leadData.lead_status;
+
+          // Never downgrade from 'Active Seller' to 'Activated' — aggregation handles the upgrade
+          if (existingLead.lead_status === 'Active Seller' && newNepalcanStatus === 'Activated') {
+            // Only update non-status fields, keep Active Seller status
+            existingLead.business_name = leadData.business_name;
+            existingLead.contact_person = leadData.contact_person;
+            existingLead.email = leadData.email;
+            existingLead.phone = leadData.phone;
+            existingLead.location = leadData.location;
+            existingLead.expected_product_count = leadData.expected_product_count;
+            existingLead.is_verified = leadData.is_verified;
+            existingLead.verification_status = leadData.verification_status;
+            existingLead.onboarding_stage = leadData.onboarding_stage;
+            existingLead.activation_status = leadData.activation_status;
+            if (!existingLead.nepalcanId) existingLead.nepalcanId = _id;
+            existingLead.last_nepalcan_status = newNepalcanStatus;
+            await existingLead.save();
+            updated++;
+            continue;
+          }
+
           Object.assign(existingLead, leadData);
           if (!existingLead.nepalcanId) existingLead.nepalcanId = _id;
           existingLead.last_nepalcan_status = newNepalcanStatus;
-          // Track activation date for Daily Report
-          if (newNepalcanStatus === 'Activated' && previousNepalcanStatus !== 'Activated' && !existingLead.converted_at) {
-            existingLead.converted_at = new Date();
+          // Track activation date — only when transitioning from a known prior status (not first sync)
+          if (previousNepalcanStatus && newNepalcanStatus === 'Activated' && previousNepalcanStatus !== 'Activated') {
+            if (!existingLead.converted_at) existingLead.converted_at = new Date();
           }
           await existingLead.save();
 

@@ -1,6 +1,7 @@
 const express = require('express');
 const extensionController = require('../controllers/extensionController');
 const authMiddleware = require('../middlewares/authMiddleware');
+const { requirePermission } = require('../middlewares/permissionMiddleware');
 
 const router = express.Router();
 
@@ -17,12 +18,12 @@ router.post('/heartbeat', extensionController.heartbeat);
 router.post('/activity-log', extensionController.logActivity);
 
 // Admin-only endpoints
-router.delete('/qc-pending', authMiddleware.restrictTo('super_admin', 'admin'), extensionController.deleteQcPending);
-router.delete('/events/user/:userId', authMiddleware.restrictTo('super_admin', 'admin'), extensionController.deleteUserEvents);
-router.delete('/events/:eventId', authMiddleware.restrictTo('super_admin', 'admin'), extensionController.deleteEvent);
-router.get('/devices', authMiddleware.restrictTo('super_admin', 'admin'), extensionController.getDevices);
-router.get('/stats', authMiddleware.restrictTo('super_admin', 'admin'), extensionController.getStats);
-router.get('/analytics', authMiddleware.restrictTo('super_admin', 'admin'), extensionController.getAnalytics);
-router.get('/debug', authMiddleware.restrictTo('super_admin', 'admin'), extensionController.debugEvents);
+router.delete('/qc-pending', requirePermission('extension.admin'), extensionController.deleteQcPending);
+router.delete('/events/user/:userId', requirePermission('extension.admin'), extensionController.deleteUserEvents);
+router.delete('/events/:eventId', requirePermission('extension.admin'), extensionController.deleteEvent);
+router.get('/devices', requirePermission('extension.admin'), extensionController.getDevices);
+router.get('/stats', requirePermission('extension.admin'), extensionController.getStats);
+router.get('/analytics', requirePermission('extension.admin'), extensionController.getAnalytics);
+router.get('/debug', requirePermission('extension.admin'), extensionController.debugEvents);
 
 module.exports = router;

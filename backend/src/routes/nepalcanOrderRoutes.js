@@ -12,13 +12,14 @@ const {
   getMonthlyData,
   checkReturnedOrders
 } = require('../controllers/nepalcanOrderController');
-const { protect, restrictTo } = require('../middlewares/authMiddleware');
+const { protect } = require('../middlewares/authMiddleware');
+const { requirePermission } = require('../middlewares/permissionMiddleware');
 
 const router = express.Router();
 
-// All routes require authentication and super_admin role
+// All routes require authentication and nepalcan permission
 router.use(protect);
-router.use(restrictTo('super_admin'));
+router.use(requirePermission('nepalcan.manage'));
 
 // Sync orders from Nepalcan to database
 router.post('/sync', syncNepalcanOrders);

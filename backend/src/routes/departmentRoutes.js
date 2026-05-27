@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const departmentController = require('../controllers/departmentController');
-const { protect, restrictTo } = require('../middlewares/authMiddleware');
+const { protect } = require('../middlewares/authMiddleware');
+const { requirePermission } = require('../middlewares/permissionMiddleware');
 
 // All routes require authentication
 router.use(protect);
@@ -13,15 +14,15 @@ router.get('/', departmentController.getAllDepartments);
 router.get('/:id/users', departmentController.getDepartmentUsers);
 
 // GET /api/v1/departments/users - Get users for task assignment
-router.get('/users/for-task', restrictTo('admin', 'super_admin'), departmentController.getDepartmentUsersForTask);
+router.get('/users/for-task', requirePermission('departments.view'), departmentController.getDepartmentUsersForTask);
 
-// POST /api/v1/departments - Create department (SuperAdmin only)
-router.post('/', restrictTo('super_admin'), departmentController.createDepartment);
+// POST /api/v1/departments - Create department
+router.post('/', requirePermission('departments.create'), departmentController.createDepartment);
 
-// PUT /api/v1/departments/:id - Update department (SuperAdmin only)
-router.put('/:id', restrictTo('super_admin'), departmentController.updateDepartment);
+// PUT /api/v1/departments/:id - Update department
+router.put('/:id', requirePermission('departments.update'), departmentController.updateDepartment);
 
-// DELETE /api/v1/departments/:id - Delete department (SuperAdmin only)
-router.delete('/:id', restrictTo('super_admin'), departmentController.deleteDepartment);
+// DELETE /api/v1/departments/:id - Delete department
+router.delete('/:id', requirePermission('departments.delete'), departmentController.deleteDepartment);
 
 module.exports = router;

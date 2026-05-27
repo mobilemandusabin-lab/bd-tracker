@@ -47,6 +47,11 @@ const Layout = () => {
   const toggleMobileMenu = () => setIsMobileMenuOpen(!isMobileMenuOpen);
   const closeMobileMenu = () => setIsMobileMenuOpen(false);
 
+  const hasPermission = (perm) => {
+    if (user?.role === 'super_admin') return true;
+    return user?.permissions?.includes(perm) || false;
+  };
+
   const navSections = [
     {
       label: 'Overview',
@@ -59,8 +64,12 @@ const Layout = () => {
       label: 'Sales Pipeline',
       items: [
         { to: '/leads', icon: Users, label: 'Leads' },
-        { to: '/vendors', icon: Store, label: 'Vendors' },
-        { to: '/active-sellers', icon: Package, label: 'Active Sellers' },
+        ...(hasPermission('vendors.view')
+          ? [{ to: '/vendors', icon: Store, label: 'Vendors' }]
+          : []),
+        ...(hasPermission('leads.view')
+          ? [{ to: '/active-sellers', icon: Package, label: 'Active Sellers' }]
+          : []),
       ]
     },
     {
@@ -69,7 +78,7 @@ const Layout = () => {
         { to: '/goals', icon: Target, label: 'Goals' },
         { to: '/bd-tiers', icon: Award, label: 'BD Tiers' },
         { to: '/tasks', icon: ClipboardList, label: 'Tasks' },
-        ...(user?.role === 'admin' || user?.role === 'super_admin'
+        ...(hasPermission('tickets.view')
           ? [{ to: '/tickets', icon: MessageSquare, label: 'Tickets' }]
           : []),
       ]
@@ -77,25 +86,25 @@ const Layout = () => {
     {
       label: 'Management',
       items: [
-        ...(user?.role === 'super_admin' || user?.role === 'admin'
+        ...(hasPermission('users.view')
           ? [{ to: '/users', icon: Settings, label: 'Team' }]
           : []),
-        ...(user?.role === 'super_admin'
-          ? [
-              { to: '/nepalcan-sales', icon: ShoppingBag, label: 'Nepalcan Sales' },
-              { to: '/settings/pipeline', icon: Cog, label: 'Pipeline Settings' },
-            ]
+        ...(hasPermission('nepalcan.view')
+          ? [{ to: '/nepalcan-sales', icon: ShoppingBag, label: 'Nepalcan Sales' }]
+          : []),
+        ...(hasPermission('pipeline.manage')
+          ? [{ to: '/settings', icon: Cog, label: 'Settings' }]
           : []),
       ]
     },
     {
       label: 'Internal Operations',
       items: [
-        ...(user?.role === 'super_admin' || user?.role === 'admin'
-          ? [
-              { to: '/operations-analytics', icon: Activity, label: 'Operations Analytics' },
-              { to: '/extension', icon: Puzzle, label: 'Chrome Extension' },
-            ]
+        ...(hasPermission('extension.admin')
+          ? [{ to: '/operations-analytics', icon: Activity, label: 'Operations Analytics' }]
+          : []),
+        ...(hasPermission('extension.view')
+          ? [{ to: '/extension', icon: Puzzle, label: 'Chrome Extension' }]
           : []),
       ]
     },

@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { getPermissionsForRole } = require('../middlewares/permissionMiddleware');
 
 const signToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -7,15 +8,21 @@ const signToken = (id) => {
   });
 };
 
-const createSendToken = (user, statusCode, res) => {
+const createSendToken = async (user, statusCode, res) => {
   const token = signToken(user._id);
   user.password = undefined;
+
+  // Resolve permissions from role
+  const permissions = await getPermissionsForRole(user.role);
 
   res.status(statusCode).json({
     status: 'success',
     token,
     data: {
-      user
+      user: {
+        ...user.toObject(),
+        permissions
+      }
     }
   });
 };
@@ -29,7 +36,7 @@ exports.signup = async (req, res) => {
       role: req.body.role || 'user'
     });
 
-    createSendToken(newUser, 201, res);
+    await createSendToken(newUser, 201, res);
   } catch (err) {
     res.status(400).json({ status: 'fail', message: err.message });
   }
@@ -58,7 +65,7 @@ exports.login = async (req, res) => {
     user.last_login = Date.now();
     await user.save({ validateBeforeSave: false });
 
-    createSendToken(user, 200, res);
+    await createSendToken(user, 200, res);
   } catch (err) {
     res.status(400).json({ status: 'fail', message: err.message });
   }
@@ -67,11 +74,15 @@ exports.login = async (req, res) => {
 exports.getMe = async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
-    
+    const permissions = req.userPermissions || await getPermissionsForRole(user.role);
+
     res.status(200).json({
       status: 'success',
       data: {
-        user
+        user: {
+          ...user.toObject(),
+          permissions
+        }
       }
     });
   } catch (err) {

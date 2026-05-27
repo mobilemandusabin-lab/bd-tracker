@@ -1,6 +1,7 @@
 const express = require('express');
 const goalController = require('../controllers/goalController');
 const authMiddleware = require('../middlewares/authMiddleware');
+const { requirePermission } = require('../middlewares/permissionMiddleware');
 
 const router = express.Router();
 
@@ -9,12 +10,12 @@ router.use(authMiddleware.protect);
 
 router.route('/')
   .get(goalController.getAllGoals)
-  .post(authMiddleware.restrictTo('super_admin', 'admin'), goalController.createGoal);
+  .post(requirePermission('goals.create'), goalController.createGoal);
 
 router.route('/:id')
   .get(goalController.getGoal)
-  .patch(authMiddleware.restrictTo('super_admin', 'admin'), goalController.updateGoal)
-  .delete(authMiddleware.restrictTo('super_admin', 'admin'), goalController.deleteGoal);
+  .patch(requirePermission('goals.update'), goalController.updateGoal)
+  .delete(requirePermission('goals.delete'), goalController.deleteGoal);
 
 router.route('/:id/progress')
   .patch(goalController.updateGoalProgress);

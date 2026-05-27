@@ -2,6 +2,24 @@ importScripts('config.js');
 
 let authToken = null;
 let deviceId = null;
+let consecutiveAuthFailures = 0;
+const MAX_AUTH_FAILURES = 3;
+
+function handleAuthFailure() {
+  consecutiveAuthFailures++;
+  console.log(`[BD Tracker BG] ⚠️ Auth failure ${consecutiveAuthFailures}/${MAX_AUTH_FAILURES}`);
+  if (consecutiveAuthFailures >= MAX_AUTH_FAILURES) {
+    console.log(`[BD Tracker BG] 🔒 Too many auth failures — logging out`);
+    handleLogout();
+  }
+}
+
+function resetAuthFailures() {
+  if (consecutiveAuthFailures > 0) {
+    console.log(`[BD Tracker BG] ✅ Auth failures reset`);
+    consecutiveAuthFailures = 0;
+  }
+}
 
 chrome.storage.local.get(['authToken', 'deviceId']).then((stored) => {
   authToken = stored.authToken || null;
@@ -164,8 +182,9 @@ async function handleEvent(message) {
 
       if (!response.ok) {
         console.log(`[BD Tracker BG] ❌ session_ended log failed: ${response.status}`);
-        if (response.status === 401) await handleLogout();
+        if (response.status === 401) handleAuthFailure();
       } else {
+        resetAuthFailures();
         console.log(`[BD Tracker BG] ✅ session_ended logged for ${data.product_id}`);
       }
     } catch (err) {
@@ -217,9 +236,10 @@ async function handleEvent(message) {
     if (!response.ok) {
       console.log(`[BD Tracker BG] ❌ Event log failed: ${response.status}`);
       if (response.status === 401) {
-        await handleLogout();
+        handleAuthFailure();
       }
     } else {
+      resetAuthFailures();
       const result = await response.json();
       console.log(`[BD Tracker BG] ✅ Event logged: ${eventType} → ${result?.data?.event_id || 'ok'}`);
     }
@@ -241,6 +261,7 @@ async function handleLogin(message) {
 
     if (response.ok && data.token) {
       authToken = data.token;
+      consecutiveAuthFailures = 0;
       await chrome.storage.local.set({
         authToken: data.token,
         userName: data.data?.user?.name || message.email,
@@ -321,10 +342,10 @@ async function sendHeartbeat() {
 
     if (response.ok) {
       await chrome.storage.local.set({ lastSync: new Date().toISOString() });
+      resetAuthFailures();
       console.log(`[BD Tracker BG] ✅ Heartbeat success`);
     } else if (response.status === 401) {
-      console.log(`[BD Tracker BG] ❌ Heartbeat 401 — logging out`);
-      await handleLogout();
+      handleAuthFailure();
     }
   } catch (err) {
     console.log(`[BD Tracker BG] ❌ Heartbeat error: ${err.message}`);
