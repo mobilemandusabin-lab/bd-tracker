@@ -220,12 +220,12 @@ exports.logActivity = async (req, res) => {
       if (isPost) {
       } else {
         // PUT = check if this is a new listing or an edit
-        // Increased window to 60 minutes to support staff opening many tabs at once
-        const sixtyMinAgo = new Date(Date.now() - 60 * 60 * 1000);
+        // Increased window to 24 hours — staff may create products in bulk then list later
+        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
         const recentCreation = await ExtensionEvent.findOne({
           event_type: 'product_created',
           product_id: effectiveProductId,
-          created_at: { $gte: sixtyMinAgo }
+          created_at: { $gte: oneDayAgo }
         });
         if (recentCreation) {
           // New listing: delete product_created signal, keep listing_created
