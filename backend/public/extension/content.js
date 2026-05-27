@@ -438,8 +438,29 @@
   // ═══════════════════════════════════════════════════════════════
   // EVENT SENDER
   // ═══════════════════════════════════════════════════════════════
+  // LISTING-CREATED DEDUP — suppress spec_added within 15min of listing_created
+  // ═══════════════════════════════════════════════════════════════
+  const recentlyListed = {};  // { product_id: timestamp }
+  const SPEC_SUPPRESS_WINDOW = 15 * 60 * 1000; // 15 minutes
+
+  // ═══════════════════════════════════════════════════════════════
   function sendEvent(eventType, data, reqBody) {
     const productId = data.product_id;
+
+    // Track listing_created timestamp per product
+    if (eventType === 'listing_created' && productId) {
+      recentlyListed[productId] = Date.now();
+      console.log(`[BD Tracker] ⏱️ Listing-created recorded for ${productId}, suppressing spec_added for 15min`);
+    }
+
+    // Suppress spec_added if listing_created just fired for same product
+    if (eventType === 'spec_added' && productId && recentlyListed[productId]) {
+      const elapsed = Date.now() - recentlyListed[productId];
+      if (elapsed < SPEC_SUPPRESS_WINDOW) {
+        console.log(`[BD Tracker] ⏭️ Skipping spec_added for ${productId} — listing_created was ${Math.round(elapsed / 1000)}s ago (within 15min window)`);
+        return;
+      }
+    }
     let enrichedData = { ...data };
 
     // Track the product session
