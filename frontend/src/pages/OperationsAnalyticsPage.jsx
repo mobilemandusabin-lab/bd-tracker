@@ -10,14 +10,16 @@ import {
 import { API_URL } from '../config/api';
 
 const OperationsAnalyticsPage = () => {
-  const { token } = useSelector((state) => state.auth);
+  const { token, user } = useSelector((state) => state.auth);
   const navigate = useNavigate();
   const [analytics, setAnalytics] = useState(null);
   const [period, setPeriod] = useState('7d');
   const [view, setView] = useState('total');
+  const isAdmin = user?.role === 'super_admin' || user?.role === 'admin' || (user?.permissions || []).includes('extension.admin');
   const [loading, setLoading] = useState(true);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [detailModal, setDetailModal] = useState(null);
 
   useEffect(() => {
     fetchAnalytics();
@@ -89,6 +91,24 @@ const OperationsAnalyticsPage = () => {
     }
   };
 
+  const openEventDetails = async (eventType, label, userId) => {
+    setDetailModal({ eventType, label, events: [], loading: true });
+    try {
+      let url = `${API_URL}/extension/analytics/details?event_type=${eventType}`;
+      if (startDate && endDate) {
+        url += `&start_date=${startDate}&end_date=${endDate}`;
+      } else {
+        url += `&period=${period}`;
+      }
+      if (userId) url += `&user_id=${userId}`;
+      const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
+      setDetailModal(prev => ({ ...prev, events: res.data.data.events, loading: false }));
+    } catch (err) {
+      console.error('Error fetching event details:', err);
+      setDetailModal(prev => ({ ...prev, events: [], loading: false }));
+    }
+  };
+
   const eventTypes = [
     { key: 'listing_created', label: 'Products Listed', icon: Package, color: 'blue' },
     { key: 'qc_approved', label: 'QC Approved', icon: ShieldCheck, color: 'emerald' },
@@ -142,6 +162,9 @@ const OperationsAnalyticsPage = () => {
             <span className="text-[10px] font-bold text-red-600 uppercase tracking-widest">Internal Operations</span>
           </div>
           <h1 className="text-2xl lg:text-3xl font-extrabold text-slate-900 tracking-tight">Operations Analytics</h1>
+          {!isAdmin && (
+            <p className="text-xs text-slate-400 mt-1">Showing your own activity only</p>
+          )}
         </div>
         <button
           onClick={() => navigate('/extension')}
@@ -159,7 +182,7 @@ const OperationsAnalyticsPage = () => {
           <div className="flex items-center bg-slate-100 rounded-xl p-1">
             {[
               { key: 'total', label: 'Total', icon: BarChart3 },
-              { key: 'users', label: 'By Users', icon: Users },
+              ...(isAdmin ? [{ key: 'users', label: 'By Users', icon: Users }] : []),
             ].map(({ key, label, icon: Icon }) => (
               <button
                 key={key}
@@ -236,7 +259,7 @@ const OperationsAnalyticsPage = () => {
               const c = colorMap[color];
               return (
                 <div key={key} className="p-4 bg-white rounded-2xl border border-slate-100 shadow-sm text-center relative">
-                  {key === 'qc_pending' && (
+                  {key === 'qc_pending' && isAdmin && (
                     <button
                       onClick={deleteQcPending}
                       className="absolute top-2 right-2 p-1 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
@@ -662,13 +685,15 @@ const OperationsAnalyticsPage = () => {
                             <p className="text-2xl font-extrabold text-slate-900">{user.total}</p>
                             <p className="text-[10px] font-bold text-slate-400 uppercase">Total Events</p>
                           </div>
-                          <button
-                            onClick={() => deleteUserEvents(user.id, user.name)}
-                            className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                            title={`Delete all events for ${user.name}`}
-                          >
-                            <Trash2 size={14} />
-                          </button>
+                          {isAdmin && (
+                            <button
+                              onClick={() => deleteUserEvents(user.id, user.name)}
+                              className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                              title={`Delete all events for ${user.name}`}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
                         </div>
                       </div>
                       <div className="grid grid-cols-5 gap-2 mb-3">
@@ -678,9 +703,9 @@ const OperationsAnalyticsPage = () => {
                           return (
                             <button
                               key={key}
-                              onClick={() => !global && count > 0 && deleteUserEventType(user.id, user.name, key)}
-                              className={`p-2 rounded-lg ${c.bg} text-center ${!global && count > 0 ? 'cursor-pointer hover:ring-2 hover:ring-red-300 transition-all' : ''}`}
-                              title={!global && count > 0 ? `Delete ${label} events for ${user.name}` : ''}
+                              onClick={() => !global && count > 0 && openEventDetails(key, `${user.name} — ${label}`, user.id)}
+                              className={`p-2 rounded-lg ${c.bg} text-center ${!global && count > 0 ? 'cursor-pointer hover:ring-2 hover:ring-blue-300 transition-all' : ''}`}
+                              title={!global && count > 0 ? `View ${label} for ${user.name}` : ''}
                             >
                               <p className={`text-lg font-extrabold ${c.text}`}>{count}</p>
                               <p className="text-[8px] font-bold text-slate-400 uppercase leading-tight mt-0.5">{label.split(' ').pop()}</p>
@@ -732,7 +757,7 @@ const OperationsAnalyticsPage = () => {
                         <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Total</th>
                         <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Sessions</th>
                         <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Active</th>
-                        <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase"></th>
+                        {isAdmin && <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase"></th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
@@ -744,23 +769,29 @@ const OperationsAnalyticsPage = () => {
                               <div className="font-bold text-slate-900">{user.name}</div>
                               {user.team && <div className="text-[10px] text-slate-400 uppercase">{user.team}</div>}
                             </td>
-                            {eventTypes.map(({ key, color, global }) => (
-                              <td key={key} className={`px-4 py-2.5 text-center font-bold ${colorMap[color].text}`}>
+                            {eventTypes.map(({ key, label, color, global }) => (
+                              <td
+                                key={key}
+                                className={`px-4 py-2.5 text-center font-bold ${colorMap[color].text} cursor-pointer hover:underline`}
+                                onClick={() => !global && openEventDetails(key, `${user.name} — ${label}`, user.id)}
+                              >
                                 {global ? (summary[key] ?? '—') : (user[key] || 0)}
                               </td>
                             ))}
                             <td className="px-4 py-2.5 text-center font-bold text-slate-900">{user.total}</td>
                             <td className="px-4 py-2.5 text-center font-bold text-emerald-600">{userSession?.sessions || 0}</td>
                             <td className="px-4 py-2.5 text-center font-bold text-blue-600">{userSession?.active_hours || 0}h</td>
-                            <td className="px-4 py-2.5 text-center">
-                              <button
-                                onClick={() => deleteUserEvents(user.id, user.name)}
-                                className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
-                                title={`Delete all events for ${user.name}`}
-                              >
-                                <Trash2 size={12} />
-                              </button>
-                            </td>
+                            {isAdmin && (
+                              <td className="px-4 py-2.5 text-center">
+                                <button
+                                  onClick={() => deleteUserEvents(user.id, user.name)}
+                                  className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                                  title={`Delete all events for ${user.name}`}
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </td>
+                            )}
                           </tr>
                         );
                       })}
@@ -773,6 +804,49 @@ const OperationsAnalyticsPage = () => {
             <EmptyState />
           )}
         </>
+      )}
+
+      {/* Event Detail Modal */}
+      {detailModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setDetailModal(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col mx-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900">{detailModal.label}</h3>
+                <p className="text-[10px] text-slate-400 mt-0.5">{detailModal.events.length} events</p>
+              </div>
+              <button onClick={() => setDetailModal(null)} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              {detailModal.loading ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="w-6 h-6 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : detailModal.events.length === 0 ? (
+                <p className="text-sm text-slate-400 text-center py-8">No events found</p>
+              ) : (
+                <div className="space-y-2">
+                  {detailModal.events.map((ev, i) => (
+                    <div key={i} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
+                      <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center text-xs font-bold text-slate-400 border border-slate-100">
+                        {i + 1}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-bold text-slate-800 truncate">{ev.product_name || 'Unknown Product'}</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          {new Date(ev.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          {ev.qc_status && <span className="ml-2 capitalize">QC: {ev.qc_status}</span>}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

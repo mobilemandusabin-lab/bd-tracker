@@ -419,7 +419,12 @@ exports.getAnalytics = async (req, res) => {
     }
 
     const matchFilter = { created_at: { $gte: startDate, $lte: endDate } };
-    if (user_id && mongoose.Types.ObjectId.isValid(user_id)) {
+    const isAdmin = req.userPermissions?.includes('extension.admin');
+
+    // Non-admin users can only see their own data
+    if (!isAdmin) {
+      matchFilter.user_id = req.user._id;
+    } else if (user_id && mongoose.Types.ObjectId.isValid(user_id)) {
       matchFilter.user_id = new mongoose.Types.ObjectId(user_id);
     }
 
@@ -710,6 +715,140 @@ exports.getAnalytics = async (req, res) => {
         dailyPendingCounts,
         eventsByUser,
         recentEvents
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+// GET /extension/analytics/details — event details for a given type
+exports.getAnalyticsDetails = async (req, res) => {
+  try {
+    const { event_type, period = '7d', start_date, end_date } = req.query;
+    if (!event_type) return res.status(400).json({ status: 'error', message: 'event_type required' });
+
+    let startDate, endDate;
+    if (start_date) {
+      startDate = new Date(start_date + 'T00:00:00.000Z');
+      endDate = end_date ? new Date(end_date + 'T23:59:59.999Z') : new Date();
+    } else {
+      const now = new Date();
+      endDate = new Date();
+      switch (period) {
+        case 'today': startDate = new Date(now.setHours(0, 0, 0, 0)); break;
+        case '7d': startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000); break;
+        case '30d': startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); break;
+        case '90d': startDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000); break;
+        default: startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      }
+    }
+
+    const { user_id } = req.query;
+    const matchFilter = { event_type, created_at: { $gte: startDate, $lte: endDate } };
+    const isAdmin = req.userPermissions?.includes('extension.admin');
+    if (!isAdmin) {
+      matchFilter.user_id = req.user._id;
+    } else if (user_id && mongoose.Types.ObjectId.isValid(user_id)) {
+      matchFilter.user_id = new mongoose.Types.ObjectId(user_id);
+    }
+
+    const events = await ExtensionEvent.find(matchFilter)
+      .select('product_name product_id created_at vendor_id qc_status metadata')
+      .sort({ created_at: -1 })
+      .limit(200)
+      .lean();
+
+    // For events without product_name, try to look it up from other events on the same product_id
+    const missingNames = events.filter(e => !e.product_name && e.product_id);
+    if (missingNames.length > 0) {
+      const productIds = [...new Set(missingNames.map(e => e.product_id.toString()))];
+      const nameLookup = await ExtensionEvent.aggregate([
+        { $match: { product_id: { $in: productIds.map(id => new mongoose.Types.ObjectId(id)) }, product_name: { $ne: null } } },
+        { $group: { _id: '$product_id', name: { $first: '$product_name' } } }
+      ]);
+      const nameMap = {};
+      for (const item of nameLookup) nameMap[item._id.toString()] = item.name;
+      for (const ev of events) {
+        if (!ev.product_name && ev.product_id) ev.product_name = nameMap[ev.product_id.toString()] || null;
+      }
+    }
+
+    res.status(200).json({ status: 'success', data: { events, count: events.length } });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+// GET /extension/my-stats — lightweight endpoint for extension popup
+// Returns user's own today stats + team leaderboard
+exports.getMyStats = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const userRole = req.user.role;
+    const userTeam = req.user.team;
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const now = new Date();
+
+    // Get user's own event counts
+    const myEvents = await ExtensionEvent.aggregate([
+      { $match: { user_id: userId, created_at: { $gte: todayStart, $lte: now } } },
+      { $group: { _id: '$event_type', count: { $sum: 1 } } }
+    ]);
+
+    const myStats = { listing_created: 0, product_created: 0, product_updated: 0, qc_approved: 0, qc_rejected: 0, spec_added: 0, session_ended: 0 };
+    for (const item of myEvents) {
+      if (myStats.hasOwnProperty(item._id)) myStats[item._id] = item.count;
+    }
+
+    // Build team leaderboard
+    // listing team sees listing users; qc team sees qc users; admin/super_admin see all
+    let teamFilter = {};
+    if (userRole === 'super_admin' || userRole === 'admin') {
+      teamFilter = { team: { $in: ['listing', 'qc'] } };
+    } else if (userTeam === 'listing') {
+      teamFilter = { team: 'listing' };
+    } else if (userTeam === 'qc') {
+      teamFilter = { team: 'qc' };
+    } else {
+      // Other roles only see their own stats
+      teamFilter = { _id: userId };
+    }
+
+    const teamUsers = await User.find(teamFilter).select('name team').lean();
+    const teamUserIds = teamUsers.map(u => u._id);
+
+    // Get all team events for today
+    const teamEvents = await ExtensionEvent.aggregate([
+      { $match: { user_id: { $in: teamUserIds }, created_at: { $gte: todayStart, $lte: now } } },
+      { $group: { _id: { user_id: '$user_id', event_type: '$event_type' }, count: { $sum: 1 } } }
+    ]);
+
+    // Build leaderboard
+    const userMap = {};
+    for (const u of teamUsers) {
+      userMap[u._id.toString()] = { user_id: u._id, name: u.name, team: u.team, listing_created: 0, product_created: 0, product_updated: 0, qc_approved: 0, qc_rejected: 0, spec_added: 0, total: 0 };
+    }
+
+    for (const item of teamEvents) {
+      const uid = item._id.user_id.toString();
+      const eventType = item._id.event_type;
+      if (userMap[uid] && userMap[uid].hasOwnProperty(eventType)) {
+        userMap[uid][eventType] = item.count;
+        userMap[uid].total += item.count;
+      }
+    }
+
+    const leaderboard = Object.values(userMap).sort((a, b) => b.total - a.total);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        my: { ...myStats, total: Object.values(myStats).reduce((a, b) => a + b, 0) },
+        team: leaderboard,
+        user: { name: req.user.name, team: userTeam, role: userRole }
       }
     });
   } catch (err) {

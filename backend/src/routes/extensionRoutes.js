@@ -23,7 +23,9 @@ router.delete('/events/user/:userId', requirePermission('extension.admin'), exte
 router.delete('/events/:eventId', requirePermission('extension.admin'), extensionController.deleteEvent);
 router.get('/devices', requirePermission('extension.admin'), extensionController.getDevices);
 router.get('/stats', requirePermission('extension.admin'), extensionController.getStats);
-router.get('/analytics', requirePermission('extension.admin'), extensionController.getAnalytics);
+router.get('/analytics', extensionController.getAnalytics);
+router.get('/analytics/details', extensionController.getAnalyticsDetails);
+router.get('/my-stats', extensionController.getMyStats);
 router.get('/debug', requirePermission('extension.admin'), extensionController.debugEvents);
 
 module.exports = router;

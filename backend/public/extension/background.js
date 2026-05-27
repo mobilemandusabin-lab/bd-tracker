@@ -266,7 +266,8 @@ async function handleLogin(message) {
         authToken: data.token,
         userName: data.data?.user?.name || message.email,
         userEmail: data.data?.user?.email || message.email,
-        userTeam: data.data?.user?.team || null
+        userTeam: data.data?.user?.team || null,
+        userId: data.data?.user?._id || null
       });
 
       startHeartbeat();

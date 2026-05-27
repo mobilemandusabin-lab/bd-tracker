@@ -107,7 +107,7 @@ function App() {
               </ProtectedRoute>
             } />
             <Route path="operations-analytics" element={
-              <ProtectedRoute permissions={['extension.admin']}>
+              <ProtectedRoute permissions={['extension.admin', 'extension.view']}>
                 <OperationsAnalyticsPage />
               </ProtectedRoute>
             } />

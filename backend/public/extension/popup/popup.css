@@ -92,6 +92,220 @@ body {
   background: #22c55e;
 }
 
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 2px;
+  background: #f1f5f9;
+  border-radius: 10px;
+  padding: 3px;
+  margin-bottom: 12px;
+}
+
+.tab {
+  flex: 1;
+  padding: 7px 12px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.tab.active {
+  background: #ffffff;
+  color: #1e293b;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+.tab:hover:not(.active) {
+  color: #334155;
+}
+
+/* Tab content */
+.tab-content {
+  display: none;
+  margin-bottom: 12px;
+}
+
+.tab-content.active {
+  display: block;
+}
+
+/* Stats Grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.stat-card {
+  padding: 10px;
+  background: #f8fafc;
+  border-radius: 10px;
+  text-align: center;
+}
+
+.stat-card.accent {
+  background: #fef3c7;
+}
+
+.stat-value {
+  font-size: 20px;
+  font-weight: 800;
+  color: #1e293b;
+  line-height: 1.2;
+}
+
+.stat-card.accent .stat-value {
+  color: #92400e;
+}
+
+.stat-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 2px;
+}
+
+.stat-card.accent .stat-label {
+  color: #b45309;
+}
+
+.stat-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border-radius: 10px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.stat-total-value {
+  font-size: 14px;
+  font-weight: 800;
+  color: #1e293b;
+}
+
+/* Team List */
+.loading {
+  text-align: center;
+  padding: 20px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.team-list {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.team-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.team-list::-webkit-scrollbar-thumb {
+  background: #e2e8f0;
+  border-radius: 4px;
+}
+
+.team-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  margin-bottom: 4px;
+  transition: background 0.1s;
+}
+
+.team-user:hover {
+  background: #f8fafc;
+}
+
+.team-user.is-me {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+}
+
+.team-user-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 11px;
+  color: white;
+  flex-shrink: 0;
+}
+
+.team-user-avatar.listing {
+  background: #3b82f6;
+}
+
+.team-user-avatar.qc {
+  background: #8b5cf6;
+}
+
+.team-user-avatar.admin {
+  background: #dc2626;
+}
+
+.team-user-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.team-user-name {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.team-user-team {
+  font-size: 10px;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.team-user-stats {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.team-stat {
+  text-align: center;
+}
+
+.team-stat-value {
+  font-size: 13px;
+  font-weight: 800;
+  color: #1e293b;
+  line-height: 1;
+}
+
+.team-stat-label {
+  font-size: 8px;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Info Grid */
 .info-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

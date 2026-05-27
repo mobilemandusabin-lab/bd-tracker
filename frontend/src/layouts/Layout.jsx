@@ -112,7 +112,7 @@ const Layout = () => {
     {
       label: 'Internal Operations',
       items: [
-        ...(hasPermission('extension.admin')
+        ...(hasPermission('extension.admin') || hasPermission('extension.view')
           ? [{ to: '/operations-analytics', icon: Activity, label: 'Operations Analytics' }]
           : []),
         ...(hasPermission('extension.view')

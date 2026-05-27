@@ -38,9 +38,47 @@
         <div class="user-name" id="userName">User</div>
         <div class="user-status">
           <span class="status-dot active"></span>
-          <span>Active</span>
+          <span id="userRole">Active</span>
         </div>
       </div>
+    </div>
+
+    <!-- Tab Navigation -->
+    <div class="tabs">
+      <button class="tab active" data-tab="myStats">My Stats</button>
+      <button class="tab" data-tab="teamTab">Team</button>
+    </div>
+
+    <!-- My Stats Tab -->
+    <div id="myStats" class="tab-content active">
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value" id="myListings">-</div>
+          <div class="stat-label">Listings</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="myProducts">-</div>
+          <div class="stat-label">Products</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="myUpdates">-</div>
+          <div class="stat-label">Updates</div>
+        </div>
+        <div class="stat-card accent">
+          <div class="stat-value" id="myQc">-</div>
+          <div class="stat-label">QC Approved</div>
+        </div>
+      </div>
+      <div class="stat-total">
+        <span>Total events today:</span>
+        <span class="stat-total-value" id="myTotal">-</span>
+      </div>
+    </div>
+
+    <!-- Team Tab -->
+    <div id="teamTab" class="tab-content">
+      <div id="teamLoading" class="loading">Loading team data...</div>
+      <div id="teamList" class="team-list"></div>
     </div>
 
     <div class="info-grid">
@@ -73,6 +111,7 @@
     </div>
   </div>
 
+  <script src="../config.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
