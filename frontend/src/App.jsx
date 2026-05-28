@@ -21,6 +21,7 @@ import BDTierPage from './pages/BDTierPage';
 import BDLeaderboardDetailPage from './pages/BDLeaderboardDetailPage';
 import ExtensionPage from './pages/ExtensionPage';
 import OperationsAnalyticsPage from './pages/OperationsAnalyticsPage';
+import OperationalGoalsPage from './pages/OperationalGoalsPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import InstallPrompt from './components/InstallPrompt';
 
@@ -109,6 +110,11 @@ function App() {
             <Route path="operations-analytics" element={
               <ProtectedRoute permissions={['extension.admin', 'extension.view']}>
                 <OperationsAnalyticsPage />
+              </ProtectedRoute>
+            } />
+            <Route path="operational-goals" element={
+              <ProtectedRoute permissions={['extension.view']}>
+                <OperationalGoalsPage />
               </ProtectedRoute>
             } />
           </Route>

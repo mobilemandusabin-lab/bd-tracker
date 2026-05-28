@@ -9,6 +9,8 @@ import VendorDetailModal from '../components/VendorDetailModal';
 import LeadActionModal from '../components/LeadActionModal';
 import { cn } from '../utils/cn';
 import { API_URL } from '../config/api';
+import { useWhatsApp } from '../hooks/useWhatsApp';
+import WhatsAppModal from '../components/WhatsAppModal';
 
 const StatusBadge = ({ status }) => {
   const getColors = (s) => {
@@ -60,6 +62,7 @@ const VendorManagementPage = () => {
   const vendorsContainerRef = useRef(null);
   const desktopSentinelRef = useRef(null);
   const mobileSentinelRef = useRef(null);
+  const { showModal: showWAModal, whatsappType, openWhatsApp, handleSelect: handleWASelect, resetType: resetWAType, closeModal: closeWAModal } = useWhatsApp();
 
   const VENDOR_STATUSES = ['Negotiation', 'Document Pending', 'Verification', 'Onboarding', 'Activated', 'Active Seller', 'Lost', 'Self Registered', 'Proposal Dropped'];
 
@@ -76,6 +79,9 @@ const VendorManagementPage = () => {
       params.type = 'vendor';
     }
     if (searchQuery) params.search = searchQuery;
+    if (sortOption === 'products_desc' || sortOption === 'products_asc') {
+      params.sort_by = sortOption;
+    }
 
     switch (activeTab) {
       case 'verified':
@@ -95,52 +101,56 @@ const VendorManagementPage = () => {
         break;
     }
     return params;
-  }, [activeTab, searchQuery]);
+  }, [activeTab, searchQuery, sortOption]);
 
   const refetchVendors = useCallback(() => {
     dispatch(resetVendors());
+    const sortParam = (sortOption === 'products_desc' || sortOption === 'products_asc') ? { sort_by: sortOption } : {};
     if (activeTab === 'active') {
-      dispatch(fetchActiveSellers({ page: 1, limit: 25, search: searchQuery }));
+      dispatch(fetchActiveSellers({ page: 1, limit: 25, search: searchQuery, ...sortParam }));
     } else {
       dispatch(fetchVendors(buildParams(1, 25)));
     }
-  }, [dispatch, activeTab, buildParams, searchQuery]);
+  }, [dispatch, activeTab, buildParams, searchQuery, sortOption]);
 
-  // Refetch when tab changes
+  // Refetch when tab or sort changes
   useEffect(() => {
     setSearchTerm('');
     setSearchQuery('');
     dispatch(resetVendors());
+    const sortParam = (sortOption === 'products_desc' || sortOption === 'products_asc') ? { sort_by: sortOption } : {};
     if (activeTab === 'active') {
-      dispatch(fetchActiveSellers({ page: 1, limit: 25 }));
+      dispatch(fetchActiveSellers({ page: 1, limit: 25, ...sortParam }));
     } else {
       dispatch(fetchVendors(buildParams(1, 25)));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, dispatch]);
+  }, [activeTab, sortOption, dispatch]);
 
   const handleSearch = useCallback(() => {
     setSearchQuery(searchTerm);
     dispatch(resetVendors());
+    const sortParam = (sortOption === 'products_desc' || sortOption === 'products_asc') ? { sort_by: sortOption } : {};
     if (activeTab === 'active') {
-      dispatch(fetchActiveSellers({ page: 1, limit: 25, search: searchTerm }));
+      dispatch(fetchActiveSellers({ page: 1, limit: 25, search: searchTerm, ...sortParam }));
     } else {
       const params = buildParams(1, 25);
       if (searchTerm) params.search = searchTerm;
       dispatch(fetchVendors(params));
     }
-  }, [dispatch, searchTerm, buildParams, activeTab]);
+  }, [dispatch, searchTerm, buildParams, activeTab, sortOption]);
 
   const handleClearSearch = useCallback(() => {
     setSearchTerm('');
     setSearchQuery('');
     dispatch(resetVendors());
+    const sortParam = (sortOption === 'products_desc' || sortOption === 'products_asc') ? { sort_by: sortOption } : {};
     if (activeTab === 'active') {
-      dispatch(fetchActiveSellers({ page: 1, limit: 25 }));
+      dispatch(fetchActiveSellers({ page: 1, limit: 25, ...sortParam }));
     } else {
       dispatch(fetchVendors(buildParams(1, 25)));
     }
-  }, [dispatch, buildParams, activeTab]);
+  }, [dispatch, buildParams, activeTab, sortOption]);
 
   // Fetch today's vendor follow-ups
   const fetchTodayFollowups = useCallback(async () => {
@@ -224,12 +234,13 @@ const VendorManagementPage = () => {
 
   const loadMoreVendors = useCallback(() => {
     if (reduxLoadingMore || !hasMore) return;
+    const sortParam = (sortOption === 'products_desc' || sortOption === 'products_asc') ? { sort_by: sortOption } : {};
     if (activeTab === 'active') {
-      dispatch(fetchActiveSellers({ page: currentPage + 1, limit: 25, search: searchQuery }));
+      dispatch(fetchActiveSellers({ page: currentPage + 1, limit: 25, search: searchQuery, ...sortParam }));
     } else {
       dispatch(fetchVendors(buildParams(currentPage + 1, 25)));
     }
-  }, [reduxLoadingMore, hasMore, currentPage, dispatch, buildParams, activeTab, searchQuery]);
+  }, [reduxLoadingMore, hasMore, currentPage, dispatch, buildParams, activeTab, searchQuery, sortOption]);
 
   // Use correct data source based on active tab
   const displayVendors = activeTab === 'active' ? activeSellerItems : allVendors;
@@ -273,7 +284,7 @@ const VendorManagementPage = () => {
   };
   const handleAction = (vendor) => { setSelectedVendor(vendor); setIsActionModalOpen(true); };
 
-  // Sort client-side (server returns sorted by created_at desc)
+  // Sort client-side only for date sorts; product sorts are server-side
   const sortedVendors = [...displayVendors].sort((a, b) => {
     if (sortOption === 'newest') return new Date(b.created_at) - new Date(a.created_at);
     if (sortOption === 'oldest') return new Date(a.created_at) - new Date(b.created_at);
@@ -377,6 +388,7 @@ const VendorManagementPage = () => {
         </div>
         <select value={sortOption} onChange={(e) => setSortOption(e.target.value)} className="px-4 py-3 bg-white border border-slate-200 rounded-xl font-bold text-sm focus:ring-2 focus:ring-red-200 focus:border-red-400">
           <option value="newest">Newest First</option><option value="oldest">Oldest First</option>
+          <option value="products_desc">Most Products</option><option value="products_asc">Least Products</option>
         </select>
       </div>
 
@@ -565,7 +577,7 @@ const VendorManagementPage = () => {
                   <td className="px-5 py-3 text-right">
                     <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
                       <a href={`tel:${vendor.phone}`} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all" title="Call"><Phone size={14} /></a>
-                      <a href={`https://wa.me/${vendor.phone?.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all" title="WhatsApp"><MessageCircle size={14} /></a>
+                      <button onClick={() => openWhatsApp(vendor.phone)} className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all" title="WhatsApp"><MessageCircle size={14} /></button>
                       <button onClick={() => handleDetail(vendor)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all" title="View Details"><ExternalLink size={14} /></button>
                       <button onClick={() => handleAction(vendor)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all" title="Actions"><MoreVertical size={14} /></button>
                     </div>

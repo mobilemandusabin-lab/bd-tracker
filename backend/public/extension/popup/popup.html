@@ -43,10 +43,9 @@
       </div>
     </div>
 
-    <!-- Tab Navigation -->
+    <!-- Tab Navigation (My Stats only — Team tab removed) -->
     <div class="tabs">
       <button class="tab active" data-tab="myStats">My Stats</button>
-      <button class="tab" data-tab="teamTab">Team</button>
     </div>
 
     <!-- My Stats Tab -->
@@ -55,30 +54,19 @@
         <div class="stat-card">
           <div class="stat-value" id="myListings">-</div>
           <div class="stat-label">Listings</div>
+          <div class="stat-target" id="targetListings"></div>
         </div>
         <div class="stat-card">
-          <div class="stat-value" id="myProducts">-</div>
-          <div class="stat-label">Products</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" id="myUpdates">-</div>
-          <div class="stat-label">Updates</div>
+          <div class="stat-value" id="mySpecs">-</div>
+          <div class="stat-label">Spec Added</div>
+          <div class="stat-target" id="targetSpecs"></div>
         </div>
         <div class="stat-card accent">
           <div class="stat-value" id="myQc">-</div>
           <div class="stat-label">QC Approved</div>
+          <div class="stat-target" id="targetQc"></div>
         </div>
       </div>
-      <div class="stat-total">
-        <span>Total events today:</span>
-        <span class="stat-total-value" id="myTotal">-</span>
-      </div>
-    </div>
-
-    <!-- Team Tab -->
-    <div id="teamTab" class="tab-content">
-      <div id="teamLoading" class="loading">Loading team data...</div>
-      <div id="teamList" class="team-list"></div>
     </div>
 
     <div class="info-grid">

@@ -178,6 +178,18 @@ body {
   color: #b45309;
 }
 
+.stat-target {
+  font-size: 9px;
+  font-weight: 600;
+  color: #94a3b8;
+  margin-top: 2px;
+  min-height: 11px;
+}
+
+.stat-card.accent .stat-target {
+  color: #b45309;
+}
+
 .stat-total {
   display: flex;
   justify-content: space-between;
@@ -193,116 +205,6 @@ body {
   font-size: 14px;
   font-weight: 800;
   color: #1e293b;
-}
-
-/* Team List */
-.loading {
-  text-align: center;
-  padding: 20px;
-  font-size: 12px;
-  color: #94a3b8;
-}
-
-.team-list {
-  max-height: 260px;
-  overflow-y: auto;
-}
-
-.team-list::-webkit-scrollbar {
-  width: 4px;
-}
-
-.team-list::-webkit-scrollbar-thumb {
-  background: #e2e8f0;
-  border-radius: 4px;
-}
-
-.team-user {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  margin-bottom: 4px;
-  transition: background 0.1s;
-}
-
-.team-user:hover {
-  background: #f8fafc;
-}
-
-.team-user.is-me {
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
-}
-
-.team-user-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 11px;
-  color: white;
-  flex-shrink: 0;
-}
-
-.team-user-avatar.listing {
-  background: #3b82f6;
-}
-
-.team-user-avatar.qc {
-  background: #8b5cf6;
-}
-
-.team-user-avatar.admin {
-  background: #dc2626;
-}
-
-.team-user-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.team-user-name {
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.team-user-team {
-  font-size: 10px;
-  color: #94a3b8;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.team-user-stats {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.team-stat {
-  text-align: center;
-}
-
-.team-stat-value {
-  font-size: 13px;
-  font-weight: 800;
-  color: #1e293b;
-  line-height: 1;
-}
-
-.team-stat-label {
-  font-size: 8px;
-  color: #94a3b8;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
 }
 
 /* Info Grid */
@@ -396,3 +298,70 @@ body {
 .btn-ghost:hover {
   color: #dc2626;
 }
+
+/* Goals Section */
+.goals-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.goals-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+}
+
+.goal-row {
+  margin-bottom: 8px;
+}
+
+.goal-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.goal-label span:first-child {
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.goal-values {
+  font-size: 11px;
+  font-weight: 800;
+  color: #1e293b;
+}
+
+.goal-bar-bg {
+  height: 6px;
+  background: #f1f5f9;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.goal-bar {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.goal-bar.goal-red { background: #ef4444; }
+.goal-bar.goal-amber { background: #f59e0b; }
+.goal-bar.goal-green { background: #10b981; }
+
+.goal-pct {
+  font-size: 9px;
+  font-weight: 700;
+  text-align: right;
+  margin-top: 2px;
+}
+
+.goal-pct.goal-red-text { color: #ef4444; }
+.goal-pct.goal-amber-text { color: #f59e0b; }
+.goal-pct.goal-green-text { color: #10b981; }

@@ -226,10 +226,15 @@ exports.getAllLeads = async (req, res) => {
     const limit = parseInt(req.query.limit) || 0; // 0 means no limit (for backward compatibility)
     const skip = limit > 0 ? (page - 1) * limit : 0;
 
+    // Sort
+    let sortOption = { created_at: -1 };
+    if (req.query.sort_by === 'products_desc') sortOption = { expected_product_count: -1, created_at: -1 };
+    else if (req.query.sort_by === 'products_asc') sortOption = { expected_product_count: 1, created_at: -1 };
+
     let leadsQuery = Lead.find(query)
       .populate('assigned_user', 'name email role')
       .populate('creator_id', 'name email role')
-      .sort({ created_at: -1 })
+      .sort(sortOption)
       .lean();
 
     // Apply pagination only if limit is specified
@@ -590,6 +595,13 @@ exports.getActiveSellers = async (req, res) => {
         searchRegex.test(s.phone || '') ||
         searchRegex.test(s.location || '')
       );
+    }
+
+    // Sort by product count if requested
+    if (req.query.sort_by === 'products_desc') {
+      filteredSellers.sort((a, b) => (b.total_products_listed || 0) - (a.total_products_listed || 0));
+    } else if (req.query.sort_by === 'products_asc') {
+      filteredSellers.sort((a, b) => (a.total_products_listed || 0) - (b.total_products_listed || 0));
     }
 
     // Calculate totals from full unfiltered set

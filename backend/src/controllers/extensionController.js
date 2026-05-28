@@ -843,14 +843,483 @@ exports.getMyStats = async (req, res) => {
 
     const leaderboard = Object.values(userMap).sort((a, b) => b.total - a.total);
 
+    // Fetch goals — try user's team first, then fallback to any goal for this user
+    const OperationalGoal = require('../models/OperationalGoal');
+    let goals = [];
+    if (userTeam && ['listing', 'qc'].includes(userTeam)) {
+      goals = await OperationalGoal.find({
+        team: userTeam,
+        $or: [{ user_id: null }, { user_id: userId }]
+      }).lean();
+    }
+    // Fallback: find any goal for this user (user-specific overrides)
+    if (!goals.length) {
+      goals = await OperationalGoal.find({
+        $or: [{ user_id: userId }]
+      }).lean();
+    }
+    // Last resort: find any team default
+    if (!goals.length) {
+      goals = await OperationalGoal.find({ user_id: null }).lean();
+    }
+
+    const teamGoal = goals.find(g => !g.user_id);
+    const userGoal = goals.find(g => g.user_id && g.user_id.toString() === userId.toString());
+    const effective = userGoal || teamGoal;
+
+    console.log('[my-stats] userTeam:', userTeam, 'goals found:', goals.length, 'effective:', effective ? { listing_target: effective.listing_target, spec_target: effective.spec_target, qc_target: effective.qc_target } : null);
+
+    // Show goals if a goal document exists (team default or per-user override)
+    const goalsData = effective ? {
+      listing_target: effective.listing_target || 0,
+      spec_target: effective.spec_target || 0,
+      qc_target: effective.qc_enabled ? (effective.qc_target || 0) : 0,
+      qc_enabled: effective.qc_enabled || false,
+      listing_actual: myStats.listing_created || 0,
+      spec_actual: myStats.spec_added || 0,
+      qc_actual: effective.qc_enabled ? ((myStats.qc_approved || 0) + (myStats.qc_rejected || 0)) : 0
+    } : null;
+
     res.status(200).json({
       status: 'success',
       data: {
         my: { ...myStats, total: Object.values(myStats).reduce((a, b) => a + b, 0) },
         team: leaderboard,
-        user: { name: req.user.name, team: userTeam, role: userRole }
+        user: { name: req.user.name, team: userTeam, role: userRole },
+        goals: goalsData
       }
     });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+// GET /extension/operational-goals — Get operational goals
+exports.getOperationalGoals = async (req, res) => {
+  try {
+    const OperationalGoal = require('../models/OperationalGoal');
+    const userRole = req.user.role;
+    const userTeam = req.user.team;
+    const isAdmin = userRole === 'super_admin' || userRole === 'admin' || req.userPermissions?.includes('extension.admin');
+
+    let team = req.query.team;
+    if (!isAdmin) {
+      team = userTeam;
+    }
+    if (!team || !['listing', 'qc'].includes(team)) {
+      return res.status(400).json({ status: 'fail', message: 'Invalid or missing team parameter' });
+    }
+
+    const goals = await OperationalGoal.find({ team })
+      .populate('user_id', 'name team')
+      .populate('updated_by', 'name')
+      .lean();
+
+    const teamDefault = goals.find(g => !g.user_id);
+    const overrides = goals.filter(g => g.user_id);
+
+    res.status(200).json({
+      status: 'success',
+      data: { team, team_default: teamDefault || null, overrides }
+    });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+// PUT /extension/operational-goals — Create/update a goal
+exports.updateOperationalGoal = async (req, res) => {
+  try {
+    const OperationalGoal = require('../models/OperationalGoal');
+    const { team, user_id, listing_target, spec_target, qc_target, qc_enabled } = req.body;
+
+    if (!team || !['listing', 'qc'].includes(team)) {
+      return res.status(400).json({ status: 'fail', message: 'Invalid team' });
+    }
+
+    const query = { team, user_id: user_id || null };
+    const update = {
+      listing_target: listing_target || 0,
+      spec_target: spec_target || 0,
+      qc_target: qc_target || 0,
+      qc_enabled: qc_enabled || false,
+      updated_by: req.user._id,
+      updated_at: new Date()
+    };
+
+    const goal = await OperationalGoal.findOneAndUpdate(query, update, {
+      new: true, upsert: true, runValidators: true
+    });
+
+    res.status(200).json({ status: 'success', data: goal });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+// DELETE /extension/operational-goals/:id — Delete a per-user override
+exports.deleteOperationalGoal = async (req, res) => {
+  try {
+    const OperationalGoal = require('../models/OperationalGoal');
+    const goal = await OperationalGoal.findById(req.params.id);
+    if (!goal) return res.status(404).json({ status: 'fail', message: 'Goal not found' });
+    if (!goal.user_id) return res.status(400).json({ status: 'fail', message: 'Cannot delete team default' });
+    await goal.deleteOne();
+    res.status(200).json({ status: 'success', message: 'Override deleted' });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+// GET /extension/operational-goals — Get goals for a team
+exports.getOperationalGoals = async (req, res) => {
+  try {
+    const OperationalGoal = require('../models/OperationalGoal');
+    const userRole = req.user.role;
+    const userTeam = req.user.team;
+    const isAdmin = userRole === 'super_admin' || userRole === 'admin' || req.userPermissions?.includes('extension.admin');
+
+    let team = req.query.team;
+    if (!isAdmin) {
+      team = userTeam;
+    }
+    if (!team || !['listing', 'qc'].includes(team)) {
+      return res.status(400).json({ status: 'fail', message: 'Invalid or missing team parameter' });
+    }
+
+    const goals = await OperationalGoal.find({ team })
+      .populate('user_id', 'name team')
+      .populate('updated_by', 'name')
+      .lean();
+
+    const teamDefault = goals.find(g => !g.user_id);
+    const overrides = goals.filter(g => g.user_id);
+
+    res.status(200).json({
+      status: 'success',
+      data: { team, team_default: teamDefault || null, overrides }
+    });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+// PUT /extension/operational-goals — Create/update a goal
+exports.updateOperationalGoal = async (req, res) => {
+  try {
+    const OperationalGoal = require('../models/OperationalGoal');
+    const { team, user_id, listing_target, spec_target, qc_target, qc_enabled } = req.body;
+
+    if (!team || !['listing', 'qc'].includes(team)) {
+      return res.status(400).json({ status: 'fail', message: 'Invalid team' });
+    }
+
+    const query = { team, user_id: user_id || null };
+    const update = {
+      listing_target: listing_target || 0,
+      spec_target: spec_target || 0,
+      qc_target: qc_target || 0,
+      qc_enabled: qc_enabled || false,
+      updated_by: req.user._id,
+      updated_at: new Date()
+    };
+
+    const goal = await OperationalGoal.findOneAndUpdate(query, update, {
+      new: true, upsert: true, runValidators: true
+    });
+
+    res.status(200).json({ status: 'success', data: goal });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+// DELETE /extension/operational-goals/:id — Delete a per-user override
+exports.deleteOperationalGoal = async (req, res) => {
+  try {
+    const OperationalGoal = require('../models/OperationalGoal');
+    const goal = await OperationalGoal.findById(req.params.id);
+
+    if (!goal) {
+      return res.status(404).json({ status: 'fail', message: 'Goal not found' });
+    }
+    if (!goal.user_id) {
+      return res.status(400).json({ status: 'fail', message: 'Cannot delete team default' });
+    }
+
+    await OperationalGoal.findByIdAndDelete(req.params.id);
+    res.status(200).json({ status: 'success', message: 'Override deleted' });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+// GET /extension/team-performance — Listing & QC team gamification analytics
+exports.getTeamPerformance = async (req, res) => {
+  try {
+    const userRole = req.user.role;
+    const userTeam = req.user.team;
+    const isAdmin = userRole === 'super_admin' || userRole === 'admin' || req.userPermissions?.includes('extension.admin');
+
+    // Determine which teams to show
+    let teamsToShow = [];
+    if (isAdmin) {
+      const teamParam = req.query.team;
+      teamsToShow = teamParam === 'listing' ? ['listing'] : teamParam === 'qc' ? ['qc'] : ['listing', 'qc'];
+    } else if (userTeam === 'listing') {
+      teamsToShow = ['listing'];
+    } else if (userTeam === 'qc') {
+      teamsToShow = ['qc'];
+    } else {
+      return res.status(200).json({ status: 'success', data: { listing: null, qc: null } });
+    }
+
+    const OperationalGoal = require('../models/OperationalGoal');
+    const goalDocs = await OperationalGoal.find({ team: { $in: teamsToShow } }).lean();
+    // Build per-user target map: { team: { userId: { listing, spec, qc, qc_enabled }, null: teamDefault } }
+    const teamDefaults = {};
+    const userTargetMap = {};
+    for (const g of goalDocs) {
+      if (!g.user_id) {
+        teamDefaults[g.team] = g;
+      } else {
+        const uid = g.user_id.toString();
+        if (!userTargetMap[g.team]) userTargetMap[g.team] = {};
+        userTargetMap[g.team][uid] = g;
+      }
+    }
+
+    const LISTING_EVENTS = ['listing_created'];
+    const SPEC_EVENTS = ['spec_added'];
+    const QC_EVENTS = ['qc_approved', 'qc_rejected'];
+
+    const now = new Date();
+    const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
+    const thirtyDaysAgo = new Date(now - 30 * 24 * 60 * 60 * 1000); thirtyDaysAgo.setHours(0, 0, 0, 0);
+    const sevenDaysAgo = new Date(now - 7 * 24 * 60 * 60 * 1000); sevenDaysAgo.setHours(0, 0, 0, 0);
+    const fourteenDaysAgo = new Date(now - 14 * 24 * 60 * 60 * 1000); fourteenDaysAgo.setHours(0, 0, 0, 0);
+
+    const result = {};
+
+    for (const team of teamsToShow) {
+      const eventTypes = team === 'listing' ? [...LISTING_EVENTS, ...SPEC_EVENTS] : QC_EVENTS;
+      const teamDefault = teamDefaults[team];
+
+      // Get all users in this team
+      const teamUsers = await User.find({ team }).select('name team').lean();
+      if (teamUsers.length === 0) {
+        result[team] = { team_default: teamDefault || null, leaderboard: [], team_today_avg: 0, team_today_total: 0, team_week_total: 0 };
+        continue;
+      }
+      const teamUserIds = teamUsers.map(u => u._id);
+      const userMap = {};
+      for (const u of teamUsers) {
+        userMap[u._id.toString()] = { user_id: u._id, name: u.name, team: u.team };
+      }
+
+      // Get last 30 days of events for team users
+      const dailyEvents = await ExtensionEvent.aggregate([
+        { $match: { user_id: { $in: teamUserIds }, event_type: { $in: eventTypes }, created_at: { $gte: thirtyDaysAgo } } },
+        {
+          $group: {
+            _id: { user_id: '$user_id', date: { $dateToString: { format: '%Y-%m-%d', date: '$created_at' } } },
+            count: { $sum: 1 }
+          }
+        },
+        { $sort: { '_id.date': 1 } }
+      ]);
+
+      // Build per-user daily counts
+      const userDaily = {};
+      for (const u of teamUsers) {
+        userDaily[u._id.toString()] = {};
+      }
+      for (const ev of dailyEvents) {
+        const uid = ev._id.user_id.toString();
+        if (userDaily[uid]) {
+          userDaily[uid][ev._id.date] = ev.count;
+        }
+      }
+
+      // Generate date strings for last 30 days
+      const dateStr = (d) => d.toISOString().slice(0, 10);
+      const todayStr = dateStr(now);
+      const yesterdayStr = dateStr(new Date(now - 86400000));
+
+      // Compute per-user stats
+      const leaderboard = [];
+      for (const u of teamUsers) {
+        const uid = u._id.toString();
+        const daily = userDaily[uid];
+        const userGoal = userTargetMap[team]?.[uid] || teamDefault;
+        const userTarget = team === 'listing'
+          ? (userGoal?.listing_target || 0) + (userGoal?.spec_target || 0)
+          : (userGoal?.qc_target || 0);
+        const userQcEnabled = userGoal?.qc_enabled || false;
+
+        // Today count
+        const todayCount = daily[todayStr] || 0;
+
+        // Streak: consecutive days meeting target (from today backward)
+        let streak = 0;
+        let longestStreak = 0;
+        const streakDate = new Date(now);
+        for (let i = 0; i < 30; i++) {
+          const ds = dateStr(streakDate);
+          if (userTarget > 0 && (daily[ds] || 0) >= userTarget) {
+            streak++;
+          } else if (userTarget > 0) {
+            break;
+          }
+          streakDate.setDate(streakDate.getDate() - 1);
+        }
+        longestStreak = streak;
+
+        // Weekly totals (this week vs last week)
+        let thisWeekTotal = 0;
+        let lastWeekTotal = 0;
+        for (let i = 0; i < 7; i++) {
+          const d = new Date(now - i * 86400000);
+          thisWeekTotal += daily[dateStr(d)] || 0;
+        }
+        for (let i = 7; i < 14; i++) {
+          const d = new Date(now - i * 86400000);
+          lastWeekTotal += daily[dateStr(d)] || 0;
+        }
+        const weeklyChangePct = lastWeekTotal > 0 ? Math.round(((thisWeekTotal - lastWeekTotal) / lastWeekTotal) * 100) : (thisWeekTotal > 0 ? 100 : 0);
+
+        // 7-day daily counts for sparkline
+        const dailyCounts = [];
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(now - i * 86400000);
+          dailyCounts.push(daily[dateStr(d)] || 0);
+        }
+
+        leaderboard.push({
+          user_id: u._id,
+          name: u.name,
+          today_count: todayCount,
+          target: userTarget,
+          target_pct: userTarget > 0 ? Math.round((todayCount / userTarget) * 100) : 0,
+          met_today: userTarget > 0 && todayCount >= userTarget,
+          qc_enabled: userQcEnabled,
+          streak,
+          longest_streak: longestStreak,
+          weekly_total: thisWeekTotal,
+          weekly_change_pct: weeklyChangePct,
+          daily_counts: dailyCounts,
+          // Rank computed below
+          rank: 0,
+          rank_change: 0
+        });
+      }
+
+      // Sort by today_count for today's rank
+      const todayRanked = [...leaderboard].sort((a, b) => b.today_count - a.today_count);
+      todayRanked.forEach((u, i) => { u.rank = i + 1; });
+
+      // Compute yesterday's rank for rank_change
+      const yesterdayRanked = [...leaderboard].sort((a, b) => {
+        const aYesterday = userDaily[a.user_id.toString()]?.[yesterdayStr] || 0;
+        const bYesterday = userDaily[b.user_id.toString()]?.[yesterdayStr] || 0;
+        return bYesterday - aYesterday;
+      });
+      const yesterdayRankMap = {};
+      yesterdayRanked.forEach((u, i) => { yesterdayRankMap[u.user_id.toString()] = i + 1; });
+      for (const u of leaderboard) {
+        const yRank = yesterdayRankMap[u.user_id.toString()] || leaderboard.length;
+        u.rank_change = yRank - u.rank; // positive = improved
+      }
+
+      // Sort final leaderboard by rank
+      leaderboard.sort((a, b) => a.rank - b.rank);
+
+      // Team aggregates
+      const teamTodayTotal = leaderboard.reduce((s, u) => s + u.today_count, 0);
+      const teamTodayAvg = Math.round(teamTodayTotal / leaderboard.length);
+      const teamWeekTotal = leaderboard.reduce((s, u) => s + u.weekly_total, 0);
+
+      result[team] = {
+        team_default: teamDefault || null,
+        leaderboard,
+        team_today_avg: teamTodayAvg,
+        team_today_total: teamTodayTotal,
+        team_week_total: teamWeekTotal
+      };
+    }
+
+    res.status(200).json({ status: 'success', data: result });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+// GET /extension/operational-goals — Get operational goals
+exports.getOperationalGoals = async (req, res) => {
+  try {
+    const OperationalGoal = require('../models/OperationalGoal');
+    const userRole = req.user.role;
+    const userTeam = req.user.team;
+    const isAdmin = userRole === 'super_admin' || userRole === 'admin' || req.userPermissions?.includes('extension.admin');
+
+    if (isAdmin) {
+      const team = req.query.team || 'listing';
+      const goals = await OperationalGoal.find({ team }).populate('user_id', 'name team').populate('updated_by', 'name').lean();
+      const teamDefault = goals.find(g => !g.user_id);
+      const userOverrides = goals.filter(g => g.user_id);
+      return res.status(200).json({ status: 'success', data: { team, teamDefault, userOverrides } });
+    }
+
+    // Non-admin: return own team default + own override
+    if (!userTeam || !['listing', 'qc'].includes(userTeam)) {
+      return res.status(200).json({ status: 'success', data: { team: userTeam, teamDefault: null, userOverride: null } });
+    }
+    const goals = await OperationalGoal.find({
+      team: userTeam,
+      $or: [{ user_id: null }, { user_id: req.user._id }]
+    }).lean();
+    const teamDefault = goals.find(g => !g.user_id) || null;
+    const userOverride = goals.find(g => g.user_id && g.user_id.toString() === req.user._id.toString()) || null;
+    res.status(200).json({ status: 'success', data: { team: userTeam, teamDefault, userOverride } });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+// PUT /extension/operational-goals — Create/update operational goal
+exports.updateOperationalGoal = async (req, res) => {
+  try {
+    const OperationalGoal = require('../models/OperationalGoal');
+    const { team, user_id, listing_target, qc_target, qc_enabled } = req.body;
+
+    if (!['listing', 'qc'].includes(team)) {
+      return res.status(400).json({ status: 'fail', message: 'Invalid team' });
+    }
+
+    const query = { team, user_id: user_id || null };
+    const update = {
+      listing_target: listing_target || 0,
+      qc_target: qc_target || 0, qc_enabled: qc_enabled || false,
+      updated_by: req.user._id,
+      updated_at: new Date()
+    };
+
+    const goal = await OperationalGoal.findOneAndUpdate(query, update, { new: true, upsert: true, runValidators: true });
+    res.status(200).json({ status: 'success', data: goal });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+// DELETE /extension/operational-goals/:id — Delete a per-user override
+exports.deleteOperationalGoal = async (req, res) => {
+  try {
+    const OperationalGoal = require('../models/OperationalGoal');
+    const goal = await OperationalGoal.findById(req.params.id);
+    if (!goal) return res.status(404).json({ status: 'fail', message: 'Goal not found' });
+    if (!goal.user_id) return res.status(400).json({ status: 'fail', message: 'Cannot delete team-wide default' });
+    await goal.deleteOne();
+    res.status(200).json({ status: 'success', message: 'Override deleted' });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
   }
@@ -874,6 +1343,93 @@ exports.debugEvents = async (req, res) => {
         created_at: e.created_at
       }))
     });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+// ==================== OPERATIONAL GOALS ====================
+
+// GET /extension/operational-goals — Get goals for a team
+exports.getOperationalGoals = async (req, res) => {
+  try {
+    const OperationalGoal = require('../models/OperationalGoal');
+    const userRole = req.user.role;
+    const userTeam = req.user.team;
+    const userId = req.user._id;
+    const isAdmin = userRole === 'super_admin' || userRole === 'admin' || req.userPermissions?.includes('extension.admin');
+
+    let team = req.query.team;
+    if (!isAdmin) {
+      team = userTeam;
+    }
+    if (!team || !['listing', 'qc'].includes(team)) {
+      return res.status(400).json({ status: 'fail', message: 'Valid team (listing or qc) is required' });
+    }
+
+    if (isAdmin) {
+      const goals = await OperationalGoal.find({ team })
+        .populate('user_id', 'name team')
+        .populate('updated_by', 'name')
+        .lean();
+      const teamDefault = goals.find(g => !g.user_id) || null;
+      const userOverrides = goals.filter(g => g.user_id);
+      return res.status(200).json({ status: 'success', data: { team_default: teamDefault, user_overrides: userOverrides } });
+    } else {
+      const goals = await OperationalGoal.find({
+        team,
+        $or: [{ user_id: null }, { user_id: userId }]
+      }).lean();
+      const teamDefault = goals.find(g => !g.user_id) || null;
+      const userOverride = goals.find(g => g.user_id && g.user_id.toString() === userId.toString()) || null;
+      return res.status(200).json({ status: 'success', data: { team_default: teamDefault, user_override: userOverride } });
+    }
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+// PUT /extension/operational-goals — Create/update a goal
+exports.updateOperationalGoal = async (req, res) => {
+  try {
+    const OperationalGoal = require('../models/OperationalGoal');
+    const { team, user_id, listing_target, spec_target, qc_target, qc_enabled } = req.body;
+
+    if (!team || !['listing', 'qc'].includes(team)) {
+      return res.status(400).json({ status: 'fail', message: 'Valid team is required' });
+    }
+
+    const query = { team, user_id: user_id || null };
+    const update = {
+      listing_target: listing_target || 0,
+      spec_target: spec_target || 0,
+      qc_target: qc_target || 0, qc_enabled: qc_enabled || false,
+      updated_by: req.user._id,
+      updated_at: new Date()
+    };
+
+    const goal = await OperationalGoal.findOneAndUpdate(query, update, { new: true, upsert: true, runValidators: true });
+    res.status(200).json({ status: 'success', data: goal });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+// DELETE /extension/operational-goals/:id — Delete a per-user override
+exports.deleteOperationalGoal = async (req, res) => {
+  try {
+    const OperationalGoal = require('../models/OperationalGoal');
+    const goal = await OperationalGoal.findById(req.params.id);
+
+    if (!goal) {
+      return res.status(404).json({ status: 'fail', message: 'Goal not found' });
+    }
+    if (!goal.user_id) {
+      return res.status(400).json({ status: 'fail', message: 'Cannot delete team-wide default' });
+    }
+
+    await OperationalGoal.findByIdAndDelete(req.params.id);
+    res.status(200).json({ status: 'success', message: 'Goal override deleted' });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
   }

@@ -15,11 +15,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
       tab.classList.add('active');
       document.getElementById(tab.dataset.tab).classList.add('active');
-
-      // Fetch team data on first click
-      if (tab.dataset.tab === 'teamTab' && !tab.dataset.loaded) {
-        tab.dataset.loaded = 'true';
-      }
     });
   });
 
@@ -61,59 +56,36 @@ async function fetchStats() {
     if (!response.ok) {
       console.log('[BD Tracker Popup] Stats fetch failed:', response.status);
       document.getElementById('myListings').textContent = '0';
-      document.getElementById('myProducts').textContent = '0';
-      document.getElementById('myUpdates').textContent = '0';
+      document.getElementById('mySpecs').textContent = '0';
       document.getElementById('myQc').textContent = '0';
-      document.getElementById('myTotal').textContent = '0';
-      document.getElementById('teamLoading').textContent = 'Endpoint not available yet — restart backend after push';
       return;
     }
 
     const result = await response.json();
     const data = result.data;
+    console.log('[BD Tracker Popup] API response:', JSON.stringify(data, null, 2));
 
     // Populate My Stats
     if (data.my) {
       document.getElementById('myListings').textContent = data.my.listing_created || 0;
-      document.getElementById('myProducts').textContent = data.my.product_created || 0;
-      document.getElementById('myUpdates').textContent = data.my.product_updated || 0;
+      document.getElementById('mySpecs').textContent = data.my.spec_added || 0;
       document.getElementById('myQc').textContent = data.my.qc_approved || 0;
-      document.getElementById('myTotal').textContent = data.my.total || 0;
     }
 
-    // Populate Team
-    if (data.team && data.team.length > 0) {
-      document.getElementById('teamLoading').style.display = 'none';
-      const teamList = document.getElementById('teamList');
-      const myUserId = data.user?.name; // Use name for matching since we have it
+    // Populate Targets
+    if (data.goals) {
+      const listingTarget = data.goals.listing_target || 0;
+      const specTarget = data.goals.spec_target || 0;
+      const qcEnabled = data.goals.qc_enabled || false;
+      const qcTarget = qcEnabled ? (data.goals.qc_target || 0) : 0;
 
-      teamList.innerHTML = data.team.map(member => {
-        const isMe = member.name === data.user?.name;
-        const avatarClass = member.team === 'listing' ? 'listing' : member.team === 'qc' ? 'qc' : 'admin';
-        const roleLabel = member.team === 'listing' ? 'LST' : member.team === 'qc' ? 'QC' : 'ADM';
-
-        return `
-          <div class="team-user${isMe ? ' is-me' : ''}">
-            <div class="team-user-avatar ${avatarClass}">${member.name.charAt(0).toUpperCase()}</div>
-            <div class="team-user-info">
-              <div class="team-user-name">${member.name}${isMe ? ' (You)' : ''}</div>
-              <div class="team-user-team">${roleLabel}</div>
-            </div>
-            <div class="team-user-stats">
-              <div class="team-stat">
-                <div class="team-stat-value">${member.listing_created || 0}</div>
-                <div class="team-stat-label">LST</div>
-              </div>
-              <div class="team-stat">
-                <div class="team-stat-value">${member.qc_approved || 0}</div>
-                <div class="team-stat-label">QC</div>
-              </div>
-            </div>
-          </div>
-        `;
-      }).join('');
+      document.getElementById('targetListings').textContent = listingTarget > 0 ? `Target: ${listingTarget}` : '';
+      document.getElementById('targetSpecs').textContent = specTarget > 0 ? `Target: ${specTarget}` : '';
+      document.getElementById('targetQc').textContent = qcEnabled && qcTarget > 0 ? `Target: ${qcTarget}` : '';
     } else {
-      document.getElementById('teamLoading').textContent = 'No team data available';
+      document.getElementById('targetListings').textContent = '';
+      document.getElementById('targetSpecs').textContent = '';
+      document.getElementById('targetQc').textContent = '';
     }
 
     // Update user role display
@@ -124,7 +96,6 @@ async function fetchStats() {
 
   } catch (err) {
     console.log('[BD Tracker Popup] Stats error:', err.message);
-    document.getElementById('teamLoading').textContent = 'Could not load stats — check connection';
   }
 }
 

@@ -5,7 +5,7 @@ import axios from 'axios';
 import {
   BarChart3, Package, ShieldCheck, ShieldX, Clock, FileText,
   TrendingUp, TrendingDown, Users, ChevronLeft, RefreshCw, Calendar, Trash2,
-  Trophy, AlertTriangle, Timer, Activity, ArrowUp, ArrowDown
+  Trophy, AlertTriangle, Timer, Activity, ArrowUp, ArrowDown, Flame, Target
 } from 'lucide-react';
 import { API_URL } from '../config/api';
 
@@ -20,10 +20,20 @@ const OperationsAnalyticsPage = () => {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [detailModal, setDetailModal] = useState(null);
+  const [teamPerf, setTeamPerf] = useState(null);
+  const [teamPerfLoading, setTeamPerfLoading] = useState(false);
+  const [teamFilter, setTeamFilter] = useState(user?.team || 'listing');
+  const [editingTargets, setEditingTargets] = useState(false);
+  const [targetValues, setTargetValues] = useState({ listing: 30, qc: 50 });
+  const [savingTarget, setSavingTarget] = useState(false);
 
   useEffect(() => {
     fetchAnalytics();
   }, [period, startDate, endDate]);
+
+  useEffect(() => {
+    if (view === 'team') fetchTeamPerformance();
+  }, [view, teamFilter]);
 
   const fetchAnalytics = async () => {
     setLoading(true);
@@ -42,6 +52,39 @@ const OperationsAnalyticsPage = () => {
       console.error('Error fetching analytics:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchTeamPerformance = async () => {
+    setTeamPerfLoading(true);
+    try {
+      const teamParam = isAdmin ? `?team=${teamFilter}` : '';
+      const res = await axios.get(`${API_URL}/extension/team-performance${teamParam}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = res.data.data;
+      setTeamPerf(data);
+      // Update targetValues from response
+      if (data.listing) setTargetValues(prev => ({ ...prev, listing: data.listing.target }));
+      if (data.qc) setTargetValues(prev => ({ ...prev, qc: data.qc.target }));
+    } catch (err) {
+      console.error('Error fetching team performance:', err);
+    } finally {
+      setTeamPerfLoading(false);
+    }
+  };
+
+  const saveTarget = async (team) => {
+    setSavingTarget(true);
+    try {
+      await axios.put(`${API_URL}/team-targets/${team}`, { daily_target: targetValues[team] }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      fetchTeamPerformance();
+    } catch (err) {
+      console.error('Error saving target:', err);
+    } finally {
+      setSavingTarget(false);
     }
   };
 
@@ -182,6 +225,7 @@ const OperationsAnalyticsPage = () => {
           <div className="flex items-center bg-slate-100 rounded-xl p-1">
             {[
               { key: 'total', label: 'Total', icon: BarChart3 },
+              { key: 'team', label: 'Team Performance', icon: Trophy },
               ...(isAdmin ? [{ key: 'users', label: 'By Users', icon: Users }] : []),
             ].map(({ key, label, icon: Icon }) => (
               <button
@@ -804,6 +848,286 @@ const OperationsAnalyticsPage = () => {
             <EmptyState />
           )}
         </>
+      )}
+
+      {/* Team Performance View */}
+      {view === 'team' && (
+        <div className="space-y-4">
+          {/* Team Selector (admin only) */}
+          {isAdmin && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Team:</span>
+              {['listing', 'qc'].map(t => (
+                <button
+                  key={t}
+                  onClick={() => setTeamFilter(t)}
+                  className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    teamFilter === t
+                      ? t === 'listing' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-blue-600 text-white shadow-sm'
+                      : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                  }`}
+                >
+                  {t === 'listing' ? 'Listing Team' : 'QC Team'}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Daily Targets Settings (admin only) */}
+          {isAdmin && (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+              <button
+                onClick={() => setEditingTargets(!editingTargets)}
+                className="w-full px-5 py-3 flex items-center justify-between hover:bg-slate-50 transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <Target size={14} className="text-slate-400" />
+                  <span className="text-xs font-bold text-slate-700">Daily Targets</span>
+                </div>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`text-slate-400 transition-transform ${editingTargets ? 'rotate-180' : ''}`}>
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              {editingTargets && (
+                <div className="px-5 pb-4 border-t border-slate-50">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+                    {['listing', 'qc'].map(team => {
+                      const isListing = team === 'listing';
+                      return (
+                        <div key={team} className="flex items-center gap-3">
+                          <div className={`w-2 h-2 rounded-full ${isListing ? 'bg-emerald-500' : 'bg-blue-500'}`} />
+                          <span className="text-xs font-bold text-slate-700 w-20">{isListing ? 'Listing' : 'QC'}</span>
+                          <input
+                            type="number"
+                            min="1"
+                            value={targetValues[team]}
+                            onChange={e => setTargetValues(prev => ({ ...prev, [team]: parseInt(e.target.value) || 1 }))}
+                            className="w-20 px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-900 text-center focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                          />
+                          <button
+                            onClick={() => saveTarget(team)}
+                            disabled={savingTarget}
+                            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+                          >
+                            {savingTarget ? '...' : 'Save'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {teamPerfLoading ? (
+            <div className="flex items-center justify-center py-16">
+              <div className="w-8 h-8 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : teamPerf && (() => {
+            const data = teamPerf[teamFilter] || teamPerf[user?.team];
+            if (!data) return <EmptyState />;
+            const lb = data.leaderboard || [];
+            const isListing = teamFilter === 'listing' || user?.team === 'listing';
+            const teamColor = isListing ? 'emerald' : 'blue';
+            const metricLabel = isListing ? 'Listings + Specs' : 'Approved + Rejected';
+
+            return (
+              <>
+                {/* Summary Cards */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  {[
+                    { label: 'Team Avg Today', value: data.team_today_avg, sub: `Target: ${data.target}`, icon: Target },
+                    { label: 'Team Total Today', value: data.team_today_total, sub: `${lb.length} members`, icon: Users },
+                    { label: 'Team Weekly Total', value: data.team_week_total, sub: metricLabel, icon: BarChart3 },
+                    { label: 'Active Streaks', value: lb.filter(u => u.streak >= 3).length, sub: `of ${lb.length} members`, icon: Flame },
+                  ].map(({ label, value, sub, icon: Icon }, i) => (
+                    <div key={i} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className={`p-1.5 rounded-lg bg-${teamColor}-50`}>
+                          <Icon size={14} className={`text-${teamColor}-600`} />
+                        </div>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{label}</span>
+                      </div>
+                      <p className="text-2xl font-extrabold text-slate-900">{value}</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">{sub}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Today's Leaderboard */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                  <div className="px-5 py-4 border-b border-slate-50">
+                    <h3 className="text-sm font-extrabold text-slate-900">
+                      {isListing ? 'Listing' : 'QC'} Team Leaderboard — Today
+                    </h3>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Ranked by {metricLabel.toLowerCase()}</p>
+                  </div>
+                  {lb.length === 0 ? (
+                    <div className="px-5 py-8 text-center text-xs text-slate-400">No team members found</div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-slate-50">
+                            <th className="px-4 py-2.5 text-left font-bold text-slate-500 w-16">Rank</th>
+                            <th className="px-4 py-2.5 text-left font-bold text-slate-500">Member</th>
+                            <th className="px-4 py-2.5 text-center font-bold text-slate-500">Today</th>
+                            <th className="px-4 py-2.5 text-center font-bold text-slate-500">Progress</th>
+                            <th className="px-4 py-2.5 text-center font-bold text-slate-500">Streak</th>
+                            <th className="px-4 py-2.5 text-center font-bold text-slate-500">Weekly</th>
+                            <th className="px-4 py-2.5 text-center font-bold text-slate-500">Trend</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {lb.map((member, i) => {
+                            const isCurrentUser = member.user_id === user?._id;
+                            const pct = Math.min(member.target_pct, 100);
+                            const barColor = pct >= 90 ? 'bg-emerald-500' : pct >= 50 ? 'bg-amber-500' : 'bg-red-500';
+                            const barBg = pct >= 90 ? 'bg-emerald-50' : pct >= 50 ? 'bg-amber-50' : 'bg-red-50';
+                            return (
+                              <tr
+                                key={member.user_id}
+                                className={`border-t border-slate-50 ${isCurrentUser ? `bg-${teamColor}-50/50` : ''} ${i === 0 ? 'bg-amber-50/30' : ''}`}
+                              >
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-extrabold ${
+                                      i === 0 ? 'bg-amber-400 text-white' : i === 1 ? 'bg-slate-300 text-white' : i === 2 ? 'bg-orange-400 text-white' : 'bg-slate-100 text-slate-500'
+                                    }`}>
+                                      {member.rank}
+                                    </span>
+                                    {member.rank_change > 0 && (
+                                      <ArrowUp size={10} className="text-emerald-500" />
+                                    )}
+                                    {member.rank_change < 0 && (
+                                      <ArrowDown size={10} className="text-red-500" />
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-2">
+                                    <span className={`font-bold text-slate-900 ${isCurrentUser ? `text-${teamColor}-700` : ''}`}>
+                                      {member.name}
+                                    </span>
+                                    {isCurrentUser && (
+                                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold bg-${teamColor}-100 text-${teamColor}-600`}>You</span>
+                                    )}
+                                    {i === 0 && (
+                                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-600">#1</span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-center">
+                                  <span className={`text-base font-extrabold ${member.met_today ? 'text-emerald-600' : 'text-slate-900'}`}>
+                                    {member.today_count}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-2">
+                                    <div className={`flex-1 h-2 rounded-full ${barBg} overflow-hidden`}>
+                                      <div className={`h-full rounded-full ${barColor} transition-all`} style={{ width: `${pct}%` }} />
+                                    </div>
+                                    <span className={`text-[10px] font-bold ${pct >= 90 ? 'text-emerald-600' : pct >= 50 ? 'text-amber-600' : 'text-red-500'}`}>
+                                      {member.target_pct}%
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-center">
+                                  {member.streak > 0 ? (
+                                    <div className="flex items-center justify-center gap-1">
+                                      <Flame size={12} className={member.streak >= 3 ? 'text-orange-500' : 'text-slate-300'} />
+                                      <span className={`font-bold ${member.streak >= 3 ? 'text-orange-600' : 'text-slate-500'}`}>
+                                        {member.streak}d
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-slate-300">—</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 text-center font-bold text-slate-700">
+                                  {member.weekly_total}
+                                </td>
+                                <td className="px-4 py-3 text-center">
+                                  <div className="flex items-center justify-center gap-1">
+                                    {member.weekly_change_pct > 0 ? (
+                                      <ArrowUp size={10} className="text-emerald-500" />
+                                    ) : member.weekly_change_pct < 0 ? (
+                                      <ArrowDown size={10} className="text-red-500" />
+                                    ) : null}
+                                    <span className={`font-bold ${
+                                      member.weekly_change_pct > 0 ? 'text-emerald-600' : member.weekly_change_pct < 0 ? 'text-red-500' : 'text-slate-400'
+                                    }`}>
+                                      {member.weekly_change_pct > 0 ? '+' : ''}{member.weekly_change_pct}%
+                                    </span>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {/* Weekly Trend - 7-day bar chart per user */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+                  <h3 className="text-sm font-extrabold text-slate-900 mb-4">7-Day Trend</h3>
+                  <div className="space-y-3">
+                    {lb.map((member) => {
+                      const maxVal = Math.max(...member.daily_counts, 1);
+                      const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+                      // Get last 7 day labels
+                      const today = new Date();
+                      const labels = [];
+                      for (let i = 6; i >= 0; i--) {
+                        const d = new Date(today - i * 86400000);
+                        labels.push(d.toLocaleDateString('en', { weekday: 'short' }));
+                      }
+                      return (
+                        <div key={member.user_id} className="flex items-center gap-3">
+                          <span className="w-24 text-xs font-bold text-slate-700 truncate">{member.name}</span>
+                          <div className="flex-1 flex items-end gap-1 h-8">
+                            {member.daily_counts.map((count, j) => (
+                              <div key={j} className="flex-1 flex flex-col items-center gap-0.5">
+                                <div
+                                  className={`w-full rounded-sm transition-all ${count >= data.target ? `bg-${teamColor}-500` : `bg-${teamColor}-200`}`}
+                                  style={{ height: `${Math.max((count / maxVal) * 100, count > 0 ? 15 : 0)}%` }}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                          <div className="text-right w-20">
+                            <span className="text-xs font-extrabold text-slate-900">{member.weekly_total}</span>
+                            <span className={`text-[10px] font-bold ml-1 ${
+                              member.weekly_change_pct > 0 ? 'text-emerald-600' : member.weekly_change_pct < 0 ? 'text-red-500' : 'text-slate-400'
+                            }`}>
+                              {member.weekly_change_pct > 0 ? '+' : ''}{member.weekly_change_pct}%
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {/* Day labels */}
+                  <div className="flex items-center gap-1 mt-2 pl-27">
+                    {(() => {
+                      const labels = [];
+                      for (let i = 6; i >= 0; i--) {
+                        const d = new Date(Date.now() - i * 86400000);
+                        labels.push(d.toLocaleDateString('en', { weekday: 'short' }));
+                      }
+                      return labels.map((l, i) => (
+                        <span key={i} className="flex-1 text-center text-[9px] text-slate-400">{l}</span>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              </>
+            );
+          })() || <EmptyState />}
+        </div>
       )}
 
       {/* Event Detail Modal */}
