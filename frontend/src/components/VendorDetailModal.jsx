@@ -14,6 +14,10 @@ const VendorDetailModal = ({ isOpen, onClose, vendor, token, user, onSuccess }) 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [newActivity, setNewActivity] = useState({ description: '', activity_type: 'call', follow_up_required: false, follow_up_date: '', follow_up_time: '' });
+  const [teamUsers, setTeamUsers] = useState([]);
+  const [reassigning, setReassigning] = useState(false);
+
+  const canReassign = user?.permissions?.includes('leads.assign');
 
   const lead = vendor?.lead_id || vendor;
   const vendorId = vendor?.lead_id?._id || vendor?.lead_id || vendor?._id;
@@ -26,7 +30,32 @@ const VendorDetailModal = ({ isOpen, onClose, vendor, token, user, onSuccess }) 
     finally { setLoading(false); }
   };
 
-  useEffect(() => { if (isOpen && vendorId) fetchActivities(); }, [isOpen, vendorId, token]);
+  useEffect(() => {
+    if (isOpen && vendorId) {
+      fetchActivities();
+      if (canReassign) {
+        axios.get(`${API_URL}/users`, { headers: { Authorization: `Bearer ${token}` } })
+          .then(res => setTeamUsers(res.data.data?.users || []))
+          .catch(() => {});
+      }
+    }
+  }, [isOpen, vendorId, token, canReassign]);
+
+  const handleReassign = async (newUserId) => {
+    if (!newUserId || newUserId === lead?.assigned_user?._id) return;
+    setReassigning(true);
+    try {
+      await axios.patch(`${API_URL}/leads/${vendorId}`, { assigned_user: newUserId }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success('Owner updated');
+      onSuccess?.();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to reassign');
+    } finally {
+      setReassigning(false);
+    }
+  };
 
   const handleSubmitActivity = async (e) => {
     e.preventDefault();
@@ -178,6 +207,27 @@ const VendorDetailModal = ({ isOpen, onClose, vendor, token, user, onSuccess }) 
                       <span className="text-xs font-bold text-slate-700">{item.value}</span>
                     </div>
                   ))}
+                  <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl">
+                    <div className="flex items-center gap-2">
+                      <User size={12} className="text-slate-400" />
+                      <span className="text-[10px] font-bold text-slate-400 uppercase">Owner</span>
+                    </div>
+                    {canReassign ? (
+                      <select
+                        value={lead?.assigned_user?._id || ''}
+                        onChange={e => handleReassign(e.target.value)}
+                        disabled={reassigning}
+                        className="text-xs font-bold text-slate-700 bg-transparent border-0 focus:outline-none cursor-pointer pr-1"
+                      >
+                        <option value="">Unassigned</option>
+                        {teamUsers.filter(u => u.status === 'active').map(u => (
+                          <option key={u._id} value={u._id}>{u.name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="text-xs font-bold text-slate-700">{lead?.assigned_user?.name || 'Unassigned'}</span>
+                    )}
+                  </div>
                 </div>
               </div>
 

@@ -109,12 +109,15 @@ const LeadActionModal = ({ isOpen, onClose, lead, token, onSuccess }) => {
           <div className="space-y-2">
             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Pipeline Stage</label>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {statuses.map(s => (
-                <button key={s} onClick={() => setStatus(s)}
-                  className={cn("px-3 py-2 rounded-xl text-xs font-bold border transition-all",
-                    status === s ? "bg-red-600 border-red-600 text-white shadow-sm" : "bg-white border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
-                  )}>{s}</button>
-              ))}
+              {statuses.map(s => {
+                const isSyncLocked = isVendor && ['Activated', 'Active Seller'].includes(s);
+                return (
+                  <button key={s} onClick={() => !isSyncLocked && setStatus(s)} disabled={isSyncLocked}
+                    className={cn("px-3 py-2 rounded-xl text-xs font-bold border transition-all",
+                      status === s ? "bg-red-600 border-red-600 text-white shadow-sm" : isSyncLocked ? "bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed opacity-60" : "bg-white border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
+                    )}>{s}{isSyncLocked && ' 🔒'}</button>
+                );
+              })}
             </div>
           </div>
 

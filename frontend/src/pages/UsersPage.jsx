@@ -5,10 +5,11 @@ import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
 import {
   UserPlus, Mail, Shield, Trash2, Edit, UserCheck, AlertCircle,
-  Loader2, X, Plus, FileSpreadsheet, Upload, Search
+  Loader2, X, Plus, FileSpreadsheet, Upload, Search, ArrowRightLeft
 } from 'lucide-react';
 import { cn } from '../utils/cn';
 import BulkUploadModal from '../components/BulkUploadModal';
+import TransferModal from '../components/TransferModal';
 import { API_URL } from '../config/api';
 
 const UserModal = ({ isOpen, onClose, onSuccess, token, editingUser = null, currentUser }) => {
@@ -186,6 +187,8 @@ const UsersPage = () => {
   const [exportLoading, setExportLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  const [isTransferOpen, setIsTransferOpen] = useState(false);
+  const [transferUser, setTransferUser] = useState(null);
   const [editingUser, setEditingUser] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const { token, user: currentUser } = useSelector((state) => state.auth);
@@ -272,6 +275,15 @@ const UsersPage = () => {
         token={token}
         editingUser={editingUser}
         currentUser={currentUser}
+      />
+
+      <TransferModal
+        isOpen={isTransferOpen}
+        onClose={() => { setIsTransferOpen(false); setTransferUser(null); }}
+        onSuccess={fetchUsers}
+        token={token}
+        currentUser={transferUser}
+        users={users}
       />
 
       {/* Page Header */}
@@ -403,6 +415,15 @@ const UsersPage = () => {
                     >
                       <Edit size={14} />
                     </button>
+                    {currentUser?._id !== user._id && currentUser?.permissions?.includes('leads.assign') && (
+                      <button
+                        onClick={() => { setTransferUser(user); setIsTransferOpen(true); }}
+                        className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                        title="Transfer leads"
+                      >
+                        <ArrowRightLeft size={14} />
+                      </button>
+                    )}
                     {currentUser?._id !== user._id && (
                       <button
                         onClick={() => handleDelete(user._id)}

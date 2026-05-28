@@ -1142,7 +1142,7 @@ const FollowupConfirmModal = ({ isOpen, onClose, onDecision, followupInfo }) => 
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 10 }}
                 transition={{ type: "spring", damping: 25, stiffness: 300 }}
-                className="fixed top-[50%] left-[50%] z-[101] w-full max-w-md translate-x-[-50%] translate-y-[-50%] rounded-2xl bg-white p-0 shadow-2xl outline-none"
+                className="fixed z-[101] w-[calc(100%-2rem)] max-w-md rounded-2xl bg-white p-0 shadow-2xl outline-none bottom-4 left-1/2 -translate-x-1/2 lg:top-1/2 lg:bottom-auto lg:-translate-y-1/2 lg:left-1/2 lg:translate-x-[-50%]"
               >
                 <div className="px-5 py-4 bg-red-50 border-b border-red-100 rounded-t-2xl">
                   <div className="flex items-center gap-2">

@@ -20,6 +20,10 @@ const LeadDetailModal = ({ isOpen, onClose, lead, token, user, onSuccess }) => {
   const [showBranches, setShowBranches] = useState(false);
   const [selectedBranches, setSelectedBranches] = useState([]);
   const [newActivity, setNewActivity] = useState({ description: '', activity_type: 'call', follow_up_required: false, follow_up_date: '', follow_up_time: '' });
+  const [teamUsers, setTeamUsers] = useState([]);
+  const [reassigning, setReassigning] = useState(false);
+
+  const canReassign = user?.permissions?.includes('leads.assign');
 
   const fetchActivities = async () => {
     try {
@@ -39,8 +43,29 @@ const LeadDetailModal = ({ isOpen, onClose, lead, token, user, onSuccess }) => {
       axios.get(`${API_URL}/delivery-zones`, { headers: { Authorization: `Bearer ${token}` } })
         .then(res => setZoneGroups(res.data.data.groups || []))
         .catch(() => {});
+      if (canReassign) {
+        axios.get(`${API_URL}/users`, { headers: { Authorization: `Bearer ${token}` } })
+          .then(res => setTeamUsers(res.data.data?.users || []))
+          .catch(() => {});
+      }
     }
-  }, [isOpen, lead, token]);
+  }, [isOpen, lead, token, canReassign]);
+
+  const handleReassign = async (newUserId) => {
+    if (!newUserId || newUserId === lead.assigned_user?._id) return;
+    setReassigning(true);
+    try {
+      await axios.patch(`${API_URL}/leads/${lead._id}`, { assigned_user: newUserId }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success('Lead reassigned');
+      onSuccess?.();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Reassign failed');
+    } finally {
+      setReassigning(false);
+    }
+  };
 
   const toggleBranch = (branchId, name) => {
     setSelectedBranches(prev => {
@@ -266,7 +291,6 @@ const LeadDetailModal = ({ isOpen, onClose, lead, token, user, onSuccess }) => {
                   {[
                     { label: 'Created', value: new Date(lead.created_at).toLocaleDateString(), icon: Calendar },
                     { label: 'Source', value: lead.lead_source, icon: TrendingUp, color: 'text-red-600' },
-                    { label: 'Owner', value: lead.assigned_user?.name || 'Unassigned', icon: Briefcase },
                   ].map((item, i) => (
                     <div key={i} className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl">
                       <div className="flex items-center gap-2">
@@ -276,6 +300,27 @@ const LeadDetailModal = ({ isOpen, onClose, lead, token, user, onSuccess }) => {
                       <span className={cn("text-xs font-bold", item.color || "text-slate-700")}>{item.value}</span>
                     </div>
                   ))}
+                  <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl">
+                    <div className="flex items-center gap-2">
+                      <Briefcase size={12} className="text-slate-400" />
+                      <span className="text-[10px] font-bold text-slate-400 uppercase">Owner</span>
+                    </div>
+                    {canReassign ? (
+                      <select
+                        value={lead.assigned_user?._id || ''}
+                        onChange={e => handleReassign(e.target.value)}
+                        disabled={reassigning}
+                        className="text-xs font-bold text-slate-700 bg-transparent border-0 focus:outline-none cursor-pointer pr-1"
+                      >
+                        <option value="">Unassigned</option>
+                        {teamUsers.filter(u => u.status === 'active').map(u => (
+                          <option key={u._id} value={u._id}>{u.name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="text-xs font-bold text-slate-700">{lead.assigned_user?.name || 'Unassigned'}</span>
+                    )}
+                  </div>
                 </div>
               </div>
 

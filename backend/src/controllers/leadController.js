@@ -307,7 +307,12 @@ exports.updateLead = async (req, res) => {
     if (!oldLead) return res.status(404).json({ status: 'fail', message: 'No lead found or access denied' });
 
     const previousStatus = oldLead.lead_status;
-    
+
+    // Prevent manual override of Nepalcan-synced statuses on vendors
+    if (oldLead.type === 'vendor' && ['Activated', 'Active Seller'].includes(req.body.lead_status)) {
+      return res.status(403).json({ status: 'fail', message: 'Activated and Active Seller are synced from Nepalcan and cannot be set manually' });
+    }
+
     // Auto-assign lead to current user if it's unassigned and they are taking an action
     if (!oldLead.assigned_user) {
       req.body.assigned_user = req.user._id;
@@ -751,6 +756,71 @@ exports.bulkUploadLeads = async (req, res) => {
 
   } catch (err) {
     console.error('Bulk upload error:', err);
+    res.status(400).json({ status: 'fail', message: err.message });
+  }
+};
+
+// GET /leads/handover-preview?from_user_id=xxx
+exports.handoverPreview = async (req, res) => {
+  try {
+    const { from_user_id } = req.query;
+    if (!from_user_id) return res.status(400).json({ status: 'fail', message: 'from_user_id required' });
+
+    const fromUser = await User.findById(from_user_id).select('name email');
+    if (!fromUser) return res.status(404).json({ status: 'fail', message: 'User not found' });
+
+    const leadCount = await Lead.countDocuments({ assigned_user: from_user_id });
+
+    res.status(200).json({
+      status: 'success',
+      data: { leadCount, fromUser: { _id: fromUser._id, name: fromUser.name, email: fromUser.email } }
+    });
+  } catch (err) {
+    res.status(400).json({ status: 'fail', message: err.message });
+  }
+};
+
+// POST /leads/bulk-transfer { from_user_id, to_user_id }
+exports.bulkTransfer = async (req, res) => {
+  try {
+    const { from_user_id, to_user_id } = req.body;
+    if (!from_user_id || !to_user_id) return res.status(400).json({ status: 'fail', message: 'from_user_id and to_user_id required' });
+    if (from_user_id === to_user_id) return res.status(400).json({ status: 'fail', message: 'Cannot transfer to the same user' });
+
+    const [fromUser, toUser] = await Promise.all([
+      User.findById(from_user_id).select('name'),
+      User.findById(to_user_id).select('name')
+    ]);
+    if (!fromUser) return res.status(404).json({ status: 'fail', message: 'Source user not found' });
+    if (!toUser) return res.status(404).json({ status: 'fail', message: 'Target user not found' });
+
+    // Find all leads assigned to source user
+    const leads = await Lead.find({ assigned_user: from_user_id }).select('_id business_name');
+    if (leads.length === 0) return res.status(200).json({ status: 'success', data: { transferred: 0 } });
+
+    // Bulk update assigned_user
+    await Lead.updateMany(
+      { assigned_user: from_user_id },
+      { $set: { assigned_user: to_user_id, assignment_status: 'accepted' } }
+    );
+
+    // Log handover activity on each lead
+    const Activity = require('../models/Activity');
+    const activityDocs = leads.map(lead => ({
+      lead_id: lead._id,
+      user_id: req.user._id,
+      activity_type: 'note',
+      description: `Lead transferred from ${fromUser.name} to ${toUser.name} (handover)`,
+      status: 'completed',
+      created_at: new Date()
+    }));
+    await Activity.insertMany(activityDocs);
+
+    res.status(200).json({
+      status: 'success',
+      data: { transferred: leads.length, fromUser: fromUser.name, toUser: toUser.name }
+    });
+  } catch (err) {
     res.status(400).json({ status: 'fail', message: err.message });
   }
 };

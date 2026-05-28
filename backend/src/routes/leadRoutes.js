@@ -42,6 +42,10 @@ router.patch('/:id/accept', leadController.acceptAssignment);
 router.get('/unassigned/nepalcan', requirePermission('leads.view'), leadController.getUnassignedNepalcanLeads);
 router.get('/category/:category', requirePermission('leads.view'), leadController.getLeadsByCategory);
 
+// Handover / bulk transfer routes - must come before /:id route
+router.get('/handover-preview', requirePermission('leads.assign'), leadController.handoverPreview);
+router.post('/bulk-transfer', requirePermission('leads.assign'), leadController.bulkTransfer);
+
 // Active sellers route - must come before /:id route
 router.get('/active-sellers', requirePermission('leads.view'), leadController.getActiveSellers);
 
