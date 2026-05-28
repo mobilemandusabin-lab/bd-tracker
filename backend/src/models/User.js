@@ -44,6 +44,9 @@ const userSchema = new mongoose.Schema({
     default: 'active'
   },
   last_login: Date,
+  preferences: {
+    whatsapp_type: { type: String, enum: ['personal', 'business', null], default: null }
+  },
   created_at: {
     type: Date,
     default: Date.now

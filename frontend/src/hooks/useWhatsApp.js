@@ -1,9 +1,17 @@
 import { useState, useCallback } from 'react';
+import { useSelector, useDispatch } from 'react-redux';
+import axios from 'axios';
+import { setUser } from '../store/authSlice';
+import { API_URL } from '../config/api';
 
 export function useWhatsApp() {
+  const dispatch = useDispatch();
+  const { user, token } = useSelector((state) => state.auth);
   const [showModal, setShowModal] = useState(false);
   const [pendingPhone, setPendingPhone] = useState(null);
-  const [whatsappType, setWhatsappType] = useState(() => localStorage.getItem('bd_whatsapp_type'));
+
+  // Read from user profile; fall back to localStorage for migration
+  const whatsappType = user?.preferences?.whatsapp_type || localStorage.getItem('bd_whatsapp_type') || null;
 
   const openWhatsApp = useCallback((phone) => {
     if (!phone) return;
@@ -19,10 +27,23 @@ export function useWhatsApp() {
     }
   }, [whatsappType]);
 
-  const handleSelect = useCallback((type) => {
-    localStorage.setItem('bd_whatsapp_type', type);
-    setWhatsappType(type);
+  const handleSelect = useCallback(async (type) => {
     setShowModal(false);
+
+    // Save to backend
+    try {
+      await axios.patch(`${API_URL}/auth/preferences`, { whatsapp_type: type }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      // Update Redux store
+      dispatch(setUser({ ...user, preferences: { ...user?.preferences, whatsapp_type: type } }));
+      // Clean up legacy localStorage
+      localStorage.removeItem('bd_whatsapp_type');
+    } catch (err) {
+      // Fallback to localStorage if backend fails
+      localStorage.setItem('bd_whatsapp_type', type);
+    }
+
     if (pendingPhone) {
       const cleanPhone = pendingPhone.replace(/\D/g, '');
       const url = type === 'business'
@@ -31,12 +52,18 @@ export function useWhatsApp() {
       window.open(url, '_blank');
       setPendingPhone(null);
     }
-  }, [pendingPhone]);
+  }, [pendingPhone, token, user, dispatch]);
 
-  const resetType = useCallback(() => {
-    localStorage.removeItem('bd_whatsapp_type');
-    setWhatsappType(null);
-  }, []);
+  const resetType = useCallback(async () => {
+    try {
+      await axios.patch(`${API_URL}/auth/preferences`, { whatsapp_type: null }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      dispatch(setUser({ ...user, preferences: { ...user?.preferences, whatsapp_type: null } }));
+    } catch (err) {
+      localStorage.removeItem('bd_whatsapp_type');
+    }
+  }, [token, user, dispatch]);
 
   return { showModal, whatsappType, openWhatsApp, handleSelect, resetType, closeModal: () => { setShowModal(false); setPendingPhone(null); } };
 }

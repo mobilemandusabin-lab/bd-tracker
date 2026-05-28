@@ -89,3 +89,23 @@ exports.getMe = async (req, res) => {
     res.status(400).json({ status: 'fail', message: err.message });
   }
 };
+
+// PATCH /auth/preferences — update current user's preferences
+exports.updatePreferences = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ status: 'fail', message: 'User not found' });
+    }
+
+    if (req.body.whatsapp_type !== undefined) {
+      user.preferences = { ...user.preferences?.toObject?.(), whatsapp_type: req.body.whatsapp_type };
+    }
+
+    await user.save({ validateBeforeSave: false });
+
+    res.status(200).json({ status: 'success', data: { preferences: user.preferences } });
+  } catch (err) {
+    res.status(400).json({ status: 'fail', message: err.message });
+  }
+};
