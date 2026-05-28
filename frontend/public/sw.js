@@ -1,28 +1,46 @@
-const CACHE_NAME = 'bd-tracker-v2';
-const urlsToCache = [
-  '/',
-  '/index.html',
-  '/manifest.json'
-];
+const CACHE_NAME = 'bd-tracker-v3';
 
 self.addEventListener('install', (event) => {
+  // Activate immediately
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+  // Clean up old caches
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(urlsToCache))
+    caches.keys().then((names) =>
+      Promise.all(names.filter((n) => n !== CACHE_NAME).map((n) => caches.delete(n)))
+    ).then(() => self.clients.claim())
   );
 });
 
 self.addEventListener('fetch', (event) => {
-  // Don't cache API requests - let them pass through to network
-  if (event.request.url.includes('/api/')) {
+  // Don't cache API requests
+  if (event.request.url.includes('/api/')) return;
+
+  // Network-first for HTML/navigation requests — always get fresh index.html
+  if (event.request.mode === 'navigate' || event.request.headers.get('accept')?.includes('text/html')) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
     return;
   }
-  
+
+  // Cache-first for static assets (JS, CSS, images)
   event.respondWith(
-    caches.match(event.request)
-      .then((response) => {
-        return response || fetch(event.request);
-      })
+    caches.match(event.request).then((cached) => {
+      return cached || fetch(event.request).then((response) => {
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        return response;
+      });
+    })
   );
 });
 
@@ -37,7 +55,7 @@ self.addEventListener('push', (event) => {
     renotify: false,
     data: data
   };
-  
+
   event.waitUntil(
     self.registration.showNotification(data.title, options)
   );
