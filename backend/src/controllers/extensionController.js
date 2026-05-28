@@ -762,11 +762,11 @@ exports.getAnalyticsDetails = async (req, res) => {
     // For events without product_name, try to look it up from other events on the same product_id
     const missingNames = events.filter(e => !e.product_name && e.product_id);
     if (missingNames.length > 0) {
-      const productIds = [...new Set(missingNames.map(e => e.product_id.toString()))];
-      const nameLookup = await ExtensionEvent.aggregate([
+      const productIds = [...new Set(missingNames.map(e => e.product_id.toString()))].filter(id => mongoose.Types.ObjectId.isValid(id));
+      const nameLookup = productIds.length > 0 ? await ExtensionEvent.aggregate([
         { $match: { product_id: { $in: productIds.map(id => new mongoose.Types.ObjectId(id)) }, product_name: { $ne: null } } },
         { $group: { _id: '$product_id', name: { $first: '$product_name' } } }
-      ]);
+      ]) : [];
       const nameMap = {};
       for (const item of nameLookup) nameMap[item._id.toString()] = item.name;
       for (const ev of events) {

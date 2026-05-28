@@ -463,6 +463,14 @@
     }
     let enrichedData = { ...data };
 
+    // Enrich product_name from ProductContext cache if missing
+    if (!enrichedData.product_name && productId) {
+      const ctx = getProductContext(productId);
+      if (ctx?.product_name) enrichedData.product_name = ctx.product_name;
+      if (!enrichedData.vendor_id && ctx?.vendor_id) enrichedData.vendor_id = ctx.vendor_id;
+      if (!enrichedData.product_sku && ctx?.product_sku) enrichedData.product_sku = ctx.product_sku;
+    }
+
     // Track the product session
     if (productId) {
       const sessionInfo = ProductTracker.track(productId, eventType, data, reqBody);
