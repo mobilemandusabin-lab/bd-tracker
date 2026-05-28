@@ -234,7 +234,7 @@ exports.handleEarlyCallDecision = async (req, res) => {
 
 exports.getActivitiesByLead = async (req, res) => {
   try {
-    const activities = await Activity.find({ lead_id: req.params.leadId })
+    const activities = await Activity.find({ lead_id: req.params.leadId, description: { $not: /\(sync\)/ } })
       .populate('user_id', 'name email')
       .sort('-created_at');
     res.status(200).json({ status: 'success', results: activities.length, data: { activities } });

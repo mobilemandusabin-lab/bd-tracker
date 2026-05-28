@@ -703,10 +703,11 @@ exports.getBDDrillDown = async (req, res) => {
       created_at: { $gte: start, $lte: end }
     }).select('business_name lead_status created_at converted_at');
 
-    // Get activities for this BD
+    // Get activities for this BD (exclude sync-generated entries)
     const activities = await Activity.find({
       user_id: bdId,
-      created_at: { $gte: start, $lte: end }
+      created_at: { $gte: start, $lte: end },
+      description: { $not: /\(sync\)/ }
     }).select('activity_type description created_at lead_id').populate('lead_id', 'business_name');
 
     res.status(200).json({
@@ -1757,13 +1758,13 @@ exports.getDayDetail = async (req, res) => {
 
     const [summary, activities, userBreakdown, convertedLeads, createdLeads, lostLeads, activatedVendors, activeSellers] = await Promise.all([
       getDaySummary(startOfDay, endOfDay),
-      Activity.find({ created_at: { $gte: startOfDay, $lte: endOfDay } })
+      Activity.find({ created_at: { $gte: startOfDay, $lte: endOfDay }, description: { $not: /\(sync\)/ } })
         .populate('user_id', 'name email')
         .populate({ path: 'lead_id', select: 'business_name lead_status' })
         .sort('-created_at')
         .lean(),
       Activity.aggregate([
-        { $match: { created_at: { $gte: startOfDay, $lte: endOfDay } } },
+        { $match: { created_at: { $gte: startOfDay, $lte: endOfDay }, description: { $not: /\(sync\)/ } } },
         { $group: { _id: { user_id: '$user_id', activity_type: '$activity_type' }, count: { $sum: 1 } } },
         { $group: { _id: '$_id.user_id', types: { $push: { type: '$_id.activity_type', count: '$count' } }, total_activities: { $sum: '$count' } } },
         { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'user' } },
