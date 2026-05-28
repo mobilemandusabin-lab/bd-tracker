@@ -13,7 +13,7 @@ const OperationsAnalyticsPage = () => {
   const { token, user } = useSelector((state) => state.auth);
   const navigate = useNavigate();
   const [analytics, setAnalytics] = useState(null);
-  const [period, setPeriod] = useState('7d');
+  const [period, setPeriod] = useState('today');
   const [view, setView] = useState('total');
   const isAdmin = user?.role === 'super_admin' || user?.role === 'admin' || (user?.permissions || []).includes('extension.admin');
   const [loading, setLoading] = useState(true);
