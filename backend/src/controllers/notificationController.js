@@ -3,8 +3,46 @@ const User = require('../models/User');
 const Activity = require('../models/Activity');
 const Lead = require('../models/Lead');
 
+// Quick inline overdue check — runs on notification fetch so alerts appear in real-time
+const checkAndCreateOverdueNotifications = async () => {
+  try {
+    const now = new Date();
+    const today = now.toISOString().split('T')[0];
+    const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+
+    const overdueFollowups = await Activity.find({
+      follow_up_required: true,
+      status: 'pending',
+      $or: [
+        { follow_up_date: { $lt: today } },
+        { follow_up_date: today, follow_up_time: { $lt: currentTime } }
+      ]
+    }).populate('lead_id user_id');
+
+    for (const followup of overdueFollowups) {
+      followup.status = 'overdue';
+      await followup.save();
+
+      await Notification.create({
+        recipient: followup.user_id._id,
+        title: 'Overdue Follow-up',
+        message: `Follow-up for ${followup.lead_id?.business_name || 'Unknown Lead'} is overdue!`,
+        type: 'follow_up_overdue',
+        related_id: followup.lead_id?._id,
+        related_model: 'Lead',
+        priority: 'high'
+      });
+    }
+  } catch (err) {
+    console.error('[Inline Overdue Check] Error:', err.message);
+  }
+};
+
 exports.getMyNotifications = async (req, res) => {
   try {
+    // Check for newly overdue items before returning notifications
+    await checkAndCreateOverdueNotifications();
+
     const notifications = await Notification.find({
       recipient: req.user._id,
       scheduled_for: { $lte: new Date() } // Only show notifications that are due
@@ -55,6 +93,9 @@ exports.markAllAsRead = async (req, res) => {
 
 exports.getUnreadCount = async (req, res) => {
   try {
+    // Check for newly overdue items before counting
+    await checkAndCreateOverdueNotifications();
+
     const count = await Notification.countDocuments({
       recipient: req.user._id,
       is_read: false,
