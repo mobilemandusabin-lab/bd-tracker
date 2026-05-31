@@ -254,6 +254,30 @@ exports.logActivity = async (req, res) => {
       }
     }
 
+    // Deduplicate spec_added: one per product_id per user per day
+    if (effectiveEventType === 'spec_added' && effectiveProductId) {
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const existingSpec = await ExtensionEvent.findOne({
+        event_type: 'spec_added',
+        product_id: effectiveProductId,
+        user_id: req.user._id,
+        created_at: { $gte: todayStart }
+      });
+      if (existingSpec) {
+        return res.status(200).json({
+          status: 'success',
+          data: {
+            event_id: existingSpec._id,
+            event_type: 'spec_added',
+            product_id: effectiveProductId,
+            duplicate: true,
+            message: 'Spec already recorded for this product today'
+          }
+        });
+      }
+    }
+
     // Try to find the lead by nepalcanId (vendor_id)
     let lead_id = null;
     if (vendor_id) {

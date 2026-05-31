@@ -195,7 +195,9 @@ async function handleEvent(message) {
 
   // ── Normal events: dedup + log ──
   const dedupKey = data.product_id || data.product_name || data.url || '';
-  const dedupWindow = (eventType === 'listing_created' || eventType === 'product_created') ? 5000 : DEDUP_WINDOW;
+  const dedupWindow = (eventType === 'listing_created' || eventType === 'product_created') ? 5000
+    : eventType === 'spec_added' ? 300000  // 5 min — specs should not be added twice to same product
+    : DEDUP_WINDOW;
 
   if (isDuplicate(eventType, dedupKey, dedupWindow)) {
     console.log(`[BD Tracker BG] 🔄 Duplicate event ignored: ${eventType} for ${dedupKey}`);
