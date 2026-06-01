@@ -46,7 +46,7 @@
       product_id: productId,
       packageTypeID_present: hasPackageType,
       packageType_isObject: !!(data.packageType && typeof data.packageType === 'object' && !Array.isArray(data.packageType)),
-      specs_present: !!(data.categoryComplianceDetails && Object.keys(data.categoryComplianceDetails).length > 0),
+      specs_present: !!((data.categoryComplianceDetails && Object.keys(data.categoryComplianceDetails).length > 0) || (data.productComplianceDetails && Object.keys(data.productComplianceDetails).length > 0)),
       vendor_id: typeof data.vendor === 'object' ? data.vendor?._id : (data.vendor || null),
       product_name: data.productName || data.name || null,
       product_sku: data.productSku || null,
@@ -141,7 +141,7 @@
       if (data.packageType || body.packageType) {
         session.has_package_type = true;
       }
-      if (data.categoryComplianceDetails || body.categoryComplianceDetails) {
+      if (data.categoryComplianceDetails || body.categoryComplianceDetails || data.productComplianceDetails || body.productComplianceDetails) {
         session.has_specs = true;
         session.spec_count++;
       }
@@ -356,8 +356,8 @@
       const data = responseData?.data || responseData || {};
       const ctx = productId ? getProductContext(productId) : null;
 
-      const bodyHasSpecs = body.categoryComplianceDetails && Object.keys(body.categoryComplianceDetails).length > 0;
-      const responseHasSpecs = data.categoryComplianceDetails && Object.keys(data.categoryComplianceDetails).length > 0;
+      const bodyHasSpecs = (body.categoryComplianceDetails && Object.keys(body.categoryComplianceDetails).length > 0) || (body.productComplianceDetails && Object.keys(body.productComplianceDetails).length > 0);
+      const responseHasSpecs = (data.categoryComplianceDetails && Object.keys(data.categoryComplianceDetails).length > 0) || (data.productComplianceDetails && Object.keys(data.productComplianceDetails).length > 0);
 
       console.log(`[BD Tracker] 🔍 PUT detection for ${productId}:`, JSON.stringify({
         bodyHasSpecs,
@@ -420,7 +420,7 @@
     const body = reqBody || {};
 
     // For spec_added, prioritize request body fields (what staff actually submitted)
-    const categoryComplianceDetails = body.categoryComplianceDetails || data.categoryComplianceDetails || null;
+    const categoryComplianceDetails = body.categoryComplianceDetails || data.categoryComplianceDetails || body.productComplianceDetails || data.productComplianceDetails || null;
 
     return {
       product_id: data._id || data.id || body._id || body.id || null,
