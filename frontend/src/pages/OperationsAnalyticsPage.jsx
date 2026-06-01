@@ -28,6 +28,9 @@ const OperationsAnalyticsPage = () => {
   const [savingTarget, setSavingTarget] = useState(false);
 
   useEffect(() => {
+    // Only fetch with custom dates when BOTH are set; otherwise use period
+    if (startDate && !endDate) return; // wait for end date
+    if (!startDate && endDate) return; // wait for start date
     fetchAnalytics();
   }, [period, startDate, endDate]);
 
@@ -301,11 +304,17 @@ const OperationsAnalyticsPage = () => {
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             {eventTypes.map(({ key, label, icon: Icon, color, global }) => {
               const c = colorMap[color];
+              const count = summary[key] ?? '—';
+              const isClickable = !global && count > 0;
               return (
-                <div key={key} className="p-4 bg-white rounded-2xl border border-slate-100 shadow-sm text-center relative">
+                <div
+                  key={key}
+                  onClick={() => isClickable && openEventDetails(key, label, isAdmin ? null : user?._id)}
+                  className={`p-4 bg-white rounded-2xl border border-slate-100 shadow-sm text-center relative ${isClickable ? 'cursor-pointer hover:ring-2 hover:ring-red-300 hover:shadow-md transition-all' : ''}`}
+                >
                   {key === 'qc_pending' && isAdmin && (
                     <button
-                      onClick={deleteQcPending}
+                      onClick={(e) => { e.stopPropagation(); deleteQcPending(); }}
                       className="absolute top-2 right-2 p-1 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
                       title="Delete QC Pending data (allows re-sync)"
                     >
@@ -315,8 +324,11 @@ const OperationsAnalyticsPage = () => {
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-2 ${c.bg} ${c.text}`}>
                     <Icon size={18} />
                   </div>
-                  <p className="text-2xl font-extrabold text-slate-900">{summary[key] ?? '—'}</p>
+                  <p className="text-2xl font-extrabold text-slate-900">{count}</p>
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">{label}</p>
+                  {isClickable && (
+                    <p className="text-[9px] text-slate-300 mt-1">Click to view</p>
+                  )}
                 </div>
               );
             })}
