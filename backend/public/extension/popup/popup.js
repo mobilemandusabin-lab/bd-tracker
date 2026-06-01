@@ -157,6 +157,7 @@ function showLoggedIn(status) {
     if (data.updateAvailable) {
       document.getElementById('updateBanner').style.display = 'flex';
       document.getElementById('latestVersion').textContent = data.latestVersion || '?';
+      document.getElementById('updateChangelog').textContent = 'Please reinstall to fix listing & spec tracking issues.';
     }
   });
 }
