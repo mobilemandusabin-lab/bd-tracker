@@ -1,6 +1,6 @@
 const SystemSyncLog = require('../models/SystemSyncLog');
 const { checkOverdueFollowups, checkEscalationTriggers } = require('./overdueChecker');
-const { syncAllNepalcanData, checkAndUpdateReturnedOrders, loginToNepalcan } = require('./nepalcanSyncService');
+const { syncAllNepalcanData } = require('./nepalcanSyncService');
 const { checkAndTakeSnapshots } = require('./vendorSnapshotService');
 
 /**
@@ -51,21 +51,7 @@ const runFullSync = async (triggeredBy = 'cron', userId = null) => {
     console.error('[Full Sync] Nepalcan sync failed:', err.message);
   }
 
-  // 3. Return check (runs as part of syncAllNepalcanData but let's track separately too)
-  const returnStart = Date.now();
-  try {
-    tasks.returnedCheck = { ran: true };
-    const returnedCount = await checkAndUpdateReturnedOrders();
-    tasks.returnedCheck.success = true;
-    tasks.returnedCheck.ordersUpdated = returnedCount;
-    tasks.returnedCheck.durationMs = Date.now() - returnStart;
-    console.log(`[Full Sync] Return check done: ${returnedCount} updated`);
-  } catch (err) {
-    tasks.returnedCheck = { ran: true, success: false, error: err.message, durationMs: Date.now() - returnStart };
-    console.error('[Full Sync] Return check failed:', err.message);
-  }
-
-  // 4. Vendor snapshots
+  // 3. Vendor snapshots
   const snapshotStart = Date.now();
   try {
     tasks.vendorSnapshots = { ran: true };
