@@ -21,6 +21,7 @@ router.post('/activity-log', extensionController.logActivity);
 router.delete('/qc-pending', requirePermission('extension.admin'), extensionController.deleteQcPending);
 router.delete('/events/user/:userId', requirePermission('extension.admin'), extensionController.deleteUserEvents);
 router.delete('/events/:eventId', requirePermission('extension.admin'), extensionController.deleteEvent);
+router.patch('/events/:eventId', requirePermission('extension.admin'), extensionController.patchEvent);
 router.get('/devices', requirePermission('extension.admin'), extensionController.getDevices);
 router.get('/stats', requirePermission('extension.admin'), extensionController.getStats);
 router.get('/analytics', extensionController.getAnalytics);

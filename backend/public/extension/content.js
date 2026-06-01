@@ -405,7 +405,7 @@
   // ═══════════════════════════════════════════════════════════════
   // DATA EXTRACTION
   // ═══════════════════════════════════════════════════════════════
-  function extractData(responseData, eventType, reqBody) {
+  function extractData(responseData, eventType, reqBody, url) {
     if (eventType === 'qc_pending') {
       const pendingCount = responseData?.pagination?.total ?? null;
       return {
@@ -423,7 +423,7 @@
     const categoryComplianceDetails = body.categoryComplianceDetails || data.categoryComplianceDetails || body.productComplianceDetails || data.productComplianceDetails || null;
 
     return {
-      product_id: data._id || data.id || body._id || body.id || null,
+      product_id: data._id || data.id || body._id || body.id || (url ? extractProductId(url) : null) || null,
       vendor_id: typeof data.vendor === 'object' ? data.vendor?._id : (data.vendor || body.vendor || null),
       product_name: data.productName || body.productName || data.name || body.name || null,
       qc_status: data.qcStatus || null,
@@ -580,7 +580,7 @@
           let eventType = detectEventType(matched, reqBody, responseData, method, url);
           if (!eventType) continue;
 
-          const data = extractData(responseData, eventType, reqBody);
+          const data = extractData(responseData, eventType, reqBody, url);
           data.url = url.split('?')[0];
           data.method = method;
 
@@ -669,7 +669,7 @@
             let eventType = detectEventType(matched, reqBody, responseData, method, url);
             if (!eventType) continue;
 
-            const data = extractData(responseData, eventType, reqBody);
+            const data = extractData(responseData, eventType, reqBody, url);
             data.url = url.split('?')[0];
             data.method = method;
 

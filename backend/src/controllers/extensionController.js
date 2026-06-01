@@ -376,6 +376,25 @@ exports.deleteEvent = async (req, res) => {
   }
 };
 
+// PATCH /extension/events/:eventId — update event_type (admin only)
+exports.patchEvent = async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const { event_type } = req.body;
+    const validEvents = ['listing_created', 'product_created', 'product_updated', 'product_viewed', 'qc_approved', 'qc_rejected', 'qc_pending', 'spec_added', 'session_ended'];
+    if (!event_type || !validEvents.includes(event_type)) {
+      return res.status(400).json({ status: 'fail', message: `event_type must be one of: ${validEvents.join(', ')}` });
+    }
+    const result = await ExtensionEvent.findByIdAndUpdate(eventId, { event_type }, { new: true });
+    if (!result) {
+      return res.status(404).json({ status: 'fail', message: 'Event not found' });
+    }
+    res.status(200).json({ status: 'success', data: result });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
 // GET /extension/devices
 exports.getDevices = async (req, res) => {
   try {
@@ -452,180 +471,199 @@ exports.getAnalytics = async (req, res) => {
       matchFilter.user_id = new mongoose.Types.ObjectId(user_id);
     }
 
-    // Aggregate counts by event type
-    const eventsByType = await ExtensionEvent.aggregate([
-      { $match: matchFilter },
-      { $group: { _id: '$event_type', count: { $sum: 1 } } }
-    ]);
-
-    // Get latest pending count for each day
-    const dailyPendingCounts = await ExtensionEvent.aggregate([
-      { $match: { ...matchFilter, event_type: 'qc_pending', pending_count: { $ne: null } } },
-      { $sort: { created_at: -1 } },
-      {
-        $group: {
-          _id: { $dateToString: { format: '%Y-%m-%d', date: '$created_at' } },
-          latest_pending_count: { $first: '$pending_count' },
-          latest_time: { $first: '$created_at' }
-        }
-      },
-      { $sort: { _id: 1 } }
-    ]);
-
-    // Daily breakdown
-    const dailyEvents = await ExtensionEvent.aggregate([
-      { $match: matchFilter },
-      {
-        $group: {
-          _id: {
-            date: { $dateToString: { format: '%Y-%m-%d', date: '$created_at' } },
-            event_type: '$event_type'
-          },
-          count: { $sum: 1 }
-        }
-      },
-      { $sort: { '_id.date': 1 } }
-    ]);
-
-    // Events by user
-    const eventsByUser = await ExtensionEvent.aggregate([
-      { $match: matchFilter },
-      {
-        $group: {
-          _id: { user_id: '$user_id', event_type: '$event_type' },
-          count: { $sum: 1 }
-        }
-      },
-      {
-        $lookup: {
-          from: 'users',
-          localField: '_id.user_id',
-          foreignField: '_id',
-          as: 'user'
-        }
-      },
-      { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
-      {
-        $group: {
-          _id: '$_id.user_id',
-          user_name: { $first: '$user.name' },
-          user_team: { $first: '$user.team' },
-          events: {
-            $push: {
-              event_type: '$_id.event_type',
-              count: '$count'
-            }
-          },
-          total: { $sum: '$count' }
-        }
-      },
-      { $sort: { total: -1 } }
-    ]);
-
-    // Recent events
-    const recentEvents = await ExtensionEvent.find(matchFilter)
-      .populate('user_id', 'name team')
-      .sort({ created_at: -1 })
-      .limit(20)
-      .lean();
-
-    // Get latest qc_pending count (global, not per-user)
-    const latestPendingEvent = await ExtensionEvent.findOne(
-      { event_type: 'qc_pending', pending_count: { $ne: null } },
-      { pending_count: 1 }
-    ).sort({ created_at: -1 }).lean();
-    const latestPendingCount = latestPendingEvent?.pending_count ?? null;
-
     // Lead model for vendor name lookups
     const Lead = require('../models/Lead');
 
-    // QC Approval Rate (bulk vs individual)
-    const qcStats = await ExtensionEvent.aggregate([
-      { $match: { ...matchFilter, event_type: { $in: ['qc_approved', 'qc_rejected'] } } },
-      {
-        $group: {
-          _id: null,
-          approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, 1, 0] } },
-          rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, 1, 0] } },
-          bulk_approved: { $sum: { $cond: [{ $and: [{ $eq: ['$event_type', 'qc_approved'] }, { $eq: ['$metadata.bulk', true] }] }, 1, 0] } },
-          bulk_rejected: { $sum: { $cond: [{ $and: [{ $eq: ['$event_type', 'qc_rejected'] }, { $eq: ['$metadata.bulk', true] }] }, 1, 0] } },
-          individual_approved: { $sum: { $cond: [{ $and: [{ $eq: ['$event_type', 'qc_approved'] }, { $ne: ['$metadata.bulk', true] }] }, 1, 0] } },
-          individual_rejected: { $sum: { $cond: [{ $and: [{ $eq: ['$event_type', 'qc_rejected'] }, { $ne: ['$metadata.bulk', true] }] }, 1, 0] } }
+    // Run all independent queries in parallel
+    const [
+      eventsByType,
+      dailyPendingCounts,
+      dailyEvents,
+      eventsByUser,
+      recentEvents,
+      latestPendingEvent,
+      qcStats,
+      topProducts,
+      topVendorsRaw,
+      userSessions,
+      hourlyActivity
+    ] = await Promise.all([
+      // 1. Aggregate counts by event type
+      ExtensionEvent.aggregate([
+        { $match: matchFilter },
+        { $group: { _id: '$event_type', count: { $sum: 1 } } }
+      ]),
+      // 2. Get latest pending count for each day
+      ExtensionEvent.aggregate([
+        { $match: { ...matchFilter, event_type: 'qc_pending', pending_count: { $ne: null } } },
+        { $sort: { created_at: -1 } },
+        {
+          $group: {
+            _id: { $dateToString: { format: '%Y-%m-%d', date: '$created_at' } },
+            latest_pending_count: { $first: '$pending_count' },
+            latest_time: { $first: '$created_at' }
+          }
+        },
+        { $sort: { _id: 1 } }
+      ]),
+      // 3. Daily breakdown
+      ExtensionEvent.aggregate([
+        { $match: matchFilter },
+        {
+          $group: {
+            _id: {
+              date: { $dateToString: { format: '%Y-%m-%d', date: '$created_at' } },
+              event_type: '$event_type'
+            },
+            count: { $sum: 1 }
+          }
+        },
+        { $sort: { '_id.date': 1 } }
+      ]),
+      // 4. Events by user
+      ExtensionEvent.aggregate([
+        { $match: matchFilter },
+        {
+          $group: {
+            _id: { user_id: '$user_id', event_type: '$event_type' },
+            count: { $sum: 1 }
+          }
+        },
+        {
+          $lookup: {
+            from: 'users',
+            localField: '_id.user_id',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+        {
+          $group: {
+            _id: '$_id.user_id',
+            user_name: { $first: '$user.name' },
+            user_team: { $first: '$user.team' },
+            events: {
+              $push: {
+                event_type: '$_id.event_type',
+                count: '$count'
+              }
+            },
+            total: { $sum: '$count' }
+          }
+        },
+        { $sort: { total: -1 } }
+      ]),
+      // 5. Recent events
+      ExtensionEvent.find(matchFilter)
+        .populate('user_id', 'name team')
+        .sort({ created_at: -1 })
+        .limit(20)
+        .lean(),
+      // 6. Get latest qc_pending count (global, not per-user)
+      ExtensionEvent.findOne(
+        { event_type: 'qc_pending', pending_count: { $ne: null } },
+        { pending_count: 1 }
+      ).sort({ created_at: -1 }).lean(),
+      // 7. QC Approval Rate (bulk vs individual)
+      ExtensionEvent.aggregate([
+        { $match: { ...matchFilter, event_type: { $in: ['qc_approved', 'qc_rejected'] } } },
+        {
+          $group: {
+            _id: null,
+            approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, 1, 0] } },
+            rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, 1, 0] } },
+            bulk_approved: { $sum: { $cond: [{ $and: [{ $eq: ['$event_type', 'qc_approved'] }, { $eq: ['$metadata.bulk', true] }] }, 1, 0] } },
+            bulk_rejected: { $sum: { $cond: [{ $and: [{ $eq: ['$event_type', 'qc_rejected'] }, { $eq: ['$metadata.bulk', true] }] }, 1, 0] } },
+            individual_approved: { $sum: { $cond: [{ $and: [{ $eq: ['$event_type', 'qc_approved'] }, { $ne: ['$metadata.bulk', true] }] }, 1, 0] } },
+            individual_rejected: { $sum: { $cond: [{ $and: [{ $eq: ['$event_type', 'qc_rejected'] }, { $ne: ['$metadata.bulk', true] }] }, 1, 0] } }
+          }
         }
-      }
+      ]),
+      // 8. Top Products by event count
+      ExtensionEvent.aggregate([
+        { $match: { ...matchFilter, product_name: { $ne: null } } },
+        {
+          $group: {
+            _id: '$product_name',
+            total: { $sum: 1 },
+            listings: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, 1, 0] } },
+            specs: { $sum: { $cond: [{ $eq: ['$event_type', 'spec_added'] }, 1, 0] } },
+            updates: { $sum: { $cond: [{ $eq: ['$event_type', 'product_updated'] }, 1, 0] } },
+            qc_approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, 1, 0] } },
+            qc_rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, 1, 0] } }
+          }
+        },
+        { $sort: { total: -1 } },
+        { $limit: 10 }
+      ]),
+      // 9. Top Vendors by event count
+      ExtensionEvent.aggregate([
+        { $match: { ...matchFilter, vendor_id: { $ne: null } } },
+        {
+          $group: {
+            _id: '$vendor_id',
+            total: { $sum: 1 },
+            listings: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, 1, 0] } },
+            qc_approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, 1, 0] } },
+            qc_rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, 1, 0] } },
+            products: { $addToSet: '$product_name' }
+          }
+        },
+        { $addFields: { product_count: { $size: '$products' } } },
+        { $sort: { total: -1 } },
+        { $limit: 10 }
+      ]),
+      // 10. User Activity Sessions
+      ExtensionEvent.aggregate([
+        { $match: matchFilter },
+        { $sort: { user_id: 1, created_at: 1 } },
+        {
+          $group: {
+            _id: '$user_id',
+            events: { $push: { type: '$event_type', time: '$created_at' } }
+          }
+        },
+        {
+          $lookup: {
+            from: 'users',
+            localField: '_id',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } }
+      ]),
+      // 11. Hourly Activity Heatmap
+      ExtensionEvent.aggregate([
+        { $match: matchFilter },
+        {
+          $group: {
+            _id: { hour: { $hour: '$created_at' }, dow: { $dayOfWeek: '$created_at' } },
+            count: { $sum: 1 }
+          }
+        },
+        { $sort: { '_id.dow': 1, '_id.hour': 1 } }
+      ])
     ]);
 
-    // Top Products by event count
-    const topProducts = await ExtensionEvent.aggregate([
-      { $match: { ...matchFilter, product_name: { $ne: null } } },
-      {
-        $group: {
-          _id: '$product_name',
-          total: { $sum: 1 },
-          listings: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, 1, 0] } },
-          specs: { $sum: { $cond: [{ $eq: ['$event_type', 'spec_added'] }, 1, 0] } },
-          updates: { $sum: { $cond: [{ $eq: ['$event_type', 'product_updated'] }, 1, 0] } },
-          qc_approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, 1, 0] } },
-          qc_rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, 1, 0] } }
-        }
-      },
-      { $sort: { total: -1 } },
-      { $limit: 10 }
-    ]);
+    const latestPendingCount = latestPendingEvent?.pending_count ?? null;
 
-    // Top Vendors by event count
-    const topVendors = await ExtensionEvent.aggregate([
-      { $match: { ...matchFilter, vendor_id: { $ne: null } } },
-      {
-        $group: {
-          _id: '$vendor_id',
-          total: { $sum: 1 },
-          listings: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, 1, 0] } },
-          qc_approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, 1, 0] } },
-          qc_rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, 1, 0] } },
-          products: { $addToSet: '$product_name' }
-        }
-      },
-      { $addFields: { product_count: { $size: '$products' } } },
-      { $sort: { total: -1 } },
-      { $limit: 10 }
-    ]);
-
-    // Lookup vendor names from Leads
-    const vendorIds = topVendors.map(v => v._id).filter(Boolean);
-    const vendorLeads = await Lead.find({ nepalcanId: { $in: vendorIds } })
-      .select('nepalcanId business_name')
-      .lean();
+    // Lookup vendor names from Leads (depends on topVendorsRaw)
+    const vendorIds = topVendorsRaw.map(v => v._id).filter(Boolean);
+    const vendorLeads = vendorIds.length > 0
+      ? await Lead.find({ nepalcanId: { $in: vendorIds } }).select('nepalcanId business_name').lean()
+      : [];
     const vendorNameMap = {};
     for (const lead of vendorLeads) {
       vendorNameMap[lead.nepalcanId] = lead.business_name;
     }
-    const topVendorsWithNames = topVendors.map(v => ({
+    const topVendors = topVendorsRaw.map(v => ({
       ...v,
       vendor_name: vendorNameMap[v._id] || v._id
     }));
 
-    // User Activity Sessions (derive from events — gap > 1 hour = new session)
-    const userSessions = await ExtensionEvent.aggregate([
-      { $match: matchFilter },
-      { $sort: { user_id: 1, created_at: 1 } },
-      {
-        $group: {
-          _id: '$user_id',
-          events: { $push: { type: '$event_type', time: '$created_at' } }
-        }
-      },
-      {
-        $lookup: {
-          from: 'users',
-          localField: '_id',
-          foreignField: '_id',
-          as: 'user'
-        }
-      },
-      { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } }
-    ]);
-
+    // Process user sessions in-memory
     const SESSION_GAP_MS = 60 * 60 * 1000; // 1 hour
     const userSessionsResult = userSessions.map(u => {
       const sessions = [];
@@ -656,18 +694,6 @@ exports.getAnalytics = async (req, res) => {
         }))
       };
     }).sort((a, b) => b.total_events - a.total_events);
-
-    // Hourly Activity Heatmap (hour × day_of_week)
-    const hourlyActivity = await ExtensionEvent.aggregate([
-      { $match: matchFilter },
-      {
-        $group: {
-          _id: { hour: { $hour: '$created_at' }, dow: { $dayOfWeek: '$created_at' } },
-          count: { $sum: 1 }
-        }
-      },
-      { $sort: { '_id.dow': 1, '_id.hour': 1 } }
-    ]);
 
     // Build summary
     const summary = {};
@@ -730,7 +756,7 @@ exports.getAnalytics = async (req, res) => {
         },
         qcStats: qcStats[0] || { approved: 0, rejected: 0, bulk_approved: 0, bulk_rejected: 0, individual_approved: 0, individual_rejected: 0 },
         topProducts,
-        topVendors: topVendorsWithNames,
+        topVendors,
         bestWorst,
         hourlyActivity: hourlyActivity.map(h => ({ hour: h._id.hour, dow: h._id.dow, count: h.count })),
         userSessions: userSessionsResult,
@@ -867,25 +893,12 @@ exports.getMyStats = async (req, res) => {
 
     const leaderboard = Object.values(userMap).sort((a, b) => b.total - a.total);
 
-    // Fetch goals — try user's team first, then fallback to any goal for this user
+    // Fetch goals — single query with $or covers all cases
     const OperationalGoal = require('../models/OperationalGoal');
-    let goals = [];
-    if (userTeam && ['listing', 'qc'].includes(userTeam)) {
-      goals = await OperationalGoal.find({
-        team: userTeam,
-        $or: [{ user_id: null }, { user_id: userId }]
-      }).lean();
-    }
-    // Fallback: find any goal for this user (user-specific overrides)
-    if (!goals.length) {
-      goals = await OperationalGoal.find({
-        $or: [{ user_id: userId }]
-      }).lean();
-    }
-    // Last resort: find any team default
-    if (!goals.length) {
-      goals = await OperationalGoal.find({ user_id: null }).lean();
-    }
+    const goalQuery = userTeam && ['listing', 'qc'].includes(userTeam)
+      ? { team: userTeam, $or: [{ user_id: null }, { user_id: userId }] }
+      : { $or: [{ user_id: userId }, { user_id: null }] };
+    const goals = await OperationalGoal.find(goalQuery).lean();
 
     const teamGoal = goals.find(g => !g.user_id);
     const userGoal = goals.find(g => g.user_id && g.user_id.toString() === userId.toString());
@@ -1125,23 +1138,17 @@ exports.getTeamPerformance = async (req, res) => {
 
     const result = {};
 
-    for (const team of teamsToShow) {
+    // Parallelize per-team queries
+    const teamDataPromises = teamsToShow.map(async (team) => {
       const eventTypes = team === 'listing' ? [...LISTING_EVENTS, ...SPEC_EVENTS] : QC_EVENTS;
       const teamDefault = teamDefaults[team];
 
-      // Get all users in this team
       const teamUsers = await User.find({ team }).select('name team').lean();
       if (teamUsers.length === 0) {
-        result[team] = { team_default: teamDefault || null, leaderboard: [], team_today_avg: 0, team_today_total: 0, team_week_total: 0 };
-        continue;
+        return { team, data: { team_default: teamDefault || null, leaderboard: [], team_today_avg: 0, team_today_total: 0, team_week_total: 0 } };
       }
       const teamUserIds = teamUsers.map(u => u._id);
-      const userMap = {};
-      for (const u of teamUsers) {
-        userMap[u._id.toString()] = { user_id: u._id, name: u.name, team: u.team };
-      }
 
-      // Get last 30 days of events for team users
       const dailyEvents = await ExtensionEvent.aggregate([
         { $match: { user_id: { $in: teamUserIds }, event_type: { $in: eventTypes }, created_at: { $gte: thirtyDaysAgo } } },
         {
@@ -1152,6 +1159,24 @@ exports.getTeamPerformance = async (req, res) => {
         },
         { $sort: { '_id.date': 1 } }
       ]);
+
+      return { team, data: { teamDefault, teamUsers, dailyEvents, eventTypes } };
+    });
+
+    const teamDataResults = await Promise.all(teamDataPromises);
+
+    for (const { team, data } of teamDataResults) {
+      if (!data.teamUsers) {
+        result[team] = data;
+        continue;
+      }
+
+      const { teamDefault, teamUsers, dailyEvents, eventTypes } = data;
+      const teamUserIds = teamUsers.map(u => u._id);
+      const userMap = {};
+      for (const u of teamUsers) {
+        userMap[u._id.toString()] = { user_id: u._id, name: u.name, team: u.team };
+      }
 
       // Build per-user daily counts
       const userDaily = {};
