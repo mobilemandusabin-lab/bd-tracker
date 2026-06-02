@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import {
-  X, Calendar, User, Tag, MapPin, Phone, Mail, History, Clock,
+  X, Calendar, User, Tag, MapPin, Phone, Mail, History, Clock, ExternalLink,
   MessageSquare, ShieldCheck, AlertCircle, Loader2, Send,
   Landmark, CreditCard, Building2, GitBranch, ArrowRightLeft
 } from 'lucide-react';
@@ -130,6 +130,7 @@ const VendorDetailModal = ({ isOpen, onClose, vendor, token, user, onSuccess }) 
                     { icon: Phone, label: 'Phone', value: lead?.phone, color: 'text-emerald-500', href: `tel:${lead?.phone}` },
                     { icon: Mail, label: 'Email', value: lead?.email, color: 'text-indigo-500', href: `mailto:${lead?.email}` },
                     { icon: MapPin, label: 'Location', value: vendor.business_details?.office_address || lead?.location, color: 'text-rose-500' },
+                    { icon: ExternalLink, label: 'Store Link', value: lead?.store_link, color: 'text-cyan-500', href: lead?.store_link || undefined },
                   ].map((item, i) => (
                     item.href ? (
                       <a key={i} href={item.href} className="flex items-start gap-3 group cursor-pointer">

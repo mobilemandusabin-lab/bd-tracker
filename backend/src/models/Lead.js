@@ -29,6 +29,11 @@ const leadSchema = new mongoose.Schema({
     lowercase: true,
     trim: true
   },
+  store_link: {
+    type: String,
+    trim: true,
+    default: ''
+  },
   category: {
     type: String,
     required: false,

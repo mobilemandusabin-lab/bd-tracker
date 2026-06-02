@@ -103,7 +103,7 @@ const LeadsPage = () => {
 
     if (searchQuery) {
       if (activeTab === 'database') {
-        dispatch(fetchLeads({ page: 1, limit, search: searchQuery, all: 'true', type: 'lead' }));
+        dispatch(fetchLeads({ page: 1, limit, search: searchQuery, all: 'true' }));
       } else if (activeTab === 'pending') {
         dispatch(fetchLeads({ assignment_status: 'pending', page: 1, limit: 10, search: searchQuery, type: 'lead' }));
       } else if (activeTab === 'recent') {
@@ -123,6 +123,8 @@ const LeadsPage = () => {
       dispatch(fetchLeads({ assignment_status: 'accepted', page: 1, limit, type: 'lead' }));
     } else if (activeTab !== 'followup' && activeTab !== 'database') {
       dispatch(fetchLeads({ assignment_status: activeTab, page: 1, limit: 10, type: 'lead' }));
+    } else if (activeTab === 'database') {
+      dispatch(fetchLeads({ page: 1, limit, all: 'true' }));
     } else {
       dispatch(fetchLeads({ page: 1, limit, type: 'lead' }));
     }
@@ -174,7 +176,12 @@ const LeadsPage = () => {
 
     const limit = 25;
 
-    let params = { page: currentPage + 1, limit, type: 'lead' };
+    let params = { page: currentPage + 1, limit };
+    if (activeTab !== 'database') {
+      params.type = 'lead';
+    } else {
+      params.all = 'true';
+    }
     if (searchQuery) {
       params.search = searchQuery;
     }

@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import {
   X, Calendar, User, Tag, MapPin, Phone, Mail, History, Clock,
   Briefcase, MessageSquare, ChevronRight, ChevronDown, TrendingUp, ShieldCheck,
-  AlertCircle, Loader2, Send, Edit2, Check, X as XIcon, ArrowUpRight, ArrowRightLeft, GitBranch
+  AlertCircle, Loader2, Send, Edit2, Check, X as XIcon, ArrowUpRight, ArrowRightLeft, GitBranch, ExternalLink
 } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { API_URL } from '../config/api';
@@ -14,7 +14,7 @@ const LeadDetailModal = ({ isOpen, onClose, lead, token, user, onSuccess }) => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [editData, setEditData] = useState({ business_name: '', contact_person: '', phone: '', email: '', location: '', category: '', lead_source: '' });
+  const [editData, setEditData] = useState({ business_name: '', contact_person: '', phone: '', email: '', store_link: '', location: '', category: '', lead_source: '' });
   const [phoneError, setPhoneError] = useState('');
   const [zoneGroups, setZoneGroups] = useState([]);
   const [showBranches, setShowBranches] = useState(false);
@@ -162,6 +162,7 @@ const LeadDetailModal = ({ isOpen, onClose, lead, token, user, onSuccess }) => {
                     { icon: Mail, label: 'Email', key: 'email', value: lead.email, color: 'text-indigo-500', href: editing ? '' : `mailto:${lead.email}` },
                     { icon: MapPin, label: 'Location', key: 'location', value: lead.location, color: 'text-rose-500' },
                     { icon: Tag, label: 'Category', key: 'category', value: lead.category, color: 'text-amber-500' },
+                    { icon: ExternalLink, label: 'Store Link', key: 'store_link', value: lead.store_link, color: 'text-cyan-500', href: lead.store_link || undefined },
                   ].map((item, i) => (
                     editing ? (
                       <div key={i} className="flex items-start gap-3">

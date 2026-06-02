@@ -26,14 +26,12 @@ const ExtensionPage = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [statsRes, devicesRes, analyticsRes] = await Promise.all([
+      const [statsRes, devicesRes] = await Promise.all([
         axios.get(`${API_URL}/extension/stats`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API_URL}/extension/devices`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API_URL}/extension/analytics?period=${period}${selectedUser ? `&user_id=${selectedUser}` : ''}`, { headers: { Authorization: `Bearer ${token}` } })
+        axios.get(`${API_URL}/extension/devices`, { headers: { Authorization: `Bearer ${token}` } })
       ]);
       setStats(statsRes.data.data);
       setDevices(devicesRes.data.data.devices);
-      setAnalytics(analyticsRes.data.data);
     } catch (err) {
       console.error('Error fetching extension data:', err);
     } finally {

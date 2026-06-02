@@ -36,6 +36,11 @@ const vendorSnapshotSchema = new mongoose.Schema({
     type: String,
     enum: ['weekly', 'monthly'],
     required: true
+  },
+  targets: {
+    totalVendors: { type: Number, default: null },
+    verifiedVendors: { type: Number, default: null },
+    activeSellers: { type: Number, default: null }
   }
 }, { timestamps: true });
 
@@ -44,7 +49,7 @@ vendorSnapshotSchema.index({ type: 1, snapshotDate: -1 });
 vendorSnapshotSchema.index({ nepaliYear: 1, nepaliMonth: 1 });
 vendorSnapshotSchema.index({ snapshotDate: 1, type: 1 }, { unique: true });
 
-vendorSnapshotSchema.statics.captureSnapshot = async function (type) {
+vendorSnapshotSchema.statics.captureSnapshot = async function (type, targets = null) {
   const [totalVendors, verifiedVendors, activeSellerAgg] = await Promise.all([
     Lead.countDocuments({ type: 'vendor' }),
     Lead.countDocuments({
@@ -72,7 +77,7 @@ vendorSnapshotSchema.statics.captureSnapshot = async function (type) {
   const existing = await this.findOne({ snapshotDate, type });
   if (existing) return existing;
 
-  return await this.create({
+  const snapshotData = {
     totalVendors,
     verifiedVendors,
     activeSellers,
@@ -81,7 +86,15 @@ vendorSnapshotSchema.statics.captureSnapshot = async function (type) {
     nepaliYear: bsDate.year,
     nepaliMonth: bsDate.month,
     type
-  });
+  };
+  if (targets) {
+    snapshotData.targets = {
+      totalVendors: targets.totalVendors || null,
+      verifiedVendors: targets.verifiedVendors || null,
+      activeSellers: targets.activeSellers || null
+    };
+  }
+  return await this.create(snapshotData);
 };
 
 module.exports = mongoose.model('VendorSnapshot', vendorSnapshotSchema);

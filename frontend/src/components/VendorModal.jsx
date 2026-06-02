@@ -11,7 +11,7 @@ const VendorModal = ({ isOpen, onClose, onSuccess, token }) => {
   const [showBranches, setShowBranches] = useState(false);
   const [selectedBranches, setSelectedBranches] = useState([]);
   const [formData, setFormData] = useState({
-    business_name: '', contact_person: '', phone: '', email: '',
+    business_name: '', contact_person: '', phone: '', email: '', store_link: '',
     category: 'Wholesale', location: '', lead_source: 'Inbound',
     assigned_user: '', expected_product_count: 0, expected_monthly_sales: 0,
     lead_status: 'New', notes: ''
@@ -85,6 +85,10 @@ const VendorModal = ({ isOpen, onClose, onSuccess, token }) => {
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-500">Email Address</label>
               <input type="email" name="email" onChange={handleChange} placeholder="TBD if not available" className={inputClass} />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-500">Store Link</label>
+              <input type="url" name="store_link" onChange={handleChange} placeholder="TBD if not available" className={inputClass} />
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-500">Phone Number</label>

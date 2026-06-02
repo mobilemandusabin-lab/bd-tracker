@@ -13,6 +13,7 @@ router.get('/latest', vendorSnapshotController.getLatestSnapshot);
 router.get('/next-schedule', vendorSnapshotController.getNextSchedule);
 router.get('/compare', vendorSnapshotController.getComparison);
 router.post('/capture', vendorSnapshotController.triggerSnapshot);
+router.patch('/targets', vendorSnapshotController.updateTargets);
 router.delete('/', vendorSnapshotController.deleteSnapshots);
 
 module.exports = router;

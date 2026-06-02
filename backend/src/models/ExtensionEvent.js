@@ -60,6 +60,7 @@ const extensionEventSchema = new mongoose.Schema({
 
 extensionEventSchema.index({ event_type: 1, created_at: -1 });
 extensionEventSchema.index({ user_id: 1, created_at: -1 });
+extensionEventSchema.index({ user_id: 1, event_type: 1, created_at: -1 });
 extensionEventSchema.index({ event_type: 1, pending_count: 1, created_at: -1 });
 extensionEventSchema.index({ product_id: 1, event_type: 1, created_at: -1 });
 

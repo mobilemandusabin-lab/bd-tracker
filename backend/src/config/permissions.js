@@ -92,6 +92,12 @@ const PERMISSIONS = {
   // ── Activities ─────────────────────────────────────────────────
   ACTIVITIES_VIEW: 'activities.view',
   ACTIVITIES_CREATE: 'activities.create',
+
+  // ── Finance ───────────────────────────────────────────────────
+  FINANCE_VIEW: 'finance.view',
+  FINANCE_CREATE: 'finance.create',
+  FINANCE_UPDATE: 'finance.update',
+  FINANCE_DELETE: 'finance.delete',
 };
 
 // Default permissions for each role
@@ -141,9 +147,14 @@ const DEFAULT_ROLE_PERMISSIONS = {
     PERMISSIONS.NOTIFICATIONS_VIEW,
     PERMISSIONS.ACTIVITIES_VIEW,
     PERMISSIONS.ACTIVITIES_CREATE,
+    PERMISSIONS.FINANCE_VIEW,
+    PERMISSIONS.FINANCE_CREATE,
+    PERMISSIONS.FINANCE_UPDATE,
+    PERMISSIONS.FINANCE_DELETE,
   ],
 
   user: [
+    PERMISSIONS.FINANCE_VIEW,
     PERMISSIONS.LEADS_VIEW,
     PERMISSIONS.LEADS_CREATE,
     PERMISSIONS.LEADS_UPDATE,

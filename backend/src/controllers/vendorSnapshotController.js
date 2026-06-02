@@ -72,6 +72,9 @@ exports.getComparison = async (req, res) => {
       const current = snapshots[i];
       const previous = i > 0 ? snapshots[i - 1] : null;
 
+      // Targets from the previous snapshot represent goals for this snapshot
+      const targets = previous?.targets || {};
+
       comparison.push({
         _id: current._id,
         totalVendors: current.totalVendors,
@@ -87,6 +90,12 @@ exports.getComparison = async (req, res) => {
         nepaliYear: current.nepaliYear,
         nepaliMonth: current.nepaliMonth,
         type: current.type,
+        targets: {
+          totalVendors: targets.totalVendors || null,
+          verifiedVendors: targets.verifiedVendors || null,
+          activeSellers: targets.activeSellers || null
+        },
+        currentTargets: current.targets || {},
         totalVendorsDelta: previous ? current.totalVendors - previous.totalVendors : 0,
         verifiedVendorsDelta: previous ? current.verifiedVendors - previous.verifiedVendors : 0,
         activeSellersDelta: previous ? current.activeSellers - previous.activeSellers : 0,
@@ -114,18 +123,45 @@ exports.getComparison = async (req, res) => {
 // POST /api/v1/vendor-snapshots/capture
 exports.triggerSnapshot = async (req, res) => {
   try {
-    const { type = 'weekly' } = req.body;
+    const { type = 'weekly', targets } = req.body;
 
     if (!['weekly', 'monthly'].includes(type)) {
       return res.status(400).json({ status: 'error', message: 'Type must be weekly or monthly' });
     }
 
-    const snapshot = await takeSnapshot(type);
+    const snapshot = await takeSnapshot(type, targets);
 
     res.status(201).json({
       status: 'success',
       data: { snapshot }
     });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+// PATCH /api/v1/vendor-snapshots/targets
+exports.updateTargets = async (req, res) => {
+  try {
+    const { type = 'weekly', targets } = req.body;
+
+    if (!['weekly', 'monthly'].includes(type)) {
+      return res.status(400).json({ status: 'error', message: 'Type must be weekly or monthly' });
+    }
+
+    const snapshot = await VendorSnapshot.findOne({ type }).sort({ snapshotDate: -1 });
+    if (!snapshot) {
+      return res.status(404).json({ status: 'error', message: 'No snapshot found for this type' });
+    }
+
+    snapshot.targets = {
+      totalVendors: targets.totalVendors ?? snapshot.targets?.totalVendors ?? null,
+      verifiedVendors: targets.verifiedVendors ?? snapshot.targets?.verifiedVendors ?? null,
+      activeSellers: targets.activeSellers ?? snapshot.targets?.activeSellers ?? null
+    };
+    await snapshot.save();
+
+    res.status(200).json({ status: 'success', data: { snapshot } });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
   }

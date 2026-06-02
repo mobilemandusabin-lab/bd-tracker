@@ -9,8 +9,6 @@ import VendorDetailModal from '../components/VendorDetailModal';
 import LeadActionModal from '../components/LeadActionModal';
 import { cn } from '../utils/cn';
 import { API_URL } from '../config/api';
-import { useWhatsApp } from '../hooks/useWhatsApp';
-import WhatsAppModal from '../components/WhatsAppModal';
 import toast from 'react-hot-toast';
 
 const StatusBadge = ({ status }) => {
@@ -63,7 +61,6 @@ const VendorManagementPage = () => {
   const vendorsContainerRef = useRef(null);
   const desktopSentinelRef = useRef(null);
   const mobileSentinelRef = useRef(null);
-  const { showModal: showWAModal, whatsappType, openWhatsApp, handleSelect: handleWASelect, resetType: resetWAType, closeModal: closeWAModal } = useWhatsApp();
 
   const VENDOR_STATUSES = ['Negotiation', 'Document Pending', 'Verification', 'Onboarding', 'Activated', 'Active Seller', 'Lost', 'Self Registered', 'Proposal Dropped'];
 
@@ -243,12 +240,9 @@ const VendorManagementPage = () => {
     }
   }, [reduxLoadingMore, hasMore, currentPage, dispatch, buildParams, activeTab, searchQuery, sortOption]);
 
-  // Handle phone call with follow-up check — opens detail modal and logs call
+  // Log the call via API (no side effects)
   const handleCall = async (vendor) => {
     try {
-      setSelectedVendor(vendor);
-      setIsDetailModalOpen(true);
-
       const res = await axios.post(`${API_URL}/activities/log-call`, {
         lead_id: vendor._id,
         description: 'Quick call from vendor list'
@@ -271,8 +265,8 @@ const VendorManagementPage = () => {
     }
   };
 
-  // Open tel: link and log the call
-  const handleCallWithTel = (vendor) => {
+  // Open tel: link — use anchor tag on mobile, fallback to window.location
+  const handleCallClick = (vendor) => {
     const phone = vendor.phone?.replace(/\D/g, '');
     if (phone && phone.length >= 10) {
       window.location.href = `tel:${vendor.phone}`;
@@ -614,8 +608,8 @@ const VendorManagementPage = () => {
                   </td>
                   <td className="px-5 py-3 text-right">
                     <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                      <button onClick={() => handleCallWithTel(vendor)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all" title="Call"><Phone size={14} /></button>
-                      <button onClick={() => openWhatsApp(vendor.phone)} className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all" title="WhatsApp"><MessageCircle size={14} /></button>
+                      <a href={`tel:${vendor.phone}`} onClick={() => handleCall(vendor)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all" title="Call"><Phone size={14} /></a>
+                      <a href={vendor.phone ? `https://wa.me/${vendor.phone.replace(/\D/g, '')}` : '#'} target="_blank" rel="noopener noreferrer" className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all" title="WhatsApp"><MessageCircle size={14} /></a>
                       <button onClick={() => handleDetail(vendor)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all" title="View Details"><ExternalLink size={14} /></button>
                       <button onClick={() => handleAction(vendor)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all" title="Actions"><MoreVertical size={14} /></button>
                     </div>
@@ -705,8 +699,8 @@ const VendorManagementPage = () => {
                   {vendor.is_verified ? <ShieldCheck size={14} className="text-emerald-600" /> : <span className="text-[10px] text-slate-400">Pending</span>}
                 </div>
                 <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                  <button onClick={() => handleCallWithTel(vendor)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Call"><Phone size={14} /></button>
-                  <button onClick={() => openWhatsApp(vendor.phone)} className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg" title="WhatsApp"><MessageCircle size={14} /></button>
+                  <a href={`tel:${vendor.phone}`} onClick={() => handleCall(vendor)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Call"><Phone size={14} /></a>
+                  <a href={vendor.phone ? `https://wa.me/${vendor.phone.replace(/\D/g, '')}` : '#'} target="_blank" rel="noopener noreferrer" className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg" title="WhatsApp"><MessageCircle size={14} /></a>
                   <button onClick={() => handleDetail(vendor)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="View Details"><ExternalLink size={14} /></button>
                   <button onClick={() => handleAction(vendor)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Actions"><MoreVertical size={14} /></button>
                 </div>

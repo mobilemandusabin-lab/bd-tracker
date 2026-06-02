@@ -19,6 +19,7 @@ const LeadModal = ({ isOpen, onClose, onSuccess, token }) => {
     contact_person: '',
     phone: '',
     email: '',
+    store_link: '',
     category: '',
     location: '',
     lead_source: 'Inbound',
@@ -145,6 +146,13 @@ const LeadModal = ({ isOpen, onClose, onSuccess, token }) => {
               <label className="text-xs font-bold text-slate-500">Email Address</label>
               <input
                 type="email" name="email" onChange={handleChange} placeholder="TBD if not available"
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-100 focus:border-red-300 outline-none font-medium text-sm"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-500">Store Link</label>
+              <input
+                type="url" name="store_link" onChange={handleChange} placeholder="https://..."
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-100 focus:border-red-300 outline-none font-medium text-sm"
               />
             </div>

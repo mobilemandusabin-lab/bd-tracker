@@ -5,7 +5,7 @@ import { logout } from '../store/authSlice';
 import {
   LayoutDashboard, Users, UserCheck, ClipboardList, BarChart3, LogOut,
   ShieldCheck, Settings, Menu, X, Target, MessageSquare,
-  ShoppingBag, Cog, Store, Package, ChevronRight, Puzzle, Activity, Award
+  ShoppingBag, Cog, Store, Package, ChevronRight, Puzzle, Activity, Award, DollarSign
 } from 'lucide-react';
 import { cn } from '../utils/cn';
 import NotificationBell from '../components/NotificationBell';
