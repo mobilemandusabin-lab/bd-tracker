@@ -89,12 +89,8 @@ app.use('/api/v1/roles', roleRoutes);
 app.use('/api/v1/team-targets', teamTargetRoutes);
 app.use('/api/v1/finance', financeRoutes);
 
-// Vercel cron endpoint — no auth required, protected by CRON_SECRET
+// Vercel cron endpoint — no auth
 app.get('/api/cron/sync', async (req, res) => {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && req.headers.authorization !== `Bearer ${cronSecret}`) {
-    return res.status(401).json({ status: 'fail', message: 'Unauthorized' });
-  }
   try {
     const { runFullSync } = require('./services/unifiedSyncService');
     const log = await runFullSync('cron');

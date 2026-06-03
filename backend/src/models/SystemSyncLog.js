@@ -1,6 +1,11 @@
 const mongoose = require('mongoose');
 
 const systemSyncLogSchema = new mongoose.Schema({
+  status: {
+    type: String,
+    enum: ['running', 'completed', 'failed'],
+    default: 'running'
+  },
   triggeredBy: {
     type: String,
     enum: ['cron', 'manual', 'startup'],
@@ -13,7 +18,7 @@ const systemSyncLogSchema = new mongoose.Schema({
   },
   success: {
     type: Boolean,
-    required: true
+    default: null
   },
   durationMs: {
     type: Number,

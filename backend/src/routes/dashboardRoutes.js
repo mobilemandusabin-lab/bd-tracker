@@ -24,6 +24,7 @@ router.get('/day-compare', requirePermission('dashboard.day-compare'), dashboard
 router.get('/week-compare', requirePermission('dashboard.week-compare'), dashboardController.getWeekCompare);
 
 // Sync endpoints
+router.get('/sync-status', requirePermission('sync.manage'), dashboardController.getSyncStatus);
 router.post('/sync-all', requirePermission('sync.manage'), dashboardController.triggerFullSync);
 router.get('/sync-logs', requirePermission('sync.manage'), dashboardController.getSyncLogs);
 

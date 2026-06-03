@@ -1941,19 +1941,37 @@ exports.getWeekCompare = async (req, res) => {
   }
 };
 
-// POST /dashboard/sync-all — Manual full sync (super_admin only)
+// GET /dashboard/sync-status — Check if sync is currently running
+exports.getSyncStatus = async (req, res) => {
+  try {
+    const running = await SystemSyncLog.findOne({ status: 'running' }).sort({ createdAt: -1 }).lean();
+    const last = await SystemSyncLog.findOne({ status: { $ne: 'running' } }).sort({ createdAt: -1 }).lean();
+    res.status(200).json({
+      status: 'success',
+      data: {
+        syncing: !!running,
+        runningSince: running?.createdAt || null,
+        lastSync: last || null
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ status: 'fail', message: err.message });
+  }
+};
+
+// POST /dashboard/sync-all — Manual full sync
 exports.triggerFullSync = async (req, res) => {
   try {
     const { runFullSync } = require('../services/unifiedSyncService');
     const log = await runFullSync('manual', req.user?._id);
     res.status(200).json({
       status: 'success',
-      message: log.success ? 'Full sync completed' : 'Sync completed with errors',
+      message: 'Sync completed',
       data: log
     });
   } catch (err) {
     console.error('[Sync] Manual sync failed:', err);
-    res.status(500).json({ status: 'fail', message: err.message });
+    res.status(409).json({ status: 'fail', message: err.message });
   }
 };
 

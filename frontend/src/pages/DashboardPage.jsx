@@ -82,11 +82,38 @@ const StatCard = ({ title, value, icon: Icon, trend, color }) => {
 const DashboardPage = () => {
   const [stats, setStats] = useState(null);
   const [syncing, setSyncing] = useState(false);
+  const [serverSyncing, setServerSyncing] = useState(false);
+  const [syncElapsed, setSyncElapsed] = useState(0);
   const [syncResult, setSyncResult] = useState(null);
   const [showSyncLog, setShowSyncLog] = useState(false);
   const [syncLogs, setSyncLogs] = useState([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
   const { token, user } = useSelector((state) => state.auth);
+
+  const fetchSyncStatus = async () => {
+    try {
+      const res = await axios.get(`${API_URL}/dashboard/sync-status`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = res.data.data;
+      setServerSyncing(data.syncing);
+      if (data.syncing) {
+        setSyncing(true);
+        const started = new Date(data.runningSince).getTime();
+        setSyncElapsed(Math.floor((Date.now() - started) / 1000));
+        return true;
+      }
+      if (syncing) {
+        setSyncing(false);
+        setServerSyncing(false);
+        setSyncElapsed(0);
+        fetchSyncLogs();
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  };
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -100,7 +127,18 @@ const DashboardPage = () => {
       }
     };
     fetchStats();
+    fetchSyncStatus();
+    const interval = setInterval(fetchSyncStatus, 5000);
+    return () => clearInterval(interval);
   }, [token]);
+
+  useEffect(() => {
+    if (!syncing) return;
+    const interval = setInterval(() => {
+      setSyncElapsed(prev => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [syncing]);
 
   const handleFullSync = async () => {
     if (!window.confirm('Run full system sync? This includes Nepalcan orders, vendors, service branches, return checks, and vendor snapshots.')) return;
@@ -109,14 +147,19 @@ const DashboardPage = () => {
     setSyncResult(null);
 
     try {
-      const res = await axios.post(`${API_URL}/dashboard/sync-all`, {}, {
+      await axios.post(`${API_URL}/dashboard/sync-all`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setSyncResult(res.data.data);
-      fetchSyncLogs();
+      let poll = 0;
+      const checkDone = setInterval(async () => {
+        poll++;
+        const stillRunning = await fetchSyncStatus();
+        if (!stillRunning || poll > 120) {
+          clearInterval(checkDone);
+        }
+      }, 3000);
     } catch (err) {
       setSyncResult({ success: false, errorMessage: err.response?.data?.message || err.message });
-    } finally {
       setSyncing(false);
     }
   };
@@ -183,14 +226,14 @@ const DashboardPage = () => {
                 >
                   <ShoppingBag size={14} /> Sales
                 </Link>
-                <button
-                  onClick={handleFullSync}
-                  disabled={syncing}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-white text-red-700 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-red-50 transition-all shadow-lg disabled:opacity-50"
-                >
-                  {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                  {syncing ? 'Syncing...' : 'Sync All'}
-                </button>
+<button
+  onClick={handleFullSync}
+  disabled={syncing}
+  className="flex items-center gap-2 px-4 py-2.5 bg-white text-red-700 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-red-50 transition-all shadow-lg disabled:opacity-50"
+>
+  {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+  {syncing ? `Syncing ${syncElapsed}s` : 'Sync All'}
+</button>
                 <button
                   onClick={() => { setShowSyncLog(!showSyncLog); if (!showSyncLog) fetchSyncLogs(); }}
                   className="flex items-center gap-2 px-4 py-2.5 bg-white/10 backdrop-blur-sm text-white border border-white/20 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-white/20 transition-all"
@@ -202,29 +245,45 @@ const DashboardPage = () => {
             )}
           </div>
         </div>
-        {syncResult && (
+        {(syncResult || syncing) && (
           <div className="relative mt-4 px-4 py-3 bg-white/10 backdrop-blur-sm rounded-xl space-y-2">
             <div className="flex items-center gap-2">
-              {syncResult.success ? <CheckCircle2 size={14} className="text-emerald-300" /> : <XCircle size={14} className="text-red-300" />}
+              {syncing ? (
+                <Loader2 size={14} className="animate-spin text-amber-300" />
+              ) : syncResult?.success ? (
+                <CheckCircle2 size={14} className="text-emerald-300" />
+              ) : (
+                <XCircle size={14} className="text-red-300" />
+              )}
               <p className="text-xs font-bold text-white">
-                {syncResult.success ? 'Sync completed successfully' : 'Sync completed with errors'}
-                {syncResult.durationMs && ` (${(syncResult.durationMs / 1000).toFixed(1)}s)`}
+                {syncing ? `Sync in progress (${syncElapsed}s)` : syncResult?.success ? 'Sync completed' : 'Sync completed with errors'}
+                {!syncing && syncResult?.durationMs ? ` (${(syncResult.durationMs / 1000).toFixed(1)}s)` : ''}
               </p>
             </div>
-            <div className="flex flex-wrap gap-3 text-[10px] font-bold text-white/80">
-              {syncResult.tasks?.nepalcanOrders?.ran && (
-                <span>Orders: {syncResult.tasks.nepalcanOrders.ordersSynced ?? '-'}</span>
-              )}
-              {syncResult.tasks?.vendorSync?.ran && (
-                <span>Vendors: {syncResult.tasks.vendorSync.vendorsSynced ?? '-'}</span>
-              )}
-              {syncResult.tasks?.returnedCheck?.ran && (
-                <span>Returns: {syncResult.tasks.returnedCheck.ordersUpdated ?? 0}</span>
-              )}
-              {syncResult.tasks?.vendorSnapshots?.ran && (
-                <span>Snapshots: {syncResult.tasks.vendorSnapshots.snapshotsTaken ?? 0}</span>
-              )}
-            </div>
+            {syncResult?.tasks && (
+              <div className="flex flex-wrap gap-3 text-[10px] font-bold text-white/80">
+                {syncResult.tasks.nepalcanOrders?.ran && (
+                  <span className={syncResult.tasks.nepalcanOrders.success === false ? 'text-red-300' : ''}>
+                    Orders: {syncResult.tasks.nepalcanOrders.ordersSynced ?? '-'}
+                  </span>
+                )}
+                {syncResult.tasks.vendorSync?.ran && (
+                  <span className={syncResult.tasks.vendorSync.success === false ? 'text-red-300' : ''}>
+                    Vendors: {syncResult.tasks.vendorSync.vendorsSynced ?? '-'}
+                    {syncResult.tasks.vendorSync.vendorsCreated > 0 && ` (+${syncResult.tasks.vendorSync.vendorsCreated} new)`}
+                  </span>
+                )}
+                {syncResult.tasks.returnedCheck?.ran && (
+                  <span>Returns: {syncResult.tasks.returnedCheck.ordersUpdated ?? 0}</span>
+                )}
+                {syncResult.tasks.vendorSnapshots?.ran && (
+                  <span>Snapshots: {syncResult.tasks.vendorSnapshots.snapshotsTaken ?? 0}</span>
+                )}
+                {syncResult.tasks.overdueCheck?.ran && (
+                  <span>Overdue: {syncResult.tasks.overdueCheck?.result?.overdueCount ?? 0}</span>
+                )}
+              </div>
+            )}
           </div>
         )}
         {showSyncLog && syncLogs.length > 0 && (
@@ -237,7 +296,13 @@ const DashboardPage = () => {
                 <div key={log._id || i} className="px-4 py-2 border-b border-white/5 last:border-0 hover:bg-white/5">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      {log.success ? <CheckCircle2 size={10} className="text-emerald-300" /> : <XCircle size={10} className="text-red-300" />}
+                      {log.status === 'running' ? (
+                        <Loader2 size={10} className="animate-spin text-amber-300" />
+                      ) : log.success ? (
+                        <CheckCircle2 size={10} className="text-emerald-300" />
+                      ) : (
+                        <XCircle size={10} className="text-red-300" />
+                      )}
                       <span className="text-[10px] font-bold text-white">
                         {log.triggeredBy === 'manual' ? 'Manual' : log.triggeredBy === 'cron' ? 'Scheduled' : 'Startup'}
                         {log.userId?.name && ` by ${log.userId.name}`}
@@ -247,6 +312,26 @@ const DashboardPage = () => {
                       {new Date(log.createdAt).toLocaleString()} · {(log.durationMs / 1000).toFixed(1)}s
                     </span>
                   </div>
+                  {log.tasks && (log.tasks.nepalcanOrders?.ran || log.tasks.vendorSync?.ran) && (
+                    <div className="flex flex-wrap gap-2 mt-1 ml-4">
+                      {log.tasks.nepalcanOrders?.ran && (
+                        <span className="text-[9px] text-white/40">
+                          Orders: {log.tasks.nepalcanOrders.ordersSynced ?? '-'}
+                        </span>
+                      )}
+                      {log.tasks.vendorSync?.ran && (
+                        <span className="text-[9px] text-white/40">
+                          Vendors: {log.tasks.vendorSync.vendorsSynced ?? '-'}
+                          {log.tasks.vendorSync.vendorsCreated > 0 && ` (${log.tasks.vendorSync.vendorsCreated} new)`}
+                        </span>
+                      )}
+                      {log.tasks.vendorSnapshots?.ran && (
+                        <span className="text-[9px] text-white/40">
+                          Snapshots: {log.tasks.vendorSnapshots.snapshotsTaken}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

@@ -461,7 +461,7 @@ exports.getAnalytics = async (req, res) => {
       }
     }
 
-    const matchFilter = { created_at: { $gte: startDate, $lte: endDate } };
+    const matchFilter = { created_at: { $gte: startDate, $lte: endDate }, product_id: { $ne: 'b' } };
     const isAdmin = req.userPermissions?.includes('extension.admin');
 
     // Non-admin users can only see their own data
@@ -795,7 +795,7 @@ exports.getAnalyticsDetails = async (req, res) => {
     }
 
     const { user_id } = req.query;
-    const matchFilter = { event_type, created_at: { $gte: startDate, $lte: endDate } };
+    const matchFilter = { event_type, created_at: { $gte: startDate, $lte: endDate }, product_id: { $ne: 'b' } };
     const isAdmin = req.userPermissions?.includes('extension.admin');
     if (!isAdmin) {
       matchFilter.user_id = req.user._id;
