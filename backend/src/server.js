@@ -17,6 +17,21 @@ const server = app.listen(port, '0.0.0.0', async () => {
   await seedExtensionVersion();
   startSnapshotScheduler();
 
+  // Reset any stale running syncs on startup
+  try {
+    const SystemSyncLog = require('./models/SystemSyncLog');
+    const stale = await SystemSyncLog.findOne({ status: 'running' });
+    if (stale) {
+      stale.status = 'failed';
+      stale.success = false;
+      stale.errorMessage = 'Auto-reset on server restart';
+      await stale.save();
+      console.log('[Startup] Reset stale running sync from', stale.createdAt);
+    }
+  } catch (err) {
+    console.error('[Startup] Failed to reset stale syncs:', err.message);
+  }
+
   // Run full sync on startup (after 30s to let DB connect)
   setTimeout(async () => {
     try {

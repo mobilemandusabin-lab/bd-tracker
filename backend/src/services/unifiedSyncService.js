@@ -3,10 +3,20 @@ const { checkOverdueFollowups, checkEscalationTriggers } = require('./overdueChe
 const { syncAllNepalcanData } = require('./nepalcanSyncService');
 const { checkAndTakeSnapshots } = require('./vendorSnapshotService');
 
+const STALE_SYNC_TIMEOUT_MS = 30 * 60 * 1000;
+
 const runFullSync = async (triggeredBy = 'cron', userId = null) => {
   const existingRunning = await SystemSyncLog.findOne({ status: 'running' });
   if (existingRunning) {
-    throw new Error('A sync is already in progress (started ' + new Date(existingRunning.createdAt).toLocaleString() + ')');
+    const age = Date.now() - new Date(existingRunning.createdAt).getTime();
+    if (age < STALE_SYNC_TIMEOUT_MS) {
+      throw new Error('A sync is already in progress (started ' + new Date(existingRunning.createdAt).toLocaleString() + ')');
+    }
+    existingRunning.status = 'failed';
+    existingRunning.success = false;
+    existingRunning.errorMessage = 'Auto-reset — stale sync older than 30min';
+    await existingRunning.save();
+    console.log('[Full Sync] Reset stale running sync from', existingRunning.createdAt);
   }
 
   const startTime = Date.now();
