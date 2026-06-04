@@ -5,10 +5,16 @@ const Activity = require('../models/Activity');
 const Goal = require('../models/Goal');
 const User = require('../models/User');
 
-const groq = new OpenAI({
-  baseURL: 'https://api.groq.com/openai/v1',
-  apiKey: process.env.GROQ_API_KEY
-});
+let groq = null;
+function getGroq() {
+  if (!groq) {
+    groq = new OpenAI({
+      baseURL: 'https://api.groq.com/openai/v1',
+      apiKey: process.env.GROQ_API_KEY || 'sk-placeholder'
+    });
+  }
+  return groq;
+}
 
 const MODEL = 'llama-3.3-70b-versatile';
 
@@ -289,7 +295,7 @@ ${context}`;
   ];
 
   try {
-    const response = await groq.chat.completions.create({
+    const response = await getGroq().chat.completions.create({
       model: MODEL,
       messages,
       temperature: 0.3,

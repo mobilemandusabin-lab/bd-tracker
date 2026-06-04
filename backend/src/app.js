@@ -23,7 +23,10 @@ const extensionRoutes = require('./routes/extensionRoutes');
 const roleRoutes = require('./routes/roleRoutes');
 const teamTargetRoutes = require('./routes/teamTargetRoutes');
 const financeRoutes = require('./routes/financeRoutes');
-const aiRoutes = require('./routes/aiRoutes');
+let aiRoutes;
+if (process.env.GROQ_API_KEY) {
+  aiRoutes = require('./routes/aiRoutes');
+}
 
 const app = express();
 
@@ -89,7 +92,7 @@ app.use('/api/v1/extension', extensionRoutes);
 app.use('/api/v1/roles', roleRoutes);
 app.use('/api/v1/team-targets', teamTargetRoutes);
 app.use('/api/v1/finance', financeRoutes);
-app.use('/api/v1/ai', aiRoutes);
+if (aiRoutes) app.use('/api/v1/ai', aiRoutes);
 
 // Vercel cron endpoint — no auth
 app.get('/api/cron/sync', async (req, res) => {
