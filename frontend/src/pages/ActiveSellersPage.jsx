@@ -240,7 +240,7 @@ const ActiveSellersPage = () => {
 
       {/* Table */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="hidden lg:block overflow-x-auto overflow-y-auto" ref={sellersContainerRef} style={{ maxHeight: 'calc(100vh - 400px)' }}>
+        <div className="hidden lg:block overflow-x-auto overflow-y-auto" ref={sellersContainerRef} style={{ maxHeight: 'calc(100dvh - 400px)' }}>
           <table className="w-full text-left table-fixed">
             <thead>
               <tr className="bg-red-50/50 border-b border-red-100">

@@ -124,4 +124,11 @@ nepalcanOrderSchema.methods.getTotalFulfillmentTime = function() {
   return null;
 };
 
+// Indexes for analytics queries
+nepalcanOrderSchema.index({ orderStatus: 1, createdAt: -1 });
+nepalcanOrderSchema.index({ vendor_lead_id: 1 });
+nepalcanOrderSchema.index({ createdAt: -1 });
+nepalcanOrderSchema.index({ vendor: 1 });
+nepalcanOrderSchema.index({ customer: 1 });
+
 module.exports = mongoose.model('NepalcanOrder', nepalcanOrderSchema);

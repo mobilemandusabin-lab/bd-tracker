@@ -28,9 +28,6 @@ const OperationsAnalyticsPage = () => {
   const [savingTarget, setSavingTarget] = useState(false);
 
   useEffect(() => {
-    // Only fetch with custom dates when BOTH are set; otherwise use period
-    if (startDate && !endDate) return; // wait for end date
-    if (!startDate && endDate) return; // wait for start date
     fetchAnalytics();
   }, [period, startDate, endDate]);
 
@@ -38,12 +35,24 @@ const OperationsAnalyticsPage = () => {
     if (view === 'team') fetchTeamPerformance();
   }, [view, teamFilter]);
 
+  const buildDateParams = () => {
+    if (startDate && endDate) return { start_date: startDate, end_date: endDate };
+    if (startDate) return { start_date: startDate, end_date: new Date().toISOString().split('T')[0] };
+    if (endDate) {
+      const d = new Date(endDate);
+      d.setDate(d.getDate() - 30);
+      return { start_date: d.toISOString().split('T')[0], end_date };
+    }
+    return null;
+  };
+
   const fetchAnalytics = async () => {
     setLoading(true);
     try {
       let url = `${API_URL}/extension/analytics`;
-      if (startDate && endDate) {
-        url += `?start_date=${startDate}&end_date=${endDate}`;
+      const dateParams = buildDateParams();
+      if (dateParams) {
+        url += `?start_date=${dateParams.start_date}&end_date=${dateParams.end_date}`;
       } else {
         url += `?period=${period}`;
       }
@@ -93,7 +102,10 @@ const OperationsAnalyticsPage = () => {
 
   const handleStartDate = (e) => {
     setStartDate(e.target.value);
-    if (!endDate) setEndDate(new Date().toISOString().split('T')[0]);
+  };
+
+  const handleEndDate = (e) => {
+    setEndDate(e.target.value);
   };
 
   const clearDateRange = () => {
@@ -141,8 +153,9 @@ const OperationsAnalyticsPage = () => {
     setDetailModal({ eventType, label, events: [], loading: true });
     try {
       let url = `${API_URL}/extension/analytics/details?event_type=${eventType}`;
-      if (startDate && endDate) {
-        url += `&start_date=${startDate}&end_date=${endDate}`;
+      const dateParams = buildDateParams();
+      if (dateParams) {
+        url += `&start_date=${dateParams.start_date}&end_date=${dateParams.end_date}`;
       } else {
         url += `&period=${period}`;
       }
@@ -283,7 +296,7 @@ const OperationsAnalyticsPage = () => {
           <input
             type="date"
             value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
+            onChange={handleEndDate}
             className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-600 border-none outline-none"
           />
           {startDate && (

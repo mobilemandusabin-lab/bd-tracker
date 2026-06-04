@@ -126,7 +126,7 @@ const Layout = () => {
   ];
 
   return (
-    <div className="flex h-screen bg-[#fafafa] overflow-hidden">
+    <div className="flex h-dvh bg-[#fafafa] overflow-hidden">
       {/* Mobile Header */}
       <header className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-white border-b border-slate-100 z-[300] flex items-center justify-between px-4">
         <div className="flex items-center gap-2">
@@ -225,7 +225,7 @@ const Layout = () => {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col h-screen overflow-hidden">
+      <main className="flex-1 flex flex-col h-dvh overflow-hidden">
         {/* Desktop Header */}
         <header className="hidden lg:flex h-14 items-center justify-between px-8 border-b border-slate-100 bg-white/80 backdrop-blur-md shrink-0 relative z-[300]">
           <div />

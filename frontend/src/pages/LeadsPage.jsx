@@ -725,7 +725,7 @@ const LeadsPage = () => {
       {/* Leads Table */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         {/* Desktop Table */}
-        <div className="hidden lg:block overflow-x-auto overflow-y-auto" ref={leadsContainerRef} style={{ maxHeight: 'calc(100vh - 340px)' }}>
+        <div className="hidden lg:block overflow-x-auto overflow-y-auto" ref={leadsContainerRef} style={{ maxHeight: 'calc(100dvh - 340px)' }}>
           {activeTab === 'followup' ? (
             <table className="w-full text-left border-collapse table-fixed">
               <thead>

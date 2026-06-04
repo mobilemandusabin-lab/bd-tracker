@@ -267,7 +267,9 @@ leadSchema.set('toObject', { virtuals: true });
 // Indexes for common queries
 leadSchema.index({ lead_status: 1 });
 leadSchema.index({ assigned_user: 1 });
+leadSchema.index({ assigned_user: 1, created_at: -1 });
 leadSchema.index({ created_at: -1 });
+leadSchema.index({ type: 1, created_at: -1 });
 leadSchema.index({ converted_at: -1 });
 leadSchema.index({ drop_date: -1 });
 leadSchema.index({ updated_at: -1 });

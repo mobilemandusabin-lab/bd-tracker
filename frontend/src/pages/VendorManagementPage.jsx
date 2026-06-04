@@ -485,7 +485,7 @@ const VendorManagementPage = () => {
       {/* Table */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         {/* Desktop Table */}
-        <div className="hidden lg:block overflow-x-auto overflow-y-auto" ref={vendorsContainerRef} style={{ maxHeight: 'calc(100vh - 400px)' }}>
+        <div className="hidden lg:block overflow-x-auto overflow-y-auto" ref={vendorsContainerRef} style={{ maxHeight: 'calc(100dvh - 400px)' }}>
           {activeTab === 'followup' ? (
             <table className="w-full text-left table-fixed">
               <thead>

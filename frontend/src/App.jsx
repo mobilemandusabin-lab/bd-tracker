@@ -25,6 +25,7 @@ import OperationalGoalsPage from './pages/OperationalGoalsPage';
 import FinancePage from './pages/FinancePage';
 import ProtectedRoute from './components/ProtectedRoute';
 import InstallPrompt from './components/InstallPrompt';
+import AIChatWidget from './components/AIChatWidget';
 
 function App() {
   const dispatch = useDispatch();
@@ -128,6 +129,7 @@ function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
+      <AIChatWidget />
     </>
   );
 }

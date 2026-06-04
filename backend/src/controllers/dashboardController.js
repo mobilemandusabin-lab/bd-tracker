@@ -875,209 +875,256 @@ exports.getAnalytics = async (req, res) => {
       default: startDate = new Date(0);
     }
 
-    const [funnel, monthlyTrends, sourceConversion, categoryConversion, dropReasons, activityHeatmap, revenueTrend, scoreDistribution, avgConversionTime, totalLeads, totalConverted, totalLost, totalRevenue, totalVendors, activeVendors, vendorTrends, allGoals] = await Promise.all([
+    const dateFilter = { $gte: startDate };
+
+    const [
+      leadResult,
+      activityResult,
+      orderResult,
+      revenueBySource,
+      bdRevenueAgg,
+      lossByBD,
+      syncHealth,
+      syncTimeline,
+      allGoals,
+      allUsers
+    ] = await Promise.all([
+
+      // 1. Lead $facet — merges ~20 separate aggregations into 1
       Lead.aggregate([
-        { $match: { created_at: { $gte: startDate } } },
-        { $group: { _id: '$lead_status', count: { $sum: 1 } } },
-        { $sort: { count: -1 } }
+        { $match: { created_at: dateFilter } },
+        { $facet: {
+          funnel: [
+            { $group: { _id: '$lead_status', count: { $sum: 1 } } },
+            { $sort: { count: -1 } }
+          ],
+          monthlyTrends: [
+            { $group: {
+              _id: { year: { $year: '$created_at' }, month: { $month: '$created_at' } },
+              created: { $sum: 1 },
+              converted: { $sum: { $cond: [{ $in: ['$lead_status', ['Activated', 'Active Seller']] }, 1, 0] } }
+            }},
+            { $sort: { '_id.year': 1, '_id.month': 1 } }
+          ],
+          sourceConversion: [
+            { $group: { _id: '$lead_source', total: { $sum: 1 }, converted: { $sum: { $cond: [{ $in: ['$lead_status', ['Activated', 'Active Seller']] }, 1, 0] } } } },
+            { $sort: { total: -1 } }
+          ],
+          categoryConversion: [
+            { $match: { category: { $exists: true, $ne: null } } },
+            { $group: { _id: '$category', total: { $sum: 1 }, converted: { $sum: { $cond: [{ $in: ['$lead_status', ['Activated', 'Active Seller']] }, 1, 0] } } } },
+            { $sort: { total: -1 } },
+            { $limit: 10 }
+          ],
+          dropReasons: [
+            { $match: { lead_status: 'Lost', drop_reason: { $exists: true, $ne: null } } },
+            { $group: { _id: '$drop_reason', count: { $sum: 1 } } },
+            { $sort: { count: -1 } }
+          ],
+          scoreDistribution: [
+            { $bucket: { groupBy: '$lead_score', boundaries: [0, 21, 41, 61, 81, 101], default: '100+', output: { count: { $sum: 1 } } } }
+          ],
+          avgConversionTime: [
+            { $match: { converted_at: { $exists: true, $ne: null } } },
+            { $project: { daysToConvert: { $divide: [{ $subtract: ['$converted_at', '$created_at'] }, 86400000] } } },
+            { $group: { _id: null, avgDays: { $avg: '$daysToConvert' }, minDays: { $min: '$daysToConvert' }, maxDays: { $max: '$daysToConvert' } } }
+          ],
+          vendorTrends: [
+            { $match: { type: 'vendor' } },
+            { $group: {
+              _id: { year: { $year: '$created_at' }, month: { $month: '$created_at' } },
+              total: { $sum: 1 },
+              verified: { $sum: { $cond: [{ $in: ['$lead_status', ['Activated', 'Active Seller', 'Verification']] }, 1, 0] } },
+              activeSellers: { $sum: { $cond: ['$active_seller', 1, 0] } }
+            }},
+            { $sort: { '_id.year': 1, '_id.month': 1 } }
+          ],
+          stageVelocity: [
+            { $match: { lead_status: { $ne: null } } },
+            { $group: {
+              _id: '$lead_status',
+              count: { $sum: 1 },
+              avgDaysInStage: { $avg: { $divide: [{ $subtract: ['$updated_at', '$created_at'] }, 86400000] } }
+            }},
+            { $sort: { count: -1 } }
+          ],
+          stageVelocityConverted: [
+            { $match: { converted_at: { $exists: true, $ne: null } } },
+            { $project: { totalDays: { $divide: [{ $subtract: ['$converted_at', '$created_at'] }, 86400000] } } },
+            { $bucket: { groupBy: '$totalDays', boundaries: [0, 7, 14, 30, 60, 90, 180, 365, 9999], default: '365+', output: { count: { $sum: 1 }, avgDays: { $avg: '$totalDays' } } } }
+          ],
+          lossBySource: [
+            { $match: { lead_status: 'Lost' } },
+            { $group: { _id: '$lead_source', count: { $sum: 1 } } },
+            { $sort: { count: -1 } }
+          ],
+          lossByCategory: [
+            { $match: { lead_status: 'Lost', category: { $exists: true, $ne: null } } },
+            { $group: { _id: '$category', count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+            { $limit: 10 }
+          ],
+          lossTimeline: [
+            { $match: { lead_status: 'Lost', drop_date: { $exists: true, $ne: null } } },
+            { $project: { daysToLoss: { $divide: [{ $subtract: ['$drop_date', '$created_at'] }, 86400000] } } },
+            { $bucket: { groupBy: '$daysToLoss', boundaries: [0, 7, 14, 30, 60, 90, 180, 365, 9999], default: '365+', output: { count: { $sum: 1 } } } }
+          ],
+          sourceROI: [
+            { $match: { lead_source: { $exists: true, $ne: null } } },
+            { $group: {
+              _id: '$lead_source',
+              total: { $sum: 1 },
+              converted: { $sum: { $cond: [{ $in: ['$lead_status', ['Activated', 'Active Seller']] }, 1, 0] } },
+              lost: { $sum: { $cond: [{ $eq: ['$lead_status', 'Lost'] }, 1, 0] } },
+              avgLeadScore: { $avg: '$lead_score' }
+            }},
+            { $addFields: { conversionRate: { $cond: [{ $gt: ['$total', 0] }, { $multiply: [{ $divide: ['$converted', '$total'] }, 100] }, 0] } } },
+            { $sort: { total: -1 } }
+          ],
+          bdMetrics: [
+            { $match: { assigned_user: { $exists: true, $ne: null } } },
+            { $group: {
+              _id: '$assigned_user',
+              totalLeads: { $sum: 1 },
+              converted: { $sum: { $cond: [{ $in: ['$lead_status', ['Activated', 'Active Seller']] }, 1, 0] } },
+              lost: { $sum: { $cond: [{ $eq: ['$lead_status', 'Lost'] }, 1, 0] } },
+              avgScore: { $avg: '$lead_score' }
+            }}
+          ],
+          summary: [
+            { $group: {
+              _id: null,
+              totalLeads: { $sum: 1 },
+              totalConverted: { $sum: { $cond: [{ $in: ['$lead_status', ['Activated', 'Active Seller']] }, 1, 0] } },
+              totalLost: { $sum: { $cond: [{ $eq: ['$lead_status', 'Lost'] }, 1, 0] } },
+              totalVendors: { $sum: { $cond: [{ $eq: ['$type', 'vendor'] }, 1, 0] } },
+              activeVendors: { $sum: { $cond: [{ $and: [{ $eq: ['$type', 'vendor'] }, '$active_seller'] }, 1, 0] } }
+            }}
+          ]
+        }}
       ]),
-      Lead.aggregate([
-        { $match: { created_at: { $gte: startDate } } },
-        {
-          $group: {
-            _id: { year: { $year: '$created_at' }, month: { $month: '$created_at' } },
-            created: { $sum: 1 },
-            converted: { $sum: { $cond: [{ $in: ['$lead_status', ['Activated', 'Active Seller']] }, 1, 0] } }
-          }
-        },
-        { $sort: { '_id.year': 1, '_id.month': 1 } }
+
+      // 2. Activity $facet — merges heatmap + activity counts into 1
+      Activity.aggregate([
+        { $match: { created_at: dateFilter } },
+        { $facet: {
+          activityHeatmap: [
+            { $group: { _id: { day: { $dayOfWeek: '$created_at' }, hour: { $hour: '$created_at' } }, count: { $sum: 1 } } }
+          ],
+          bdActivityCounts: [
+            { $group: { _id: '$user_id', activities: { $sum: 1 } } }
+          ]
+        }}
       ]),
-      Lead.aggregate([
-        { $match: { created_at: { $gte: startDate } } },
-        {
-          $group: {
-            _id: '$lead_source',
-            total: { $sum: 1 },
-            converted: { $sum: { $cond: [{ $in: ['$lead_status', ['Activated', 'Active Seller']] }, 1, 0] } }
-          }
-        },
-        { $sort: { total: -1 } }
+
+      // 3. NepalcanOrder $facet — merges revenue, summary, cohorts into 1 (no $lookup queries)
+      NepalcanOrder.aggregate([
+        { $match: { createdAt: dateFilter } },
+        { $facet: {
+          revenueTrend: [
+            { $match: { orderStatus: 'Delivered' } },
+            { $group: { _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } }, revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 } } },
+            { $sort: { '_id.year': 1, '_id.month': 1 } }
+          ],
+          totalRevenue: [
+            { $match: { orderStatus: 'Delivered' } },
+            { $group: { _id: null, total: { $sum: '$totalAmount' }, count: { $sum: 1 } } }
+          ],
+          customerFirstOrder: [
+            { $match: { orderStatus: 'Delivered' } },
+            { $group: { _id: '$customer', firstOrder: { $min: '$createdAt' }, orderCount: { $sum: 1 }, totalSpent: { $sum: '$totalAmount' } } },
+            { $match: { orderCount: { $gt: 0 } } },
+            { $project: { firstOrderMonth: { $dateToString: { format: '%Y-%m', date: '$firstOrder' } }, orderCount: 1, totalSpent: 1, isRepeat: { $cond: [{ $gt: ['$orderCount', 1] }, true, false] } } },
+            { $group: { _id: '$firstOrderMonth', totalCustomers: { $sum: 1 }, repeatCustomers: { $sum: { $cond: ['$isRepeat', 1, 0] } }, avgOrders: { $avg: '$orderCount' }, avgSpent: { $avg: '$totalSpent' } } },
+            { $addFields: { retentionRate: { $cond: [{ $gt: ['$totalCustomers', 0] }, { $multiply: [{ $divide: ['$repeatCustomers', '$totalCustomers'] }, 100] }, 0] } } },
+            { $sort: { _id: 1 } }
+          ]
+        }}
       ]),
+
+      // 4. Revenue by source (separate due to $lookup)
+      NepalcanOrder.aggregate([
+        { $match: { orderStatus: 'Delivered', createdAt: dateFilter } },
+        { $lookup: { from: 'leads', localField: 'vendor_lead_id', foreignField: '_id', as: 'lead' } },
+        { $unwind: { path: '$lead', preserveNullAndEmptyArrays: false } },
+        { $group: { _id: '$lead.lead_source', revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 } } },
+        { $sort: { revenue: -1 } }
+      ]),
+
+      // 5. BD Revenue (separate due to $lookup)
+      NepalcanOrder.aggregate([
+        { $match: { orderStatus: 'Delivered', createdAt: dateFilter } },
+        { $lookup: { from: 'leads', localField: 'vendor_lead_id', foreignField: '_id', as: 'lead' } },
+        { $unwind: { path: '$lead', preserveNullAndEmptyArrays: false } },
+        { $match: { 'lead.assigned_user': { $exists: true, $ne: null } } },
+        { $group: { _id: '$lead.assigned_user', revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 } } }
+      ]),
+
+      // 6. Loss by BD (separate due to $lookup)
       Lead.aggregate([
-        { $match: { created_at: { $gte: startDate }, category: { $exists: true, $ne: null } } },
-        {
-          $group: {
-            _id: '$category',
-            total: { $sum: 1 },
-            converted: { $sum: { $cond: [{ $in: ['$lead_status', ['Activated', 'Active Seller']] }, 1, 0] } }
-          }
-        },
-        { $sort: { total: -1 } },
+        { $match: { lead_status: 'Lost', created_at: dateFilter } },
+        { $group: { _id: '$assigned_user', count: { $sum: 1 } } },
+        { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'user' } },
+        { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+        { $project: { name: '$user.name', count: 1 } },
+        { $sort: { count: -1 } },
         { $limit: 10 }
       ]),
-      Lead.aggregate([
-        { $match: { lead_status: 'Lost', drop_reason: { $exists: true, $ne: null }, created_at: { $gte: startDate } } },
-        { $group: { _id: '$drop_reason', count: { $sum: 1 } } },
-        { $sort: { count: -1 } }
+
+      // 7. Sync health
+      SystemSyncLog.aggregate([
+        { $match: { createdAt: dateFilter } },
+        { $group: { _id: null, total: { $sum: 1 }, successful: { $sum: { $cond: ['$success', 1, 0] } }, failed: { $sum: { $cond: ['$success', 0, 1] } }, avgDurationMs: { $avg: '$durationMs' } } }
       ]),
-      Activity.aggregate([
-        { $match: { created_at: { $gte: startDate } } },
-        { $group: { _id: { day: { $dayOfWeek: '$created_at' }, hour: { $hour: '$created_at' } }, count: { $sum: 1 } } }
+
+      // 8. Sync timeline
+      SystemSyncLog.aggregate([
+        { $match: { createdAt: dateFilter } },
+        { $project: { date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, success: 1, durationMs: 1 } },
+        { $group: { _id: '$date', total: { $sum: 1 }, successful: { $sum: { $cond: ['$success', 1, 0] } }, avgDuration: { $avg: '$durationMs' } } },
+        { $sort: { _id: 1 } },
+        { $limit: 30 }
       ]),
-      NepalcanOrder.aggregate([
-        { $match: { createdAt: { $gte: startDate }, orderStatus: 'Delivered' } },
-        { $group: { _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } }, revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 } } },
-        { $sort: { '_id.year': 1, '_id.month': 1 } }
-      ]),
-      Lead.aggregate([
-        { $match: { created_at: { $gte: startDate } } },
-        { $bucket: { groupBy: '$lead_score', boundaries: [0, 21, 41, 61, 81, 101], default: '100+', output: { count: { $sum: 1 } } } }
-      ]),
-      Lead.aggregate([
-        { $match: { converted_at: { $exists: true, $ne: null }, created_at: { $gte: startDate } } },
-        { $project: { daysToConvert: { $divide: [{ $subtract: ['$converted_at', '$created_at'] }, 86400000] } } },
-        { $group: { _id: null, avgDays: { $avg: '$daysToConvert' }, minDays: { $min: '$daysToConvert' }, maxDays: { $max: '$daysToConvert' } } }
-      ]),
-      Lead.countDocuments({ created_at: { $gte: startDate } }),
-      Lead.countDocuments({ lead_status: { $in: ['Activated', 'Active Seller'] }, created_at: { $gte: startDate } }),
-      Lead.countDocuments({ lead_status: 'Lost', created_at: { $gte: startDate } }),
-      NepalcanOrder.aggregate([
-        { $match: { orderStatus: 'Delivered', createdAt: { $gte: startDate } } },
-        { $group: { _id: null, total: { $sum: '$totalAmount' }, count: { $sum: 1 } } }
-      ]),
-      Lead.countDocuments({ type: 'vendor', created_at: { $gte: startDate } }),
-      Lead.countDocuments({ type: 'vendor', active_seller: true, created_at: { $gte: startDate } }),
-      // Vendor monthly trends - total vs verified
-      Lead.aggregate([
-        { $match: { type: 'vendor', created_at: { $gte: startDate } } },
-        {
-          $group: {
-            _id: { year: { $year: '$created_at' }, month: { $month: '$created_at' } },
-            total: { $sum: 1 },
-            verified: {
-              $sum: {
-                $cond: [
-                  { $in: ['$lead_status', ['Activated', 'Active Seller', 'Verification']] },
-                  1, 0
-                ]
-              }
-            },
-            activeSellers: {
-              $sum: { $cond: ['$active_seller', 1, 0] }
-            }
-          }
-        },
-        { $sort: { '_id.year': 1, '_id.month': 1 } }
-      ]),
-      // All active goals for admin goal vs achieved view
+
+      // 9. Active goals
       Goal.find({ status: 'active', $or: [{ end_date: { $gte: now } }, { end_date: null }] })
         .populate('assigned_to', 'name email')
-        .sort({ start_date: -1 }).lean()
+        .sort({ start_date: -1 }).lean(),
+
+      // 10. Active users
+      User.find({ role: { $in: ['user', 'admin'] }, status: 'active' })
+        .select('name role team').lean()
     ]);
 
-    // === NEW ANALYTICS SECTION ===
+    // --- Extract results from $facet outputs ---
+    const ld = leadResult[0] || {};
+    const funnel = ld.funnel || [];
+    const monthlyTrends = ld.monthlyTrends || [];
+    const sourceConversion = ld.sourceConversion || [];
+    const categoryConversion = ld.categoryConversion || [];
+    const dropReasons = ld.dropReasons || [];
+    const scoreDistribution = ld.scoreDistribution || [];
+    const avgConversionTime = ld.avgConversionTime || [];
+    const vendorTrends = ld.vendorTrends || [];
+    const stageVelocity = ld.stageVelocity || [];
+    const stageVelocityConverted = ld.stageVelocityConverted || [];
+    const lossBySource = ld.lossBySource || [];
+    const lossByCategory = ld.lossByCategory || [];
+    const lossTimeline = ld.lossTimeline || [];
+    const sourceROI = ld.sourceROI || [];
+    const bdMetrics = ld.bdMetrics || [];
+    const summary = ld.summary?.[0] || {};
 
-    // 1. Pipeline Stage Velocity — how long do leads stay in each stage?
-    const stageVelocity = await Lead.aggregate([
-      { $match: { lead_status: { $ne: null }, created_at: { $gte: startDate } } },
-      { $group: {
-        _id: '$lead_status',
-        count: { $sum: 1 },
-        avgDaysInStage: {
-          $avg: {
-            $divide: [
-              { $subtract: ['$updated_at', '$created_at'] },
-              86400000
-            ]
-          }
-        }
-      }},
-      { $sort: { count: -1 } }
-    ]);
+    const actData = activityResult[0] || {};
+    const activityHeatmap = actData.activityHeatmap || [];
+    const bdActivityCounts = actData.bdActivityCounts || [];
 
-    // For converted leads: avg days per stage (approximation using created_at → converted_at spread)
-    const stageVelocityConverted = await Lead.aggregate([
-      { $match: { converted_at: { $exists: true, $ne: null }, created_at: { $gte: startDate } } },
-      { $project: {
-        lead_status: 1,
-        totalDays: { $divide: [{ $subtract: ['$converted_at', '$created_at'] }, 86400000] },
-        created_at: 1
-      }},
-      { $bucket: {
-        groupBy: '$totalDays',
-        boundaries: [0, 7, 14, 30, 60, 90, 180, 365, 9999],
-        default: '365+',
-        output: { count: { $sum: 1 }, avgDays: { $avg: '$totalDays' } }
-      }}
-    ]);
+    const ordData = orderResult[0] || {};
+    const revenueTrend = ordData.revenueTrend || [];
+    const totalRevenue = ordData.totalRevenue || [];
+    const customerFirstOrder = ordData.customerFirstOrder || [];
 
-    // 2. Loss Analysis Deep Dive — by BD, by source, by category, time-to-loss
-    const lossByBD = await Lead.aggregate([
-      { $match: { lead_status: 'Lost', created_at: { $gte: startDate } } },
-      { $group: { _id: '$assigned_user', count: { $sum: 1 } } },
-      { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'user' } },
-      { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
-      { $project: { name: '$user.name', count: 1 } },
-      { $sort: { count: -1 } },
-      { $limit: 10 }
-    ]);
-
-    const lossBySource = await Lead.aggregate([
-      { $match: { lead_status: 'Lost', created_at: { $gte: startDate } } },
-      { $group: { _id: '$lead_source', count: { $sum: 1 } } },
-      { $sort: { count: -1 } }
-    ]);
-
-    const lossByCategory = await Lead.aggregate([
-      { $match: { lead_status: 'Lost', category: { $exists: true, $ne: null }, created_at: { $gte: startDate } } },
-      { $group: { _id: '$category', count: { $sum: 1 } } },
-      { $sort: { count: -1 } },
-      { $limit: 10 }
-    ]);
-
-    const lossTimeline = await Lead.aggregate([
-      { $match: { lead_status: 'Lost', drop_date: { $exists: true, $ne: null }, created_at: { $gte: startDate } } },
-      { $project: {
-        daysToLoss: { $divide: [{ $subtract: ['$drop_date', '$created_at'] }, 86400000] }
-      }},
-      { $bucket: {
-        groupBy: '$daysToLoss',
-        boundaries: [0, 7, 14, 30, 60, 90, 180, 365, 9999],
-        default: '365+',
-        output: { count: { $sum: 1 } }
-      }}
-    ]);
-
-    // Source conversion rates with revenue
-    const sourceROI = await Lead.aggregate([
-      { $match: { lead_source: { $exists: true, $ne: null }, created_at: { $gte: startDate } } },
-      { $group: {
-        _id: '$lead_source',
-        total: { $sum: 1 },
-        converted: { $sum: { $cond: [{ $in: ['$lead_status', ['Activated', 'Active Seller']] }, 1, 0] } },
-        lost: { $sum: { $cond: [{ $eq: ['$lead_status', 'Lost'] }, 1, 0] } },
-        avgLeadScore: { $avg: '$lead_score' }
-      }},
-      { $addFields: {
-        conversionRate: { $cond: [{ $gt: ['$total', 0] }, { $multiply: [{ $divide: ['$converted', '$total'] }, 100] }, 0] }
-      }},
-      { $sort: { total: -1 } }
-    ]);
-
-    // Revenue by source (join through leads → orders)
-    const revenueBySource = await NepalcanOrder.aggregate([
-      { $match: { orderStatus: 'Delivered', createdAt: { $gte: startDate } } },
-      { $lookup: { from: 'leads', localField: 'vendor_lead_id', foreignField: '_id', as: 'lead' } },
-      { $unwind: { path: '$lead', preserveNullAndEmptyArrays: false } },
-      { $group: {
-        _id: '$lead.lead_source',
-        revenue: { $sum: '$totalAmount' },
-        orders: { $sum: 1 }
-      }},
-      { $sort: { revenue: -1 } }
-    ]);
-
-    // Merge revenue into sourceROI
+    // Enrich sourceROI with revenue data
     const revenueSourceMap = {};
     for (const r of revenueBySource) {
       if (r._id) revenueSourceMap[r._id] = r;
@@ -1088,71 +1135,11 @@ exports.getAnalytics = async (req, res) => {
       orders: revenueSourceMap[s._id]?.orders || 0
     }));
 
-    // 3. Sync Health — from SystemSyncLog + NepalcanSyncLog
-    const SystemSyncLog = require('../models/SystemSyncLog');
-    const NepalcanSyncLog = require('../models/NepalcanSyncLog');
-
-    const syncHealth = await SystemSyncLog.aggregate([
-      { $match: { createdAt: { $gte: startDate } } },
-      { $group: {
-        _id: null,
-        total: { $sum: 1 },
-        successful: { $sum: { $cond: ['$success', 1, 0] } },
-        failed: { $sum: { $cond: ['$success', 0, 1] } },
-        avgDurationMs: { $avg: '$durationMs' }
-      }}
-    ]);
-
-    const syncTimeline = await SystemSyncLog.aggregate([
-      { $match: { createdAt: { $gte: startDate } } },
-      { $project: {
-        date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
-        success: 1,
-        durationMs: 1
-      }},
-      { $group: {
-        _id: '$date',
-        total: { $sum: 1 },
-        successful: { $sum: { $cond: ['$success', 1, 0] } },
-        avgDuration: { $avg: '$durationMs' }
-      }},
-      { $sort: { _id: 1 } },
-      { $limit: 30 }
-    ]);
-
-    // BD Self-Comparison data
-    const allUsers = await User.find({ role: { $in: ['user', 'admin'] }, status: 'active' })
-      .select('name role team').lean();
-
-    const bdMetrics = await Lead.aggregate([
-      { $match: { assigned_user: { $exists: true, $ne: null }, created_at: { $gte: startDate } } },
-      { $group: {
-        _id: '$assigned_user',
-        totalLeads: { $sum: 1 },
-        converted: { $sum: { $cond: [{ $in: ['$lead_status', ['Activated', 'Active Seller']] }, 1, 0] } },
-        lost: { $sum: { $cond: [{ $eq: ['$lead_status', 'Lost'] }, 1, 0] } },
-        avgScore: { $avg: '$lead_score' }
-      }}
-    ]);
-
-    const bdActivityCounts = await Activity.aggregate([
-      { $match: { created_at: { $gte: startDate } } },
-      { $group: { _id: '$user_id', activities: { $sum: 1 } } }
-    ]);
-
-    const bdRevenue = await NepalcanOrder.aggregate([
-      { $match: { orderStatus: 'Delivered', createdAt: { $gte: startDate } } },
-      { $lookup: { from: 'leads', localField: 'vendor_lead_id', foreignField: '_id', as: 'lead' } },
-      { $unwind: { path: '$lead', preserveNullAndEmptyArrays: false } },
-      { $match: { 'lead.assigned_user': { $exists: true, $ne: null } } },
-      { $group: { _id: '$lead.assigned_user', revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 } } }
-    ]);
-
     // Build BD comparison data
     const activityMap = {};
     for (const a of bdActivityCounts) activityMap[a._id?.toString()] = a.activities;
     const revenueMap = {};
-    for (const r of bdRevenue) revenueMap[r._id?.toString()] = r;
+    for (const r of bdRevenueAgg) revenueMap[r._id?.toString()] = r;
 
     const bdComparison = bdMetrics.map(m => {
       const userId = m._id?.toString();
@@ -1173,7 +1160,6 @@ exports.getAnalytics = async (req, res) => {
       };
     });
 
-    // Team averages for BD comparison
     const teamAvg = bdComparison.length > 0 ? {
       totalLeads: Math.round(bdComparison.reduce((s, b) => s + b.totalLeads, 0) / bdComparison.length),
       converted: Math.round(bdComparison.reduce((s, b) => s + b.converted, 0) / bdComparison.length),
@@ -1184,104 +1170,20 @@ exports.getAnalytics = async (req, res) => {
       orders: Math.round(bdComparison.reduce((s, b) => s + b.orders, 0) / bdComparison.length)
     } : {};
 
-    // 4. Customer Cohort Retention — first order month → return rate
-    const customerFirstOrder = await NepalcanOrder.aggregate([
-      { $match: { orderStatus: 'Delivered', createdAt: { $gte: startDate } } },
-      { $group: {
-        _id: '$customer',
-        firstOrder: { $min: '$createdAt' },
-        orderCount: { $sum: 1 },
-        totalSpent: { $sum: '$totalAmount' }
-      }},
-      { $match: { orderCount: { $gt: 0 } } },
-      { $project: {
-        firstOrderMonth: { $dateToString: { format: '%Y-%m', date: '$firstOrder' } },
-        orderCount: 1,
-        totalSpent: 1,
-        isRepeat: { $cond: [{ $gt: ['$orderCount', 1] }, true, false] }
-      }},
-      { $group: {
-        _id: '$firstOrderMonth',
-        totalCustomers: { $sum: 1 },
-        repeatCustomers: { $sum: { $cond: ['$isRepeat', 1, 0] } },
-        avgOrders: { $avg: '$orderCount' },
-        avgSpent: { $avg: '$totalSpent' }
-      }},
-      { $addFields: {
-        retentionRate: { $cond: [{ $gt: ['$totalCustomers', 0] }, { $multiply: [{ $divide: ['$repeatCustomers', '$totalCustomers'] }, 100] }, 0] }
-      }},
-      { $sort: { _id: 1 } }
-    ]);
-
-    // Compute goal progress using each goal's own date range and assigned user
-    const goalProgress = await Promise.all(allGoals.map(async (goal) => {
-      const goalUserId = goal.assigned_to?._id || goal.assigned_to;
-      const goalStart = goal.start_date || new Date(0);
-      const goalEnd = goal.end_date ? new Date(Math.min(new Date(goal.end_date).getTime(), now.getTime())) : now;
-      const goalDateFilter = { $gte: goalStart, $lte: goalEnd };
-      const goalMatch = { assigned_user: goalUserId, created_at: goalDateFilter };
-
-      let currentValue = 0;
-      switch (goal.unit) {
-        case 'leads':
-          currentValue = await Lead.countDocuments(goalMatch);
-          break;
-        case 'conversions':
-          currentValue = await Lead.countDocuments({ ...goalMatch, lead_status: { $in: ['Activated', 'Active Seller'] } });
-          break;
-        case 'revenue':
-          const revData = await NepalcanOrder.aggregate([
-            { $match: { orderStatus: 'Delivered', createdAt: goalDateFilter } },
-            { $lookup: { from: 'leads', localField: 'vendor_lead_id', foreignField: '_id', as: 'lead' } },
-            { $unwind: { path: '$lead', preserveNullAndEmptyArrays: false } },
-            { $match: { 'lead.assigned_user': goalUserId } },
-            { $group: { _id: null, total: { $sum: '$totalAmount' } } }
-          ]);
-          currentValue = revData[0]?.total || 0;
-          break;
-        case 'activated_vendors':
-          const activatedAgg = await Activity.aggregate([
-            { $match: { activity_type: 'status_change', description: { $regex: /→ Activated$/, $not: /Active Seller → Activated/ }, created_at: goalDateFilter } },
-            { $lookup: { from: 'leads', localField: 'lead_id', foreignField: '_id', as: 'lead' } },
-            { $unwind: '$lead' },
-            { $match: { 'lead.assigned_user': goalUserId } },
-            { $count: 'total' }
-          ]);
-          currentValue = activatedAgg[0]?.total || 0;
-          break;
-        case 'active_sellers':
-          const activeSellerAgg = await Activity.aggregate([
-            { $match: { activity_type: 'status_change', description: { $regex: /→ Active Seller$/ }, created_at: goalDateFilter } },
-            { $lookup: { from: 'leads', localField: 'lead_id', foreignField: '_id', as: 'lead' } },
-            { $unwind: '$lead' },
-            { $match: { 'lead.assigned_user': goalUserId } },
-            { $count: 'total' }
-          ]);
-          currentValue = activeSellerAgg[0]?.total || 0;
-          break;
-        case 'activities':
-        case 'calls':
-          currentValue = await Activity.countDocuments({ user_id: goalUserId, created_at: goalDateFilter });
-          break;
-        default:
-          currentValue = goal.current_value || 0;
-      }
-
-      const progress = goal.target_value > 0 ? Math.min(Math.round((currentValue / goal.target_value) * 100), 100) : 0;
-      return { ...goal, currentValue, progress, remaining: Math.max(goal.target_value - currentValue, 0) };
-    }));
+    // Batch goal progress by unit type
+    const goalProgress = await computeGoalProgress(allGoals, now);
 
     res.status(200).json({
       status: 'success',
       data: {
         period,
         summary: {
-          totalLeads,
-          totalConverted,
-          totalLost,
-          totalVendors,
-          activeVendors,
-          conversionRate: totalLeads > 0 ? ((totalConverted / totalLeads) * 100).toFixed(1) : 0,
+          totalLeads: summary.totalLeads || 0,
+          totalConverted: summary.totalConverted || 0,
+          totalLost: summary.totalLost || 0,
+          totalVendors: summary.totalVendors || 0,
+          activeVendors: summary.activeVendors || 0,
+          conversionRate: summary.totalLeads > 0 ? ((summary.totalConverted / summary.totalLeads) * 100).toFixed(1) : 0,
           totalRevenue: totalRevenue[0]?.total || 0,
           totalOrders: totalRevenue[0]?.count || 0,
           avgConversionDays: avgConversionTime[0]?.avgDays?.toFixed(1) || 0
@@ -1310,6 +1212,137 @@ exports.getAnalytics = async (req, res) => {
     res.status(400).json({ status: 'fail', message: err.message });
   }
 };
+
+// Batched goal progress computation
+async function computeGoalProgress(goals, now) {
+  if (!goals.length) return [];
+
+  const result = new Map();
+
+  const leadGoals = goals.filter(g => ['leads', 'conversions'].includes(g.unit));
+  const activityGoals = goals.filter(g => ['activities', 'calls'].includes(g.unit));
+  const revenueGoals = goals.filter(g => g.unit === 'revenue');
+  const activatedVendorGoals = goals.filter(g => g.unit === 'activated_vendors');
+  const activeSellerGoals = goals.filter(g => g.unit === 'active_sellers');
+  const otherGoals = goals.filter(g => !['leads', 'conversions', 'activities', 'calls', 'revenue', 'activated_vendors', 'active_sellers'].includes(g.unit));
+
+  const runFacet = async (collection, goalsList, buildMatch) => {
+    if (!goalsList.length) return;
+    const facetStages = {};
+    for (let i = 0; i < goalsList.length; i++) {
+      const g = goalsList[i];
+      const match = buildMatch(g);
+      facetStages[`g${i}`] = [
+        { $match: match },
+        { $count: 'count' }
+      ];
+    }
+    const facetPipeline = Object.keys(facetStages).length > 0
+      ? [{ $facet: facetStages }]
+      : [];
+    if (facetPipeline.length) {
+      const data = (await collection.aggregate(facetPipeline))[0] || {};
+      for (let i = 0; i < goalsList.length; i++) {
+        result.set(goalsList[i]._id.toString(), data[`g${i}`]?.[0]?.count || 0);
+      }
+    }
+  };
+
+  await Promise.all([
+    runFacet(Lead, leadGoals, (g) => {
+      const userId = g.assigned_to?._id || g.assigned_to;
+      const gStart = g.start_date || new Date(0);
+      const gEnd = g.end_date ? new Date(Math.min(new Date(g.end_date).getTime(), now.getTime())) : now;
+      const match = { assigned_user: userId, created_at: { $gte: gStart, $lte: gEnd } };
+      if (g.unit === 'conversions') {
+        match.lead_status = { $in: ['Activated', 'Active Seller'] };
+      }
+      return match;
+    }),
+    runFacet(Activity, activityGoals, (g) => {
+      const userId = g.assigned_to?._id || g.assigned_to;
+      const gStart = g.start_date || new Date(0);
+      const gEnd = g.end_date ? new Date(Math.min(new Date(g.end_date).getTime(), now.getTime())) : now;
+      return { user_id: userId, created_at: { $gte: gStart, $lte: gEnd } };
+    })
+  ]);
+
+  // Revenue goals (separate due to $lookup)
+  if (revenueGoals.length > 0) {
+    const facetStages = {};
+    for (let i = 0; i < revenueGoals.length; i++) {
+      const g = revenueGoals[i];
+      const userId = g.assigned_to?._id || g.assigned_to;
+      const gStart = g.start_date || new Date(0);
+      const gEnd = g.end_date ? new Date(Math.min(new Date(g.end_date).getTime(), now.getTime())) : now;
+      facetStages[`g${i}`] = [
+        { $match: { orderStatus: 'Delivered', createdAt: { $gte: gStart, $lte: gEnd } } },
+        { $lookup: { from: 'leads', localField: 'vendor_lead_id', foreignField: '_id', as: 'lead' } },
+        { $unwind: { path: '$lead', preserveNullAndEmptyArrays: false } },
+        { $match: { 'lead.assigned_user': userId } },
+        { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+      ];
+    }
+    const data = (await NepalcanOrder.aggregate([{ $facet: facetStages }]))[0] || {};
+    for (let i = 0; i < revenueGoals.length; i++) {
+      result.set(revenueGoals[i]._id.toString(), data[`g${i}`]?.[0]?.total || 0);
+    }
+  }
+
+  // Activated vendor goals (separate due to $lookup)
+  if (activatedVendorGoals.length > 0) {
+    const facetStages = {};
+    for (let i = 0; i < activatedVendorGoals.length; i++) {
+      const g = activatedVendorGoals[i];
+      const userId = g.assigned_to?._id || g.assigned_to;
+      const gStart = g.start_date || new Date(0);
+      const gEnd = g.end_date ? new Date(Math.min(new Date(g.end_date).getTime(), now.getTime())) : now;
+      facetStages[`g${i}`] = [
+        { $match: { activity_type: 'status_change', description: { $regex: /→ Activated$/, $not: /Active Seller → Activated/ }, created_at: { $gte: gStart, $lte: gEnd } } },
+        { $lookup: { from: 'leads', localField: 'lead_id', foreignField: '_id', as: 'lead' } },
+        { $unwind: '$lead' },
+        { $match: { 'lead.assigned_user': userId } },
+        { $count: 'total' }
+      ];
+    }
+    const data = (await Activity.aggregate([{ $facet: facetStages }]))[0] || {};
+    for (let i = 0; i < activatedVendorGoals.length; i++) {
+      result.set(activatedVendorGoals[i]._id.toString(), data[`g${i}`]?.[0]?.total || 0);
+    }
+  }
+
+  // Active seller goals (separate due to $lookup)
+  if (activeSellerGoals.length > 0) {
+    const facetStages = {};
+    for (let i = 0; i < activeSellerGoals.length; i++) {
+      const g = activeSellerGoals[i];
+      const userId = g.assigned_to?._id || g.assigned_to;
+      const gStart = g.start_date || new Date(0);
+      const gEnd = g.end_date ? new Date(Math.min(new Date(g.end_date).getTime(), now.getTime())) : now;
+      facetStages[`g${i}`] = [
+        { $match: { activity_type: 'status_change', description: { $regex: /→ Active Seller$/ }, created_at: { $gte: gStart, $lte: gEnd } } },
+        { $lookup: { from: 'leads', localField: 'lead_id', foreignField: '_id', as: 'lead' } },
+        { $unwind: '$lead' },
+        { $match: { 'lead.assigned_user': userId } },
+        { $count: 'total' }
+      ];
+    }
+    const data = (await Activity.aggregate([{ $facet: facetStages }]))[0] || {};
+    for (let i = 0; i < activeSellerGoals.length; i++) {
+      result.set(activeSellerGoals[i]._id.toString(), data[`g${i}`]?.[0]?.total || 0);
+    }
+  }
+
+  for (const goal of otherGoals) {
+    result.set(goal._id.toString(), goal.current_value || 0);
+  }
+
+  return goals.map(goal => {
+    const currentValue = result.get(goal._id.toString()) || 0;
+    const progress = goal.target_value > 0 ? Math.min(Math.round((currentValue / goal.target_value) * 100), 100) : 0;
+    return { ...goal, currentValue, progress, remaining: Math.max(goal.target_value - currentValue, 0) };
+  });
+}
 
 // GET /dashboard/bd-tiers — BD tier scores for all users
 exports.getBDTiers = async (req, res) => {
@@ -1390,28 +1423,22 @@ exports.getBDTiers = async (req, res) => {
     for (const r of revenuePerUser) revenueMap[r._id?.toString()] = r;
 
     // Calculate streak: count months in last 6 where user hit their target
-    const streakMonths = 6;
-    const streakPromises = [];
-    for (let m = 0; m < streakMonths; m++) {
+    // Uses $facet to run all 6 month queries in a single pipeline
+    const streakFacets = {};
+    for (let m = 0; m < 6; m++) {
       const mStart = new Date(now.getFullYear(), now.getMonth() - m, 1);
       const mEnd = new Date(now.getFullYear(), now.getMonth() - m + 1, 0, 23, 59, 59);
-      streakPromises.push(
-        Lead.aggregate([
-          { $match: { type: 'lead', assigned_user: { $exists: true, $ne: null }, created_at: { $gte: mStart, $lte: mEnd } } },
-          { $group: {
-            _id: '$assigned_user',
-            total: { $sum: 1 },
-            converted: { $sum: { $cond: [{ $in: ['$lead_status', ['Activated', 'Active Seller']] }, 1, 0] } }
-          }}
-        ])
-      );
+      streakFacets[`m${m}`] = [
+        { $match: { type: 'lead', assigned_user: { $exists: true, $ne: null }, created_at: { $gte: mStart, $lte: mEnd } } },
+        { $group: { _id: '$assigned_user', total: { $sum: 1 }, converted: { $sum: { $cond: [{ $in: ['$lead_status', ['Activated', 'Active Seller']] }, 1, 0] } } } }
+      ];
     }
-    const streakResults = await Promise.all(streakPromises);
+    const streakResult = (await Lead.aggregate([{ $facet: streakFacets }]))[0] || {};
 
     // Target: 5 leads + 1 activation per month counts as a streak month
     const streakMap = {};
-    for (const monthData of streakResults) {
-      for (const entry of monthData) {
+    for (let m = 0; m < 6; m++) {
+      for (const entry of (streakResult[`m${m}`] || [])) {
         const uid = entry._id?.toString();
         if (!uid) continue;
         if (entry.total >= 5 && entry.converted >= 1) {
@@ -1529,155 +1556,86 @@ exports.getMyAnalytics = async (req, res) => {
     const matchBase = { assigned_user: userId, created_at: dateFilter };
 
     const [
-      totalLeads,
-      totalConverted,
-      totalLost,
-      myActivities,
-      monthlyTrends,
-      funnel,
-      activityHeatmap,
-      conversionTime,
+      leadResult,
+      activityResult,
       revenueData,
-      goals,
-      activatedVendorsCount
+      goals
     ] = await Promise.all([
-      // Total leads assigned to user
-      Lead.countDocuments(matchBase),
 
-      // Converted leads
-      Lead.countDocuments({ ...matchBase, lead_status: { $in: ['Activated', 'Active Seller'] } }),
-
-      // Lost leads
-      Lead.countDocuments({ ...matchBase, lead_status: 'Lost' }),
-
-      // Activity count
-      Activity.countDocuments({ user_id: userId, created_at: dateFilter }),
-
-      // Monthly trends
+      // 1. Lead $facet — merges monthlyTrends + funnel + conversionTime + counts
       Lead.aggregate([
         { $match: matchBase },
-        {
-          $group: {
-            _id: { year: { $year: '$created_at' }, month: { $month: '$created_at' } },
-            created: { $sum: 1 },
-            converted: { $sum: { $cond: [{ $in: ['$lead_status', ['Activated', 'Active Seller']] }, 1, 0] } }
-          }
-        },
-        { $sort: { '_id.year': 1, '_id.month': 1 } }
+        { $facet: {
+          monthlyTrends: [
+            { $group: {
+              _id: { year: { $year: '$created_at' }, month: { $month: '$created_at' } },
+              created: { $sum: 1 },
+              converted: { $sum: { $cond: [{ $in: ['$lead_status', ['Activated', 'Active Seller']] }, 1, 0] } }
+            }},
+            { $sort: { '_id.year': 1, '_id.month': 1 } }
+          ],
+          funnel: [
+            { $group: { _id: '$lead_status', count: { $sum: 1 } } },
+            { $sort: { count: -1 } }
+          ],
+          conversionTime: [
+            { $match: { converted_at: { $exists: true, $ne: null } } },
+            { $project: { daysToConvert: { $divide: [{ $subtract: ['$converted_at', '$created_at'] }, 86400000] } } },
+            { $group: { _id: null, avgDays: { $avg: '$daysToConvert' } } }
+          ],
+          summary: [
+            { $group: {
+              _id: null,
+              totalLeads: { $sum: 1 },
+              totalConverted: { $sum: { $cond: [{ $in: ['$lead_status', ['Activated', 'Active Seller']] }, 1, 0] } },
+              totalLost: { $sum: { $cond: [{ $eq: ['$lead_status', 'Lost'] }, 1, 0] } },
+              activatedVendorsCount: { $sum: { $cond: [{ $or: ['$active_seller', { $eq: ['$lead_status', 'Active Seller'] }] }, 1, 0] } }
+            }}
+          ]
+        }}
       ]),
 
-      // Funnel
-      Lead.aggregate([
-        { $match: matchBase },
-        { $group: { _id: '$lead_status', count: { $sum: 1 } } },
-        { $sort: { count: -1 } }
-      ]),
-
-      // Activity heatmap
+      // 2. Activity $facet — heatmap + count
       Activity.aggregate([
         { $match: { user_id: userId, created_at: dateFilter } },
-        { $group: { _id: { day: { $dayOfWeek: '$created_at' }, hour: { $hour: '$created_at' } }, count: { $sum: 1 } } }
+        { $facet: {
+          activityHeatmap: [
+            { $group: { _id: { day: { $dayOfWeek: '$created_at' }, hour: { $hour: '$created_at' } }, count: { $sum: 1 } } }
+          ],
+          myActivities: [
+            { $count: 'count' }
+          ]
+        }}
       ]),
 
-      // Average conversion time
-      Lead.aggregate([
-        { $match: { ...matchBase, converted_at: { $exists: true, $ne: null } } },
-        { $project: { daysToConvert: { $divide: [{ $subtract: ['$converted_at', '$created_at'] }, 86400000] } } },
-        { $group: { _id: null, avgDays: { $avg: '$daysToConvert' } } }
-      ]),
-
-      // Revenue from user's vendors (match by vendor_lead_id)
+      // 3. Revenue (separate due to $lookup)
       NepalcanOrder.aggregate([
-        {
-          $lookup: {
-            from: 'leads',
-            localField: 'vendor_lead_id',
-            foreignField: '_id',
-            as: 'lead'
-          }
-        },
+        { $lookup: { from: 'leads', localField: 'vendor_lead_id', foreignField: '_id', as: 'lead' } },
         { $unwind: { path: '$lead', preserveNullAndEmptyArrays: false } },
         { $match: { 'lead.assigned_user': userId, orderStatus: 'Delivered', createdAt: dateFilter } },
-        {
-          $group: {
-            _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } },
-            revenue: { $sum: '$totalAmount' },
-            orders: { $sum: 1 }
-          }
-        },
+        { $group: { _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } }, revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 } } },
         { $sort: { '_id.year': 1, '_id.month': 1 } }
       ]),
 
-      // User's active goals
+      // 4. User's active goals
       Goal.find({
         assigned_to: userId,
         status: 'active',
-        $or: [
-          { end_date: { $gte: now } },
-          { end_date: null }
-        ]
-      }).sort({ start_date: -1 }).lean(),
-
-      // Activated vendors count for user
-      Lead.countDocuments({ assigned_user: userId, $or: [{ active_seller: true }, { lead_status: 'Active Seller' }], created_at: dateFilter })
+        $or: [{ end_date: { $gte: now } }, { end_date: null }]
+      }).sort({ start_date: -1 }).lean()
     ]);
 
-    // Calculate goal progress using each goal's own date range
-    const goalProgress = await Promise.all(goals.map(async (goal) => {
-      const goalStart = goal.start_date || new Date(0);
-      const goalEnd = goal.end_date ? new Date(Math.min(new Date(goal.end_date).getTime(), now.getTime())) : now;
-      const goalDateFilter = { $gte: goalStart, $lte: goalEnd };
-      const goalMatch = { assigned_user: userId, created_at: goalDateFilter };
+    const ld = leadResult[0] || {};
+    const monthlyTrends = ld.monthlyTrends || [];
+    const funnel = ld.funnel || [];
+    const conversionTime = ld.conversionTime || [];
+    const summary = ld.summary?.[0] || {};
 
-      let currentValue = 0;
-      switch (goal.unit) {
-        case 'leads':
-          currentValue = await Lead.countDocuments(goalMatch);
-          break;
-        case 'conversions':
-          currentValue = await Lead.countDocuments({ ...goalMatch, lead_status: { $in: ['Activated', 'Active Seller'] } });
-          break;
-        case 'revenue':
-          const revData = await NepalcanOrder.aggregate([
-            { $match: { orderStatus: 'Delivered', createdAt: goalDateFilter } },
-            { $lookup: { from: 'leads', localField: 'vendor_lead_id', foreignField: '_id', as: 'lead' } },
-            { $unwind: { path: '$lead', preserveNullAndEmptyArrays: false } },
-            { $match: { 'lead.assigned_user': userId } },
-            { $group: { _id: null, total: { $sum: '$totalAmount' } } }
-          ]);
-          currentValue = revData[0]?.total || 0;
-          break;
-        case 'activated_vendors':
-          const myActivatedAgg = await Activity.aggregate([
-            { $match: { activity_type: 'status_change', description: { $regex: /→ Activated$/, $not: /Active Seller → Activated/ }, created_at: goalDateFilter } },
-            { $lookup: { from: 'leads', localField: 'lead_id', foreignField: '_id', as: 'lead' } },
-            { $unwind: '$lead' },
-            { $match: { 'lead.assigned_user': userId } },
-            { $count: 'total' }
-          ]);
-          currentValue = myActivatedAgg[0]?.total || 0;
-          break;
-        case 'active_sellers':
-          const myActiveSellerAgg = await Activity.aggregate([
-            { $match: { activity_type: 'status_change', description: { $regex: /→ Active Seller$/ }, created_at: goalDateFilter } },
-            { $lookup: { from: 'leads', localField: 'lead_id', foreignField: '_id', as: 'lead' } },
-            { $unwind: '$lead' },
-            { $match: { 'lead.assigned_user': userId } },
-            { $count: 'total' }
-          ]);
-          currentValue = myActiveSellerAgg[0]?.total || 0;
-          break;
-        case 'activities':
-        case 'calls':
-          currentValue = await Activity.countDocuments({ user_id: userId, created_at: goalDateFilter });
-          break;
-        default:
-          currentValue = goal.current_value || 0;
-      }
+    const act = activityResult[0] || {};
+    const activityHeatmap = act.activityHeatmap || [];
+    const myActivities = act.myActivities?.[0]?.count || 0;
 
-      const progress = goal.target_value > 0 ? Math.min(Math.round((currentValue / goal.target_value) * 100), 100) : 0;
-      return { ...goal, currentValue, progress, remaining: Math.max(goal.target_value - currentValue, 0) };
-    }));
+    const goalProgress = await computeGoalProgress(goals, now);
 
     const totalRevenue = revenueData.reduce((sum, r) => sum + r.revenue, 0);
     const totalOrders = revenueData.reduce((sum, r) => sum + r.orders, 0);
@@ -1689,10 +1647,10 @@ exports.getMyAnalytics = async (req, res) => {
         userId,
         targetUser,
         summary: {
-          totalLeads,
-          totalConverted,
-          totalLost,
-          conversionRate: totalLeads > 0 ? ((totalConverted / totalLeads) * 100).toFixed(1) : 0,
+          totalLeads: summary.totalLeads || 0,
+          totalConverted: summary.totalConverted || 0,
+          totalLost: summary.totalLost || 0,
+          conversionRate: summary.totalLeads > 0 ? ((summary.totalConverted / summary.totalLeads) * 100).toFixed(1) : 0,
           totalRevenue,
           totalOrders,
           avgConversionDays: conversionTime[0]?.avgDays?.toFixed(1) || 0,
