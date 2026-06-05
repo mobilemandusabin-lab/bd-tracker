@@ -410,6 +410,7 @@ exports.fetchFromNepalcan = async (req, res) => {
     const response = await axios.get(
       `${API_BASE}/vendor/orders/super-admin/list`,
       {
+        timeout: 15000,
         params: {
           tab: 'marketplace',
           page: 1,
@@ -488,7 +489,8 @@ exports.getOrderTracking = async (req, res) => {
   try {
     const { orderId } = req.params;
     const response = await axios.get(
-      `https://can-logistic-prod-84pie.ondigitalocean.app/api/public/marketplace-tracker/${orderId}`
+      `https://can-logistic-prod-84pie.ondigitalocean.app/api/public/marketplace-tracker/${orderId}`,
+      { timeout: 10000 }
     );
     const trackingData = response.data;
 

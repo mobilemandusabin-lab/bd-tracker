@@ -45,9 +45,10 @@ exports.loginToNepalcan = async (req, res) => {
       });
     }
 
-    const loginRes = await axios.post(`${NEPLCCAN_API_BASE}/users/login`, 
+    const loginRes = await axios.post(`${NEPLCCAN_API_BASE}/users/login`,
       { email, password },
       {
+        timeout: 15000,
         headers: {
           'Content-Type': 'application/json',
           'Origin': 'https://commerce.thecanbrand.com',
@@ -96,6 +97,7 @@ exports.getNepalcanSales = async (req, res) => {
     const response = await axios.get(
       `${NEPLCCAN_API_BASE}/vendor/orders/super-admin/list`,
       {
+        timeout: 15000,
         params: {
           tab: 'marketplace',
           page: req.query.page || 1,
@@ -221,6 +223,7 @@ exports.fetchVendorsFromNepalcan = async (req, res) => {
     const response = await axios.get(
       `${NEPLCCAN_API_BASE}/vendor/super-admin/list`,
       {
+        timeout: 15000,
         params: {
           page: 1,
           limit: 100,

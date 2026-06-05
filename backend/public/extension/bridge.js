@@ -13,10 +13,13 @@
 
   function withTimeout(promise, ms) {
     if (!promise || typeof promise.then !== 'function') return promise;
+    let timer = null;
     return Promise.race([
-      promise,
+      promise.finally(function() {
+        if (timer) { clearTimeout(timer); timer = null; }
+      }),
       new Promise(function(_, reject) {
-        setTimeout(function() { reject(new Error('sendMessage timeout')); }, ms);
+        timer = setTimeout(function() { reject(new Error('sendMessage timeout')); }, ms);
       })
     ]);
   }

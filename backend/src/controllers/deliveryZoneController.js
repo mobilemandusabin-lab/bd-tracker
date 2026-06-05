@@ -30,7 +30,7 @@ exports.syncZoneGroups = async (req, res) => {
 
     const response = await axios.get(
       `${NEPA_CAN_API}/delivery-zone-group/list?active=true&page=1&limit=50`,
-      { headers: { ...NEPA_CAN_HEADERS, Authorization: `Bearer ${token}` } }
+      { timeout: 15000, headers: { ...NEPA_CAN_HEADERS, Authorization: `Bearer ${token}` } }
     );
 
     const zoneGroups = response.data.data || [];

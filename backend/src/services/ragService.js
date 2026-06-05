@@ -10,7 +10,9 @@ function getGroq() {
   if (!groq) {
     groq = new OpenAI({
       baseURL: 'https://api.groq.com/openai/v1',
-      apiKey: process.env.GROQ_API_KEY || 'sk-placeholder'
+      apiKey: process.env.GROQ_API_KEY || 'sk-placeholder',
+      timeout: 30 * 1000,
+      maxRetries: 2
     });
   }
   return groq;

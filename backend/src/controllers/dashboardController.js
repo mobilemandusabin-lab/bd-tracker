@@ -9,31 +9,25 @@ const User = require('../models/User');
 
 exports.getStats = async (req, res) => {
   try {
-    const leadStats = await Lead.aggregate([
-      {
-        $group: {
-          _id: '$lead_status',
-          count: { $sum: 1 }
+    const [leadFacet, totalLeads, activeSellers, pendingTasks, pendingFollowups] = await Promise.all([
+      Lead.aggregate([
+        {
+          $facet: {
+            byStatus: [{ $group: { _id: '$lead_status', count: { $sum: 1 } } }],
+            byOnboarding: [
+              { $match: { type: 'vendor' } },
+              { $group: { _id: '$onboarding_stage', count: { $sum: 1 } } }
+            ]
+          }
         }
-      }
+      ]),
+      Lead.countDocuments(),
+      Lead.countDocuments({ lead_status: 'Active Seller' }),
+      Task.countDocuments({ status: 'pending' }),
+      Activity.countDocuments({ follow_up_required: true, status: 'pending' })
     ]);
 
-    const onboardingStats = await Lead.aggregate([
-      {
-        $match: { type: 'vendor' }
-      },
-      {
-        $group: {
-          _id: '$onboarding_stage',
-          count: { $sum: 1 }
-        }
-      }
-    ]);
-
-    const totalLeads = await Lead.countDocuments();
-    const activeSellers = await Lead.countDocuments({ lead_status: 'Active Seller' });
-    const pendingTasks = await Task.countDocuments({ status: 'pending' });
-    const pendingFollowups = await Activity.countDocuments({ follow_up_required: true, status: 'pending' });
+    const facet = leadFacet[0] || {};
 
     res.status(200).json({
       status: 'success',
@@ -44,8 +38,8 @@ exports.getStats = async (req, res) => {
           pendingTasks,
           pendingFollowups
         },
-        leadStats,
-        onboardingStats,
+        leadStats: facet.byStatus || [],
+        onboardingStats: facet.byOnboarding || [],
         __userRole: req.user.role
       }
     });

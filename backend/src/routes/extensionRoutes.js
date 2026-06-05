@@ -32,18 +32,7 @@ router.get('/my-stats', extensionController.getMyStats);
 router.get('/operational-goals', extensionController.getOperationalGoals);
 router.put('/operational-goals', requirePermission('extension.admin'), extensionController.updateOperationalGoal);
 router.delete('/operational-goals/:id', requirePermission('extension.admin'), extensionController.deleteOperationalGoal);
-
-// Operational Goals
-router.get('/operational-goals', extensionController.getOperationalGoals);
-router.put('/operational-goals', requirePermission('extension.admin'), extensionController.updateOperationalGoal);
-router.delete('/operational-goals/:id', requirePermission('extension.admin'), extensionController.deleteOperationalGoal);
-router.get('/operational-goals', extensionController.getOperationalGoals);
-router.put('/operational-goals', requirePermission('extension.admin'), extensionController.updateOperationalGoal);
-router.delete('/operational-goals/:id', requirePermission('extension.admin'), extensionController.deleteOperationalGoal);
 router.get('/team-performance', extensionController.getTeamPerformance);
-router.get('/operational-goals', extensionController.getOperationalGoals);
-router.put('/operational-goals', requirePermission('extension.admin'), extensionController.updateOperationalGoal);
-router.delete('/operational-goals/:id', requirePermission('extension.admin'), extensionController.deleteOperationalGoal);
 router.get('/debug', requirePermission('extension.admin'), extensionController.debugEvents);
 
 module.exports = router;

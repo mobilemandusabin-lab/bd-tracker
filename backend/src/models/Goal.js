@@ -93,5 +93,9 @@ goalSchema.virtual('is_achieved').get(function() {
   return this.current_value >= this.target_value;
 });
 
+goalSchema.index({ status: 1, end_date: -1 });
+goalSchema.index({ assigned_to: 1, status: 1, end_date: -1 });
+goalSchema.index({ status: 1, period: 1 });
+
 const Goal = mongoose.model('Goal', goalSchema);
 module.exports = Goal;

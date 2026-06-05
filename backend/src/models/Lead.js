@@ -275,6 +275,11 @@ leadSchema.index({ drop_date: -1 });
 leadSchema.index({ updated_at: -1 });
 leadSchema.index({ last_activity_at: -1 });
 leadSchema.index({ business_name: 'text', contact_person: 'text' });
+leadSchema.index({ phone: 1 });
+leadSchema.index({ email: 1 });
+leadSchema.index({ lead_source: 1, lead_status: 1 });
+leadSchema.index({ category: 1, lead_status: 1 });
+leadSchema.index({ active_seller: 1, lead_status: 1 });
 
 const Lead = mongoose.model('Lead', leadSchema);
 module.exports = Lead;

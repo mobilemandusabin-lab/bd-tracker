@@ -161,35 +161,40 @@ const syncNepalcanOrders = async (token = null) => {
     }
 
     let currentPage = 2;
-    while (ordersList.length < (responseData?.data?.total || 1000) && currentPage <= 10) {
-      try {
-        const nextPageRes = await axios.get(`${API_BASE}/vendor/orders/super-admin/list`, {
-          params: {
-            tab: 'marketplace',
-            page: currentPage,
-            limit: 500,
-            unattendedOrders: '',
-            status: 'Active'
-          },
-          headers,
-          timeout: 30000
-        });
-        
-        const nextPageData = nextPageRes.data;
+    const totalPages = Math.min(10, Math.ceil((responseData?.data?.total || 1000) / 500));
+    if (totalPages >= 2) {
+      // Fetch pages 2..N in parallel (3 at a time) instead of serially
+      const pagePromises = [];
+      for (let p = 2; p <= totalPages; p++) {
+        pagePromises.push(
+          axios.get(`${API_BASE}/vendor/orders/super-admin/list`, {
+            params: {
+              tab: 'marketplace',
+              page: p,
+              limit: 500,
+              unattendedOrders: '',
+              status: 'Active'
+            },
+            headers,
+            timeout: 30000
+          }).then(r => r.data).catch(err => {
+            console.error(`[Nepalcan Sync] Error fetching page ${p}:`, err.message);
+            return null;
+          })
+        );
+      }
+      const pageResults = await Promise.all(pagePromises);
+      for (const nextPageData of pageResults) {
+        if (!nextPageData) continue;
         let nextOrders = [];
-        
         if (nextPageData?.data?.orders && Array.isArray(nextPageData.data.orders)) {
           nextOrders = nextPageData.data.orders;
         } else if (nextPageData?.orders && Array.isArray(nextPageData.orders)) {
           nextOrders = nextPageData.orders;
         }
-        
-        if (nextOrders.length === 0) break;
-        ordersList = [...ordersList, ...nextOrders];
-        currentPage++;
-      } catch (pageErr) {
-        console.error(`[Nepalcan Sync] Error fetching page ${currentPage}:`, pageErr.message);
-        break;
+        if (nextOrders.length === 0) continue;
+        for (const o of nextOrders) ordersList.push(o);
+        if (ordersList.length >= (responseData?.data?.total || 1000)) break;
       }
     }
 
@@ -503,6 +508,7 @@ const enrichOrdersWithTracking = async () => {
         })
       );
 
+      const bulkOps = [];
       for (const result of results) {
         if (result.status !== 'fulfilled' || !result.value.trackingData) continue;
         const { order, trackingData } = result.value;
@@ -559,13 +565,29 @@ const enrichOrdersWithTracking = async () => {
           order.rawData.trackingProcesses = trackingData.marketplaceProcesses;
         }
 
-        order.lastSyncedAt = new Date();
-        if (changed) {
-          await order.save();
-          updated++;
-        } else {
-          // Still save lastSyncedAt
-          await order.save();
+        if (changed) updated++;
+
+        // Defer persistence to a single bulkWrite per batch
+        bulkOps.push({
+          updateOne: {
+            filter: { _id: order._id },
+            update: {
+              $set: {
+                orderStatus: order.orderStatus,
+                statusHistory: order.statusHistory,
+                rawData: order.rawData,
+                lastSyncedAt: new Date()
+              }
+            }
+          }
+        });
+      }
+
+      if (bulkOps.length > 0) {
+        try {
+          await NepalcanOrder.bulkWrite(bulkOps, { ordered: false });
+        } catch (bulkErr) {
+          console.error('[Tracking Enrichment] bulkWrite error:', bulkErr.message);
         }
       }
 

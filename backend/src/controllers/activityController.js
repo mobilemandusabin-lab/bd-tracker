@@ -236,7 +236,8 @@ exports.getActivitiesByLead = async (req, res) => {
   try {
     const activities = await Activity.find({ lead_id: req.params.leadId, description: { $not: /\(sync\)/ } })
       .populate('user_id', 'name email')
-      .sort('-created_at');
+      .sort('-created_at')
+      .lean();
     res.status(200).json({ status: 'success', results: activities.length, data: { activities } });
   } catch (err) {
     res.status(400).json({ status: 'fail', message: err.message });
@@ -260,7 +261,7 @@ exports.getPendingFollowups = async (req, res) => {
       query.lead_id = { $in: myLeadIds };
     }
 
-    const followups = await Activity.find(query).populate('lead_id user_id');
+    const followups = await Activity.find(query).populate('lead_id user_id').lean();
     res.status(200).json({ status: 'success', results: followups.length, data: { followups } });
   } catch (err) {
     res.status(400).json({ status: 'fail', message: err.message });
@@ -331,30 +332,44 @@ exports.getTodayFollowups = async (req, res) => {
         }
       })
       .populate('user_id', 'name email')
-      .sort('follow_up_date follow_up_time');
+      .sort('follow_up_date follow_up_time')
+      .lean();
 
-    const enriched = await Promise.all(activities.map(async (act) => {
+    // Single aggregation to find the earliest non-follow-up activity per lead AFTER each follow-up
+    const leadIds = [...new Set(activities.filter(a => a.lead_id).map(a => a.lead_id._id))];
+    const followUpTimestamps = new Map(
+      activities
+        .filter(a => a.lead_id)
+        .map(a => [String(a.lead_id._id), a.created_at || a.follow_up_date])
+    );
+    const hasActivitySet = new Set();
+    if (leadIds.length > 0) {
+      const activityHits = await Activity.aggregate([
+        { $match: { lead_id: { $in: leadIds }, activity_type: { $ne: 'follow_up' } } },
+        { $sort: { lead_id: 1, created_at: 1 } },
+        { $group: { _id: '$lead_id', first: { $first: '$created_at' } } }
+      ]);
+      for (const hit of activityHits) {
+        const fuCreatedAt = followUpTimestamps.get(String(hit._id));
+        if (fuCreatedAt && hit.first > fuCreatedAt) {
+          hasActivitySet.add(String(hit._id));
+        }
+      }
+    }
+
+    const enriched = activities.map((act) => {
       const lead = act.lead_id;
-      if (!lead) return null; // Safety check
+      if (!lead) return null;
 
       const businessName = lead.business_name || 'Unknown Enterprise';
       const manager = lead.assigned_user || act.user_id;
       const managerName = manager?.name || 'Unassigned';
-      
+
       const localStartOfDay = new Date();
       localStartOfDay.setHours(0, 0, 0, 0);
       const isOverdue = act.status === 'overdue' || (act.follow_up_date && new Date(act.follow_up_date) < localStartOfDay);
-      
-      // Check if there's an activity logged AFTER the follow-up was created
-      // This indicates the follow-up was actually done
-      const followUpCreatedAt = act.created_at || act.follow_up_date;
-      const followUpActivities = await Activity.find({
-        lead_id: lead._id,
-        activity_type: { $ne: 'follow_up' },
-        created_at: { $gt: followUpCreatedAt }
-      }).limit(1);
-      
-      const hasActivity = followUpActivities.length > 0 || act.status === 'completed';
+
+      const hasActivity = hasActivitySet.has(String(lead._id)) || act.status === 'completed';
 
       return {
         _id: lead._id,
@@ -380,7 +395,7 @@ exports.getTodayFollowups = async (req, res) => {
         is_overdue: isOverdue,
         status: act.status
       };
-    }));
+    });
 
     res.status(200).json({
       status: 'success',

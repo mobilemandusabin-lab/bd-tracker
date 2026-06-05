@@ -134,34 +134,32 @@ const updateGoalProgress = async (lead, userId) => {
 
 // Lead Status Change Handler
 appEventEmitter.on('lead.status.changed', async ({ lead, user, previous_status }) => {
-  // 1. Log Activity
-  await Activity.create({
-    lead_id: lead._id,
-    user_id: user._id,
-    activity_type: 'status_change',
-    description: `Pipeline changed: ${previous_status} → ${lead.lead_status}`,
-    status: 'completed'
-  });
+  // First three are independent — fire in parallel
+  await Promise.all([
+    Activity.create({
+      lead_id: lead._id,
+      user_id: user._id,
+      activity_type: 'status_change',
+      description: `Pipeline changed: ${previous_status} → ${lead.lead_status}`,
+      status: 'completed'
+    }),
+    AuditLog.create({
+      user_id: user._id,
+      action_type: 'UPDATE',
+      module_name: 'Lead',
+      record_id: lead._id,
+      previous_value: { lead_status: previous_status },
+      updated_value: { lead_status: lead.lead_status },
+      ip_address: lead.ip
+    }),
+    updateGoalProgress(lead, user._id)
+  ]);
 
-  // 2. Log Audit
-  await AuditLog.create({
-    user_id: user._id,
-    action_type: 'UPDATE',
-    module_name: 'Lead',
-    record_id: lead._id,
-    previous_value: { lead_status: previous_status },
-    updated_value: { lead_status: lead.lead_status },
-    ip_address: lead.ip
-  });
-
-  // 3. Update goal progress for the assigned user
-  await updateGoalProgress(lead, user._id);
-
-  // 4. AUTO-TASK: Check if lead is stuck in Negotiation
-  await checkNegotiationStal(lead);
-
-  // 5. AUTO-TASK: Check high-value leads needing follow-up
-  await checkHighValueLeadFollowup(lead);
+  // Auto-task checks run after; independent of each other
+  await Promise.all([
+    checkNegotiationStal(lead),
+    checkHighValueLeadFollowup(lead)
+  ]);
 });
 
 // Lead Created Handler - check for goals when new lead is created

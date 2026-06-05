@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const Lead = require('./Lead');
 
 const activitySchema = new mongoose.Schema({
   lead_id: {
@@ -45,14 +46,12 @@ const activitySchema = new mongoose.Schema({
 });
 
 // Update parent Lead's last_activity_at whenever an Activity is saved
-activitySchema.post('save', async function(doc) {
+// Fire-and-forget so it doesn't block the Activity save roundtrip
+activitySchema.post('save', function(doc) {
   if (doc.lead_id) {
-    try {
-      const Lead = require('./Lead');
-      await Lead.findByIdAndUpdate(doc.lead_id, { $set: { last_activity_at: doc.created_at || new Date() } });
-    } catch (err) {
-      // Don't fail the Activity save if Lead update fails
-    }
+    setImmediate(() => {
+      Lead.findByIdAndUpdate(doc.lead_id, { $set: { last_activity_at: doc.created_at || new Date() } }).catch(() => {});
+    });
   }
 });
 

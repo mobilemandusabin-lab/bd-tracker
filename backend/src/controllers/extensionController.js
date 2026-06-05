@@ -61,10 +61,29 @@ exports.extensionLogin = async (req, res) => {
 // GET /extension/latest-version — reads directly from manifest.json
 // Uses fs.readFileSync (not require) so serverless / long-running servers
 // always see the current file on disk, not a cached copy from startup.
+// 60s in-memory cache to avoid disk read on every heartbeat (one per device / 60min)
+let manifestCache = { mtimeMs: 0, data: null, at: 0 };
+const MANIFEST_CACHE_TTL_MS = 60 * 1000;
 exports.getLatestVersion = async (req, res) => {
   try {
     const manifestPath = path.join(__dirname, '../../public/extension/manifest.json');
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+    const now = Date.now();
+    let manifest = null;
+    if (manifestCache.data && now - manifestCache.at < MANIFEST_CACHE_TTL_MS) {
+      try {
+        const stat = fs.statSync(manifestPath);
+        if (stat.mtimeMs === manifestCache.mtimeMs) {
+          manifest = manifestCache.data;
+        } else {
+          manifestCache = { mtimeMs: 0, data: null, at: 0 };
+        }
+      } catch (_) {}
+    }
+    if (!manifest) {
+      manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+      const stat = fs.statSync(manifestPath);
+      manifestCache = { mtimeMs: stat.mtimeMs, data: manifest, at: now };
+    }
     const version = manifest.version || '1.0.0';
     res.status(200).json({
       status: 'success',
@@ -91,14 +110,15 @@ exports.downloadExtension = async (req, res) => {
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="bd-tracker-extension-v${version}.zip"`);
 
-    const archive = archiver('zip', { zlib: { level: 9 } });
+    // zlib level 1 — fast compression, downloads are usually on local network
+    const archive = archiver('zip', { zlib: { level: 1 } });
     archive.on('error', (err) => { throw err; });
     archive.pipe(res);
 
-    const files = fs.readdirSync(extDir);
+    const files = await fs.promises.readdir(extDir);
     for (const file of files) {
       const fullPath = path.join(extDir, file);
-      const stat = fs.statSync(fullPath);
+      const stat = await fs.promises.stat(fullPath);
       if (stat.isDirectory()) {
         archive.directory(fullPath, file);
       } else if (!file.endsWith('.zip')) {
@@ -478,15 +498,8 @@ exports.getAnalytics = async (req, res) => {
     // Lead model for vendor name lookups
     const Lead = require('../models/Lead');
 
-    // Run all independent queries in parallel
-    const [
-      facetResult,
-      eventsByUser,
-      userSessions,
-      recentEvents,
-      latestPendingEvent
-    ] = await Promise.all([
-      // 1-9, 11: Merged into a single $facet on ExtensionEvent
+    // Run all queries in a single $facet — eliminates 4 separate round-trips
+    const [facetResult] = await Promise.all([
       ExtensionEvent.aggregate([
         { $match: matchFilter },
         { $facet: {
@@ -523,40 +536,42 @@ exports.getAnalytics = async (req, res) => {
           hourlyActivity: [
             { $group: { _id: { hour: { $hour: '$created_at' }, dow: { $dayOfWeek: '$created_at' } }, count: { $sum: 1 } } },
             { $sort: { '_id.dow': 1, '_id.hour': 1 } }
+          ],
+          eventsByUser: [
+            { $group: { _id: { user_id: '$user_id', event_type: '$event_type' }, count: { $sum: 1 } } },
+            { $lookup: { from: 'users', localField: '_id.user_id', foreignField: '_id', as: 'user' } },
+            { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+            { $group: { _id: '$_id.user_id', user_name: { $first: '$user.name' }, user_team: { $first: '$user.team' }, events: { $push: { event_type: '$_id.event_type', count: '$count' } }, total: { $sum: '$count' } } },
+            { $sort: { total: -1 } }
+          ],
+          userSessions: [
+            { $sort: { user_id: 1, created_at: 1 } },
+            { $group: { _id: '$user_id', events: { $push: { type: '$event_type', time: '$created_at' } } } },
+            { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'user' } },
+            { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } }
+          ],
+          recentEvents: [
+            { $sort: { created_at: -1 } },
+            { $limit: 20 },
+            { $lookup: { from: 'users', localField: 'user_id', foreignField: '_id', as: 'user' } },
+            { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+            { $project: {
+              event_type: 1, product_id: 1, product_name: 1, vendor_id: 1,
+              qc_status: 1, pending_count: 1, created_at: 1,
+              user_id: { _id: '$user._id', name: '$user.name', team: '$user.team' }
+            }}
+          ],
+          latestPendingEvent: [
+            { $match: { event_type: 'qc_pending', pending_count: { $ne: null } } },
+            { $sort: { created_at: -1 } },
+            { $limit: 1 },
+            { $project: { _id: 0, pending_count: 1 } }
           ]
         }}
-      ]),
-      // 4. Events by user (separate due to $lookup)
-      ExtensionEvent.aggregate([
-        { $match: matchFilter },
-        { $group: { _id: { user_id: '$user_id', event_type: '$event_type' }, count: { $sum: 1 } } },
-        { $lookup: { from: 'users', localField: '_id.user_id', foreignField: '_id', as: 'user' } },
-        { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
-        { $group: { _id: '$_id.user_id', user_name: { $first: '$user.name' }, user_team: { $first: '$user.team' }, events: { $push: { event_type: '$_id.event_type', count: '$count' } }, total: { $sum: '$count' } } },
-        { $sort: { total: -1 } }
-      ]),
-      // 10. User Activity Sessions (separate due to $lookup)
-      ExtensionEvent.aggregate([
-        { $match: matchFilter },
-        { $sort: { user_id: 1, created_at: 1 } },
-        { $group: { _id: '$user_id', events: { $push: { type: '$event_type', time: '$created_at' } } } },
-        { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'user' } },
-        { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } }
-      ]),
-      // 5. Recent events (find, not aggregation)
-      ExtensionEvent.find(matchFilter)
-        .populate('user_id', 'name team')
-        .sort({ created_at: -1 })
-        .limit(20)
-        .lean(),
-      // 6. Latest qc_pending count
-      ExtensionEvent.findOne(
-        { event_type: 'qc_pending', pending_count: { $ne: null } },
-        { pending_count: 1 }
-      ).sort({ created_at: -1 }).lean()
+      ])
     ]);
 
-    const fr = facetResult[0] || {};
+    const fr = facetResult || {};
     const eventsByType = fr.eventsByType || [];
     const dailyPendingCounts = fr.dailyPendingCounts || [];
     const dailyEvents = fr.dailyEvents || [];
@@ -564,6 +579,10 @@ exports.getAnalytics = async (req, res) => {
     const topProducts = fr.topProducts || [];
     const topVendorsRaw = fr.topVendorsRaw || [];
     const hourlyActivity = fr.hourlyActivity || [];
+    const eventsByUser = fr.eventsByUser || [];
+    const userSessions = fr.userSessions || [];
+    const recentEvents = fr.recentEvents || [];
+    const latestPendingEvent = (fr.latestPendingEvent || [])[0] || null;
 
     const latestPendingCount = latestPendingEvent?.pending_count ?? null;
 
@@ -849,166 +868,6 @@ exports.getMyStats = async (req, res) => {
   }
 };
 
-// GET /extension/operational-goals — Get operational goals
-exports.getOperationalGoals = async (req, res) => {
-  try {
-    const OperationalGoal = require('../models/OperationalGoal');
-    const userRole = req.user.role;
-    const userTeam = req.user.team;
-    const isAdmin = userRole === 'super_admin' || userRole === 'admin' || req.userPermissions?.includes('extension.admin');
-
-    let team = req.query.team;
-    if (!isAdmin) {
-      team = userTeam;
-    }
-    if (!team || !['listing', 'qc'].includes(team)) {
-      return res.status(400).json({ status: 'fail', message: 'Invalid or missing team parameter' });
-    }
-
-    const goals = await OperationalGoal.find({ team })
-      .populate('user_id', 'name team')
-      .populate('updated_by', 'name')
-      .lean();
-
-    const teamDefault = goals.find(g => !g.user_id);
-    const overrides = goals.filter(g => g.user_id);
-
-    res.status(200).json({
-      status: 'success',
-      data: { team, team_default: teamDefault || null, overrides }
-    });
-  } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
-  }
-};
-
-// PUT /extension/operational-goals — Create/update a goal
-exports.updateOperationalGoal = async (req, res) => {
-  try {
-    const OperationalGoal = require('../models/OperationalGoal');
-    const { team, user_id, listing_target, spec_target, qc_target, qc_enabled } = req.body;
-
-    if (!team || !['listing', 'qc'].includes(team)) {
-      return res.status(400).json({ status: 'fail', message: 'Invalid team' });
-    }
-
-    const query = { team, user_id: user_id || null };
-    const update = {
-      listing_target: listing_target || 0,
-      spec_target: spec_target || 0,
-      qc_target: qc_target || 0,
-      qc_enabled: qc_enabled || false,
-      updated_by: req.user._id,
-      updated_at: new Date()
-    };
-
-    const goal = await OperationalGoal.findOneAndUpdate(query, update, {
-      new: true, upsert: true, runValidators: true
-    });
-
-    res.status(200).json({ status: 'success', data: goal });
-  } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
-  }
-};
-
-// DELETE /extension/operational-goals/:id — Delete a per-user override
-exports.deleteOperationalGoal = async (req, res) => {
-  try {
-    const OperationalGoal = require('../models/OperationalGoal');
-    const goal = await OperationalGoal.findById(req.params.id);
-    if (!goal) return res.status(404).json({ status: 'fail', message: 'Goal not found' });
-    if (!goal.user_id) return res.status(400).json({ status: 'fail', message: 'Cannot delete team default' });
-    await goal.deleteOne();
-    res.status(200).json({ status: 'success', message: 'Override deleted' });
-  } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
-  }
-};
-
-// GET /extension/operational-goals — Get goals for a team
-exports.getOperationalGoals = async (req, res) => {
-  try {
-    const OperationalGoal = require('../models/OperationalGoal');
-    const userRole = req.user.role;
-    const userTeam = req.user.team;
-    const isAdmin = userRole === 'super_admin' || userRole === 'admin' || req.userPermissions?.includes('extension.admin');
-
-    let team = req.query.team;
-    if (!isAdmin) {
-      team = userTeam;
-    }
-    if (!team || !['listing', 'qc'].includes(team)) {
-      return res.status(400).json({ status: 'fail', message: 'Invalid or missing team parameter' });
-    }
-
-    const goals = await OperationalGoal.find({ team })
-      .populate('user_id', 'name team')
-      .populate('updated_by', 'name')
-      .lean();
-
-    const teamDefault = goals.find(g => !g.user_id);
-    const overrides = goals.filter(g => g.user_id);
-
-    res.status(200).json({
-      status: 'success',
-      data: { team, team_default: teamDefault || null, overrides }
-    });
-  } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
-  }
-};
-
-// PUT /extension/operational-goals — Create/update a goal
-exports.updateOperationalGoal = async (req, res) => {
-  try {
-    const OperationalGoal = require('../models/OperationalGoal');
-    const { team, user_id, listing_target, spec_target, qc_target, qc_enabled } = req.body;
-
-    if (!team || !['listing', 'qc'].includes(team)) {
-      return res.status(400).json({ status: 'fail', message: 'Invalid team' });
-    }
-
-    const query = { team, user_id: user_id || null };
-    const update = {
-      listing_target: listing_target || 0,
-      spec_target: spec_target || 0,
-      qc_target: qc_target || 0,
-      qc_enabled: qc_enabled || false,
-      updated_by: req.user._id,
-      updated_at: new Date()
-    };
-
-    const goal = await OperationalGoal.findOneAndUpdate(query, update, {
-      new: true, upsert: true, runValidators: true
-    });
-
-    res.status(200).json({ status: 'success', data: goal });
-  } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
-  }
-};
-
-// DELETE /extension/operational-goals/:id — Delete a per-user override
-exports.deleteOperationalGoal = async (req, res) => {
-  try {
-    const OperationalGoal = require('../models/OperationalGoal');
-    const goal = await OperationalGoal.findById(req.params.id);
-
-    if (!goal) {
-      return res.status(404).json({ status: 'fail', message: 'Goal not found' });
-    }
-    if (!goal.user_id) {
-      return res.status(400).json({ status: 'fail', message: 'Cannot delete team default' });
-    }
-
-    await OperationalGoal.findByIdAndDelete(req.params.id);
-    res.status(200).json({ status: 'success', message: 'Override deleted' });
-  } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
-  }
-};
-
 // GET /extension/team-performance — Listing & QC team gamification analytics
 exports.getTeamPerformance = async (req, res) => {
   try {
@@ -1216,77 +1075,6 @@ exports.getTeamPerformance = async (req, res) => {
     }
 
     res.status(200).json({ status: 'success', data: result });
-  } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
-  }
-};
-
-// GET /extension/operational-goals — Get operational goals
-exports.getOperationalGoals = async (req, res) => {
-  try {
-    const OperationalGoal = require('../models/OperationalGoal');
-    const userRole = req.user.role;
-    const userTeam = req.user.team;
-    const isAdmin = userRole === 'super_admin' || userRole === 'admin' || req.userPermissions?.includes('extension.admin');
-
-    if (isAdmin) {
-      const team = req.query.team || 'listing';
-      const goals = await OperationalGoal.find({ team }).populate('user_id', 'name team').populate('updated_by', 'name').lean();
-      const teamDefault = goals.find(g => !g.user_id);
-      const userOverrides = goals.filter(g => g.user_id);
-      return res.status(200).json({ status: 'success', data: { team, teamDefault, userOverrides } });
-    }
-
-    // Non-admin: return own team default + own override
-    if (!userTeam || !['listing', 'qc'].includes(userTeam)) {
-      return res.status(200).json({ status: 'success', data: { team: userTeam, teamDefault: null, userOverride: null } });
-    }
-    const goals = await OperationalGoal.find({
-      team: userTeam,
-      $or: [{ user_id: null }, { user_id: req.user._id }]
-    }).lean();
-    const teamDefault = goals.find(g => !g.user_id) || null;
-    const userOverride = goals.find(g => g.user_id && g.user_id.toString() === req.user._id.toString()) || null;
-    res.status(200).json({ status: 'success', data: { team: userTeam, teamDefault, userOverride } });
-  } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
-  }
-};
-
-// PUT /extension/operational-goals — Create/update operational goal
-exports.updateOperationalGoal = async (req, res) => {
-  try {
-    const OperationalGoal = require('../models/OperationalGoal');
-    const { team, user_id, listing_target, qc_target, qc_enabled } = req.body;
-
-    if (!['listing', 'qc'].includes(team)) {
-      return res.status(400).json({ status: 'fail', message: 'Invalid team' });
-    }
-
-    const query = { team, user_id: user_id || null };
-    const update = {
-      listing_target: listing_target || 0,
-      qc_target: qc_target || 0, qc_enabled: qc_enabled || false,
-      updated_by: req.user._id,
-      updated_at: new Date()
-    };
-
-    const goal = await OperationalGoal.findOneAndUpdate(query, update, { new: true, upsert: true, runValidators: true });
-    res.status(200).json({ status: 'success', data: goal });
-  } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
-  }
-};
-
-// DELETE /extension/operational-goals/:id — Delete a per-user override
-exports.deleteOperationalGoal = async (req, res) => {
-  try {
-    const OperationalGoal = require('../models/OperationalGoal');
-    const goal = await OperationalGoal.findById(req.params.id);
-    if (!goal) return res.status(404).json({ status: 'fail', message: 'Goal not found' });
-    if (!goal.user_id) return res.status(400).json({ status: 'fail', message: 'Cannot delete team-wide default' });
-    await goal.deleteOne();
-    res.status(200).json({ status: 'success', message: 'Override deleted' });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
   }

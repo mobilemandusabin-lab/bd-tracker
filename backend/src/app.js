@@ -3,6 +3,7 @@ const morgan = require('morgan');
 const morganBody = require('morgan-body');
 const helmet = require('helmet');
 const cors = require('cors');
+const compression = require('compression');
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const leadRoutes = require('./routes/leadRoutes');
@@ -53,6 +54,7 @@ app.use((req, res, next) => {
 });
 
 // Middleware
+app.use(compression());
 app.use(morgan('dev'));
 app.use(helmet({
   crossOriginResourcePolicy: false,

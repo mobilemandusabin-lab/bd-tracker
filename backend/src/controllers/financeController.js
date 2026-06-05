@@ -224,7 +224,8 @@ exports.syncFromNepalcan = async (req, res) => {
         let trackingData = null;
         try {
           const response = await axios.get(
-            `https://can-logistic-prod-84pie.ondigitalocean.app/api/public/marketplace-tracker/${order.orderId}`
+            `https://can-logistic-prod-84pie.ondigitalocean.app/api/public/marketplace-tracker/${order.orderId}`,
+            { timeout: 10000 }
           );
           trackingData = response.data;
         } catch (err) {
