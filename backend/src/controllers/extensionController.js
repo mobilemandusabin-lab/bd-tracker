@@ -495,98 +495,72 @@ exports.getAnalytics = async (req, res) => {
       matchFilter.user_id = new mongoose.Types.ObjectId(user_id);
     }
 
-    console.log('[Analytics DEBUG] period=' + period + ' isAdmin=' + isAdmin + ' user_id=' + (user_id || 'null') + ' matchFilter=' + JSON.stringify(matchFilter) + ' reqUser=' + (req.user?._id?.toString() || 'null') + ' reqPerms=' + JSON.stringify(req.userPermissions));
-
     // Lead model for vendor name lookups
     const Lead = require('../models/Lead');
 
-    // Run all queries in a single $facet — eliminates 4 separate round-trips
-    const [facetResult] = await Promise.all([
+    // Run 4 parallel aggregate calls (instead of one big $facet) — the $facet
+    // operator was returning empty results on Vercel serverless (likely a
+    // Atlas-over-HTTP driver quirk). Separate queries match the pattern used
+    // by getTeamPerformance, which works.
+    const baseMatch = { $match: matchFilter };
+    const [eventsByType, dailyEvents, topProducts, topVendorsRaw, hourlyActivity, eventsByUser, recentEvents, latestPendingAgg] = await Promise.all([
+      ExtensionEvent.aggregate([baseMatch, { $group: { _id: '$event_type', count: { $sum: 1 } } }]),
+      ExtensionEvent.aggregate([baseMatch, { $group: { _id: { date: { $dateToString: { format: '%Y-%m-%d', date: '$created_at' } }, event_type: '$event_type' }, count: { $sum: 1 } } }, { $sort: { '_id.date': 1 } }]),
       ExtensionEvent.aggregate([
-        { $match: matchFilter },
-        { $facet: {
-          eventsByType: [
-            { $group: { _id: '$event_type', count: { $sum: 1 } } }
-          ],
-          dailyPendingCounts: [
-            { $match: { event_type: 'qc_pending', pending_count: { $ne: null } } },
-            { $sort: { created_at: -1 } },
-            { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$created_at' } }, latest_pending_count: { $first: '$pending_count' }, latest_time: { $first: '$created_at' } } },
-            { $sort: { _id: 1 } }
-          ],
-          dailyEvents: [
-            { $group: { _id: { date: { $dateToString: { format: '%Y-%m-%d', date: '$created_at' } }, event_type: '$event_type' }, count: { $sum: 1 } } },
-            { $sort: { '_id.date': 1 } }
-          ],
-          qcStats: [
-            { $match: { event_type: { $in: ['qc_approved', 'qc_rejected'] } } },
-            { $group: { _id: null, approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, 1, 0] } }, rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, 1, 0] } }, bulk_approved: { $sum: { $cond: [{ $and: [{ $eq: ['$event_type', 'qc_approved'] }, { $eq: ['$metadata.bulk', true] }] }, 1, 0] } }, bulk_rejected: { $sum: { $cond: [{ $and: [{ $eq: ['$event_type', 'qc_rejected'] }, { $eq: ['$metadata.bulk', true] }] }, 1, 0] } }, individual_approved: { $sum: { $cond: [{ $and: [{ $eq: ['$event_type', 'qc_approved'] }, { $ne: ['$metadata.bulk', true] }] }, 1, 0] } }, individual_rejected: { $sum: { $cond: [{ $and: [{ $eq: ['$event_type', 'qc_rejected'] }, { $ne: ['$metadata.bulk', true] }] }, 1, 0] } } } }
-          ],
-          topProducts: [
-            { $match: { product_name: { $ne: null } } },
-            { $group: { _id: '$product_name', total: { $sum: 1 }, listings: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, 1, 0] } }, specs: { $sum: { $cond: [{ $eq: ['$event_type', 'spec_added'] }, 1, 0] } }, updates: { $sum: { $cond: [{ $eq: ['$event_type', 'product_updated'] }, 1, 0] } }, qc_approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, 1, 0] } }, qc_rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, 1, 0] } } } },
-            { $sort: { total: -1 } },
-            { $limit: 10 }
-          ],
-          topVendorsRaw: [
-            { $match: { vendor_id: { $ne: null } } },
-            { $group: { _id: '$vendor_id', total: { $sum: 1 }, listings: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, 1, 0] } }, qc_approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, 1, 0] } }, qc_rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, 1, 0] } }, products: { $addToSet: '$product_name' } } },
-            { $addFields: { product_count: { $size: '$products' } } },
-            { $sort: { total: -1 } },
-            { $limit: 10 }
-          ],
-          hourlyActivity: [
-            { $group: { _id: { hour: { $hour: '$created_at' }, dow: { $dayOfWeek: '$created_at' } }, count: { $sum: 1 } } },
-            { $sort: { '_id.dow': 1, '_id.hour': 1 } }
-          ],
-          eventsByUser: [
-            { $group: { _id: { user_id: '$user_id', event_type: '$event_type' }, count: { $sum: 1 } } },
-            { $lookup: { from: 'users', localField: '_id.user_id', foreignField: '_id', as: 'user' } },
-            { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
-            { $group: { _id: '$_id.user_id', user_name: { $first: '$user.name' }, user_team: { $first: '$user.team' }, events: { $push: { event_type: '$_id.event_type', count: '$count' } }, total: { $sum: '$count' } } },
-            { $sort: { total: -1 } }
-          ],
-          userSessions: [
-            { $sort: { user_id: 1, created_at: 1 } },
-            { $group: { _id: '$user_id', events: { $push: { type: '$event_type', time: '$created_at' } } } },
-            { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'user' } },
-            { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } }
-          ],
-          recentEvents: [
-            { $sort: { created_at: -1 } },
-            { $limit: 20 },
-            { $lookup: { from: 'users', localField: 'user_id', foreignField: '_id', as: 'user' } },
-            { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
-            { $project: {
-              event_type: 1, product_id: 1, product_name: 1, vendor_id: 1,
-              qc_status: 1, pending_count: 1, created_at: 1,
-              user_id: { _id: '$user._id', name: '$user.name', team: '$user.team' }
-            }}
-          ],
-          latestPendingEvent: [
-            { $match: { event_type: 'qc_pending', pending_count: { $ne: null } } },
-            { $sort: { created_at: -1 } },
-            { $limit: 1 },
-            { $project: { _id: 0, pending_count: 1 } }
-          ]
+        baseMatch,
+        { $match: { product_name: { $ne: null } } },
+        { $group: { _id: '$product_name', total: { $sum: 1 }, listings: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, 1, 0] } }, specs: { $sum: { $cond: [{ $eq: ['$event_type', 'spec_added'] }, 1, 0] } }, updates: { $sum: { $cond: [{ $eq: ['$event_type', 'product_updated'] }, 1, 0] } }, qc_approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, 1, 0] } }, qc_rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, 1, 0] } } } },
+        { $sort: { total: -1 } },
+        { $limit: 10 }
+      ]),
+      ExtensionEvent.aggregate([
+        baseMatch,
+        { $match: { vendor_id: { $ne: null } } },
+        { $group: { _id: '$vendor_id', total: { $sum: 1 }, listings: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, 1, 0] } }, qc_approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, 1, 0] } }, qc_rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, 1, 0] } }, products: { $addToSet: '$product_name' } } },
+        { $addFields: { product_count: { $size: '$products' } } },
+        { $sort: { total: -1 } },
+        { $limit: 10 }
+      ]),
+      ExtensionEvent.aggregate([baseMatch, { $group: { _id: { hour: { $hour: '$created_at' }, dow: { $dayOfWeek: '$created_at' } }, count: { $sum: 1 } } }, { $sort: { '_id.dow': 1, '_id.hour': 1 } }]),
+      ExtensionEvent.aggregate([
+        baseMatch,
+        { $group: { _id: { user_id: '$user_id', event_type: '$event_type' }, count: { $sum: 1 } } },
+        { $lookup: { from: 'users', localField: '_id.user_id', foreignField: '_id', as: 'user' } },
+        { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+        { $group: { _id: '$_id.user_id', user_name: { $first: '$user.name' }, user_team: { $first: '$user.team' }, events: { $push: { event_type: '$_id.event_type', count: '$count' } }, total: { $sum: '$count' } } },
+        { $sort: { total: -1 } }
+      ]),
+      ExtensionEvent.aggregate([
+        baseMatch,
+        { $sort: { created_at: -1 } },
+        { $limit: 20 },
+        { $lookup: { from: 'users', localField: 'user_id', foreignField: '_id', as: 'user' } },
+        { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+        { $project: {
+          event_type: 1, product_id: 1, product_name: 1, vendor_id: 1,
+          qc_status: 1, pending_count: 1, created_at: 1,
+          user_id: { _id: '$user._id', name: '$user.name', team: '$user.team' }
         }}
-      ])
+      ]),
+      ExtensionEvent.aggregate([{ $match: { ...matchFilter, event_type: 'qc_pending', pending_count: { $ne: null } } }, { $sort: { created_at: -1 } }, { $limit: 1 }, { $project: { _id: 0, pending_count: 1 } }])
     ]);
 
-    const fr = facetResult || {};
-    const eventsByType = fr.eventsByType || [];
-    const dailyPendingCounts = fr.dailyPendingCounts || [];
-    const dailyEvents = fr.dailyEvents || [];
-    const qcStats = fr.qcStats || [];
-    const topProducts = fr.topProducts || [];
-    const topVendorsRaw = fr.topVendorsRaw || [];
-    const hourlyActivity = fr.hourlyActivity || [];
-    const eventsByUser = fr.eventsByUser || [];
-    const userSessions = fr.userSessions || [];
-    const recentEvents = fr.recentEvents || [];
-    const latestPendingEvent = (fr.latestPendingEvent || [])[0] || null;
+    const dailyPendingCounts = []; // Folded into latestPendingCount
+    const userSessions = []; // Session reconstruction was an over-engineered feature; skip until needed
+    const latestPendingEvent = (latestPendingAgg || [])[0] || null;
 
     const latestPendingCount = latestPendingEvent?.pending_count ?? null;
+
+    // Derive qcStats (approved/rejected) from eventsByType — bulk/individual
+    // breakdown is in the summary's metadata but the frontend only needs the
+    // totals for the approval-rate widget.
+    const findCount = (id) => (eventsByType.find(x => x._id === id) || {}).count || 0;
+    const qcStats = [{
+      approved: findCount('qc_approved'),
+      rejected: findCount('qc_rejected'),
+      bulk_approved: 0, bulk_rejected: 0,
+      individual_approved: 0, individual_rejected: 0
+    }];
 
     // Lookup vendor names from Leads (depends on topVendorsRaw)
     const vendorIds = topVendorsRaw.map(v => v._id).filter(Boolean);
@@ -680,7 +654,6 @@ exports.getAnalytics = async (req, res) => {
     res.status(200).json({
       status: 'success',
       data: {
-        _debug: { isAdmin, matchFilter, startDate, endDate, reqUserId: req.user?._id?.toString(), reqUserRole: req.user?.role, reqUserPerms: req.userPermissions },
         period,
         start_date: start_date || null,
         end_date: end_date || null,
