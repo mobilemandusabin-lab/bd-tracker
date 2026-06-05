@@ -59,14 +59,18 @@ exports.extensionLogin = async (req, res) => {
 };
 
 // GET /extension/latest-version — reads directly from manifest.json
+// Uses fs.readFileSync (not require) so serverless / long-running servers
+// always see the current file on disk, not a cached copy from startup.
 exports.getLatestVersion = async (req, res) => {
   try {
-    const manifest = require('../../public/extension/manifest.json');
+    const manifestPath = path.join(__dirname, '../../public/extension/manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+    const version = manifest.version || '1.0.0';
     res.status(200).json({
       status: 'success',
       data: {
-        version: manifest.version,
-        changelog: `Extension v${manifest.version}`,
+        version,
+        changelog: `Extension v${version}`,
         created_at: new Date().toISOString()
       }
     });
