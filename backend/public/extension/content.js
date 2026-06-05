@@ -1,726 +1,682 @@
 (function() {
   'use strict';
 
-  console.log(`[BD Tracker] Extension content script loaded on ${window.location.hostname}`);
+  console.log(`[BD Tracker] Content script loaded on ${window.location.hostname}`);
 
-  // ═══════════════════════════════════════════════════════════════
-  // API PATTERNS — what URLs we intercept
-  // ═══════════════════════════════════════════════════════════════
-  const API_PATTERNS = [
-    { method: 'POST', pattern: '/api/vendor/products', event_type: 'listing_created' },
-    { method: 'GET', pattern: '/api/vendor/products/', event_type: 'product_opened' },
-    { method: 'PUT', pattern: '/api/vendor/products/', event_type: 'product_updated' },
-    { method: 'POST', pattern: '/api/quality-check/products/', suffix: '/approve', event_type: 'qc_approved', rejectPattern: 'bulk-approve' },
-    { method: 'POST', pattern: '/api/quality-check/products/', suffix: '/reject', event_type: 'qc_rejected', rejectPattern: 'bulk-reject' },
-    { method: 'GET', pattern: '/api/quality-check/products', requiredParams: ['qcStatus=pending'], event_type: 'qc_pending', extractPagination: true },
-    { method: 'POST', pattern: '/api/quality-check/bulk-approve', event_type: 'qc_bulk_approved' },
-    { method: 'POST', pattern: '/api/quality-check/bulk-reject', event_type: 'qc_bulk_rejected' }
+  // ═══════════════════════════════════════════════════════════════════════
+  // URL PATTERNS
+  //   pathRe:    regex matched against the URL pathname (anchored)
+  //   method:    HTTP method to match
+  //   excludeRe: optional, if matches the path, this pattern is skipped
+  //   skip:      if true, the URL is recognized but no event is sent
+  //   event_type: candidate event_type; detection may refine it
+  // ═══════════════════════════════════════════════════════════════════════
+  const PATTERNS = [
+    {
+      method: 'POST',
+      pathRe: /^\/api\/vendor\/products$/,
+      excludeRe: /\/bulk[-\/]/i,
+      event_type: 'listing_created'
+    },
+    {
+      method: 'GET',
+      pathRe: /^\/api\/vendor\/products\/[a-f0-9]{24}$/i,
+      event_type: 'product_viewed'
+    },
+    {
+      method: 'PUT',
+      pathRe: /^\/api\/vendor\/products\/[a-f0-9]{24}$/i,
+      event_type: 'product_updated'
+    },
+    {
+      method: 'POST',
+      pathRe: /^\/api\/quality-check\/products\/[a-f0-9]{24}\/(approve|reject)$/i,
+      event_type: 'qc_approved'
+    },
+    {
+      method: 'POST',
+      pathRe: /^\/api\/quality-check\/bulk-(approve|reject)$/i,
+      event_type: 'qc_bulk_approved',
+      bulk: true
+    },
+    {
+      method: 'GET',
+      pathRe: /^\/api\/quality-check\/products(\?.*)?$/,
+      event_type: 'qc_pending',
+      queryCheck: (url) => url.includes('qcStatus=pending')
+    }
   ];
 
-  // ═══════════════════════════════════════════════════════════════
-  // PRODUCT CONTEXT CACHE
-  // Remembers what we saw on initial GET for each product in this tab
-  // ═══════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════
+  // PRODUCT CONTEXT CACHE (per-tab, in-memory)
+  //   Stores what we saw on the initial GET for a product, used by the
+  //   PUT branch to decide between "new listing" and "edit".
+  // ═══════════════════════════════════════════════════════════════════════
   const ProductContext = {};
 
-  function extractProductId(url) {
-    const match = url.match(/\/products\/([a-f0-9]+)/i);
-    return match ? match[1] : null;
+  function hasPackageType(d) {
+    if (!d) return false;
+    if (d.packageTypeID) return true;
+    if (typeof d.packageType === 'string' && d.packageType.length > 0) return true;
+    if (d.packageType && typeof d.packageType === 'object' && d.packageType._id) return true;
+    return false;
+  }
+
+  function hasSpecs(d) {
+    if (!d) return false;
+    if (d.categoryComplianceDetails && Object.keys(d.categoryComplianceDetails).length) return true;
+    if (d.productComplianceDetails && Object.keys(d.productComplianceDetails).length) return true;
+    return false;
   }
 
   function cacheProductContext(productId, responseData) {
     if (!productId) return;
-    const data = responseData?.data || responseData || {};
-
-    // packageType can be:
-    //  - an object with _id (full packageType object): { _id, code, name, categoryComplianceKeys, ... }
-    //  - a string (just the ID)
-    //  - null/undefined (not set yet)
-    const hasPackageType = !!(
-      data.packageTypeID ||
-      (typeof data.packageType === 'string' && data.packageType) ||
-      (data.packageType && typeof data.packageType === 'object' && !Array.isArray(data.packageType) && data.packageType._id)
-    );
-
-    const ctx = {
-      product_id: productId,
-      packageTypeID_present: hasPackageType,
-      packageType_isObject: !!(data.packageType && typeof data.packageType === 'object' && !Array.isArray(data.packageType)),
-      specs_present: !!((data.categoryComplianceDetails && Object.keys(data.categoryComplianceDetails).length > 0) || (data.productComplianceDetails && Object.keys(data.productComplianceDetails).length > 0)),
-      vendor_id: typeof data.vendor === 'object' ? data.vendor?._id : (data.vendor || null),
-      product_name: data.productName || data.name || null,
-      product_sku: data.productSku || null,
+    const d = unwrap(responseData);
+    ProductContext[productId] = {
+      has_package_type: hasPackageType(d),
+      has_specs: hasSpecs(d),
       seen_at: Date.now()
     };
-
-    ProductContext[productId] = ctx;
-    console.log(`[BD Tracker] 📦 ProductContext cached for ${productId}:`, JSON.stringify({
-      packageTypeID_present: ctx.packageTypeID_present,
-      specs_present: ctx.specs_present,
-      product_name: ctx.product_name
-    }));
   }
 
-  function getProductContext(productId) {
-    return ProductContext[productId] || null;
-  }
-
-  // ═══════════════════════════════════════════════════════════════
-  // PRODUCT TRACKER — session tracking per product per tab
-  // ═══════════════════════════════════════════════════════════════
-  const ProductTracker = {
+  // ═══════════════════════════════════════════════════════════════════════
+  // WORKFLOW STATE TRACKER
+  //   Per-product session state (shared across tabs of the same product).
+  //   localStorage presence registry tracks which tabs have the product
+  //   open; session_ended only fires when the LAST tab closes.
+  // ═══════════════════════════════════════════════════════════════════════
+  const State = {
     _sessions: {},
+    _global: {},
+    _presence: {},
+    _idleThreshold: 15 * 60 * 1000,
+    _deadTabThreshold: 2 * 60 * 1000,
+    _cleanupTimer: null,
+
+    init() {
+      try {
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+          const k = localStorage.key(i);
+          if (!k) continue;
+          if (k.startsWith('bd_state_')) {
+            const v = JSON.parse(localStorage.getItem(k));
+            const productId = k.slice('bd_state_'.length);
+            this._global[productId] = v;
+            if (v.is_ended && v.ended_at && Date.now() - v.ended_at > 24 * 60 * 60 * 1000) {
+              localStorage.removeItem(k);
+              delete this._global[productId];
+            }
+          } else if (k.startsWith('bd_presence_')) {
+            const productId = k.slice('bd_presence_'.length);
+            try {
+              this._presence[productId] = JSON.parse(localStorage.getItem(k)) || {};
+            } catch (e) {
+              this._presence[productId] = {};
+            }
+          }
+        }
+      } catch (e) {}
+
+      window.addEventListener('storage', (e) => this._onStorageEvent(e));
+      this._cleanupTimer = setInterval(() => this._cleanupDeadTabs(), 30 * 1000);
+    },
 
     getTabId() {
-      let tabId = sessionStorage.getItem('bd_tab_id');
-      if (!tabId) {
-        tabId = 'tab_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 5);
-        sessionStorage.setItem('bd_tab_id', tabId);
-        console.log(`[BD Tracker] 🆕 New tab ID: ${tabId}`);
+      let id = sessionStorage.getItem('bd_tab_id');
+      if (!id) {
+        id = 'tab_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+        sessionStorage.setItem('bd_tab_id', id);
       }
-      return tabId;
+      return id;
+    },
+
+    _onStorageEvent(e) {
+      if (!e.key) return;
+      if (e.key.startsWith('bd_presence_')) {
+        const productId = e.key.slice('bd_presence_'.length);
+        try {
+          this._presence[productId] = e.newValue ? JSON.parse(e.newValue) : {};
+        } catch (err) {
+          this._presence[productId] = {};
+        }
+      } else if (e.key.startsWith('bd_state_')) {
+        const productId = e.key.slice('bd_state_'.length);
+        try {
+          this._global[productId] = e.newValue ? JSON.parse(e.newValue) : null;
+        } catch (err) {}
+      }
+    },
+
+    _readPresence(productId) {
+      try {
+        const raw = localStorage.getItem('bd_presence_' + productId);
+        this._presence[productId] = raw ? JSON.parse(raw) : {};
+      } catch (e) {
+        this._presence[productId] = {};
+      }
+    },
+
+    _writePresence(productId) {
+      try {
+        localStorage.setItem('bd_presence_' + productId, JSON.stringify(this._presence[productId] || {}));
+      } catch (e) {}
+    },
+
+    _heartbeat(productId) {
+      this._readPresence(productId);
+      if (!this._presence[productId]) this._presence[productId] = {};
+      const tabId = this.getTabId();
+      const existing = this._presence[productId][tabId];
+      this._presence[productId][tabId] = {
+        openedAt: existing?.openedAt || Date.now(),
+        lastHeartbeat: Date.now()
+      };
+      this._writePresence(productId);
+    },
+
+    _deregisterTab(productId) {
+      const tabId = this.getTabId();
+      if (this._presence[productId] && this._presence[productId][tabId]) {
+        delete this._presence[productId][tabId];
+        this._writePresence(productId);
+      }
+    },
+
+    _cleanupDeadTabs() {
+      const cutoff = Date.now() - this._deadTabThreshold;
+      const tabId = this.getTabId();
+      let anyChanged = false;
+      for (const productId of Object.keys(this._presence)) {
+        const tabs = this._presence[productId];
+        let changed = false;
+        for (const tid of Object.keys(tabs)) {
+          if (tid !== tabId && tabs[tid].lastHeartbeat < cutoff) {
+            delete tabs[tid];
+            changed = true;
+          }
+        }
+        if (changed) {
+          anyChanged = true;
+          this._writePresence(productId);
+        }
+      }
+      return anyChanged;
+    },
+
+    _otherTabsViewing(productId) {
+      this._readPresence(productId);
+      const tabs = this._presence[productId] || {};
+      const tabId = this.getTabId();
+      return Object.keys(tabs).some(tid => tid !== tabId);
+    },
+
+    _tabCount(productId) {
+      this._readPresence(productId);
+      return Object.keys(this._presence[productId] || {}).length;
     },
 
     getSession(productId) {
       if (!productId) return null;
       const tabId = this.getTabId();
-      const key = `${tabId}:${productId}`;
-
-      if (!this._sessions[key]) {
-        const globalState = this._getGlobalState(productId);
-
-        this._sessions[key] = {
+      this._readPresence(productId);
+      if (!this._sessions[productId]) {
+        const g = this._global[productId] || {};
+        this._sessions[productId] = {
           product_id: productId,
           tab_id: tabId,
-          first_seen: Date.now(),
+          first_seen: g.first_seen || Date.now(),
           last_event_at: Date.now(),
           events: [],
-          current_state: globalState?.current_state || 'PRODUCT_OPENED',
-          previous_state: null,
-          has_package_type: globalState?.has_package_type || false,
-          has_specs: globalState?.has_specs || false,
-          spec_count: globalState?.spec_count || 0,
-          total_views: globalState?.total_views || 0,
-          time_to_first_spec: globalState?.time_to_first_spec || null,
-          time_to_listing: globalState?.time_to_listing || null,
+          current_state: g.current_state || 'PRODUCT_OPENED',
+          previous_state: g.previous_state || null,
+          has_package_type: !!g.has_package_type,
+          has_specs: !!g.has_specs,
+          spec_count: g.spec_count || 0,
+          total_views: g.total_views || 0,
+          time_to_first_spec: g.time_to_first_spec || null,
+          time_to_listing: g.time_to_listing || null,
+          tab_ids: Array.isArray(g.tab_ids) ? g.tab_ids.slice() : [],
           idle_periods: []
         };
-
-        console.log(`[BD Tracker] 🆕 New session for product ${productId} in tab ${tabId}`);
       }
-
-      const session = this._sessions[key];
-      session.last_event_at = Date.now();
-      session.total_views++;
-      return session;
+      this._heartbeat(productId);
+      const s = this._sessions[productId];
+      if (!s.tab_ids.includes(tabId)) s.tab_ids.push(tabId);
+      s.tab_id = tabId;
+      const now = Date.now();
+      if (s.events.length > 0 && now - s.last_event_at > this._idleThreshold) {
+        s.idle_periods.push({ start: s.last_event_at, end: now, duration: now - s.last_event_at });
+      }
+      s.last_event_at = now;
+      s.total_views++;
+      return s;
     },
 
     track(productId, eventType, responseData, reqBody) {
-      const session = this.getSession(productId);
-      if (!session) return null;
-
+      const s = this.getSession(productId);
+      if (!s) return null;
       const now = Date.now();
-      const previousState = session.current_state;
+      const prev = s.current_state;
+      const d = unwrap(responseData);
+      const b = reqBody || {};
 
-      // Detect idle period (gap > 15 min)
-      if (session.events.length > 0) {
-        const gap = now - session.last_event_at;
-        if (gap > 15 * 60 * 1000) {
-          session.idle_periods.push({ start: session.last_event_at, end: now, duration: gap });
-          console.log(`[BD Tracker] ⏸️ Idle period detected for ${productId}: ${Math.round(gap / 60000)}min`);
-        }
+      if (b.packageType || d.packageType) s.has_package_type = true;
+      if (b.categoryComplianceDetails || d.categoryComplianceDetails || b.productComplianceDetails || d.productComplianceDetails) {
+        s.has_specs = true;
+        s.spec_count++;
       }
 
-      session.events.push({ type: eventType, timestamp: now });
-      session.last_event_at = now;
-
-      // Update flags
-      const data = responseData?.data || responseData || {};
-      const body = reqBody || {};
-
-      if (data.packageType || body.packageType) {
-        session.has_package_type = true;
+      s.current_state = resolveWorkflowState(s, eventType, b, d);
+      if (s.current_state === 'SPEC_ADDED' && s.time_to_first_spec == null) {
+        s.time_to_first_spec = now - s.first_seen;
       }
-      if (data.categoryComplianceDetails || body.categoryComplianceDetails || data.productComplianceDetails || body.productComplianceDetails) {
-        session.has_specs = true;
-        session.spec_count++;
+      if (s.current_state === 'LISTING_CREATED' && s.time_to_listing == null) {
+        s.time_to_listing = now - s.first_seen;
       }
-
-      // Resolve true state
-      session.previous_state = previousState;
-      session.current_state = this._resolveState(session, eventType, responseData, reqBody);
-
-      // Track milestones
-      if (session.current_state === 'SPEC_ADDED' && !session.time_to_first_spec) {
-        session.time_to_first_spec = now - session.first_seen;
-        console.log(`[BD Tracker] ⏱️ Time to first spec for ${productId}: ${Math.round(session.time_to_first_spec / 60000)}min`);
-      }
-      if (session.current_state === 'LISTING_CREATED' && !session.time_to_listing) {
-        session.time_to_listing = now - session.first_seen;
-        console.log(`[BD Tracker] ⏱️ Time to listing for ${productId}: ${Math.round(session.time_to_listing / 60000)}min`);
-      }
-
-      console.log(`[BD Tracker] 📊 Session state for ${productId}: ${previousState} → ${session.current_state} (event: ${eventType})`);
-
-      this._persistSession(session);
-
+      s.events.push({ type: eventType, at: now, tab_id: s.tab_id });
+      this._persist(s);
+      const tabCount = this._tabCount(productId);
       return {
-        event_type: eventType,
-        workflow_state: session.current_state,
-        previous_state: previousState,
-        product_id: productId,
-        tab_id: session.tab_id,
-        session_duration: now - session.first_seen,
-        time_to_first_spec: session.time_to_first_spec,
-        time_to_listing: session.time_to_listing,
-        total_views: session.total_views,
-        spec_count: session.spec_count,
-        has_package_type: session.has_package_type
+        workflow_state: s.current_state,
+        previous_state: prev,
+        session_duration: now - s.first_seen,
+        time_to_first_spec: s.time_to_first_spec,
+        time_to_listing: s.time_to_listing,
+        total_views: s.total_views,
+        spec_count: s.spec_count,
+        has_package_type: s.has_package_type,
+        tab_id: s.tab_id,
+        active_tab_count: tabCount,
+        multi_tab: tabCount > 1
       };
+    },
+
+    _persist(s) {
+      try {
+        const payload = {
+          first_seen: s.first_seen,
+          current_state: s.current_state,
+          previous_state: s.previous_state,
+          has_package_type: s.has_package_type,
+          has_specs: s.has_specs,
+          spec_count: s.spec_count,
+          total_views: s.total_views,
+          time_to_first_spec: s.time_to_first_spec,
+          time_to_listing: s.time_to_listing,
+          tab_ids: s.tab_ids,
+          last_activity: s.last_event_at
+        };
+        localStorage.setItem('bd_state_' + s.product_id, JSON.stringify(payload));
+        this._global[s.product_id] = payload;
+      } catch (e) {}
     },
 
     endAllSessions() {
       const tabId = this.getTabId();
       const now = Date.now();
-      console.log(`[BD Tracker] 🔚 Ending all sessions for tab ${tabId}`);
-
-      for (const [key, session] of Object.entries(this._sessions)) {
-        if (session.tab_id !== tabId) continue;
-
-        const totalDuration = now - session.first_seen;
-        const activeDuration = totalDuration - session.idle_periods.reduce((sum, p) => sum + p.duration, 0);
-
-        const sessionSummary = {
-          event_type: 'session_ended',
-          workflow_state: session.current_state,
-          product_id: session.product_id,
+      for (const productId of Object.keys(this._sessions)) {
+        const s = this._sessions[productId];
+        this._deregisterTab(productId);
+        this._readPresence(productId);
+        if (this._otherTabsViewing(productId)) {
+          const g = this._global[productId] || {};
+          g.last_tab = tabId;
+          g.last_activity = now;
+          g.tab_ids = s.tab_ids;
+          this._global[productId] = g;
+          this._persist(s);
+          continue;
+        }
+        const g = this._global[productId] || {};
+        if (Array.isArray(g.tab_ids) && g.tab_ids.length > s.tab_ids.length) {
+          s.tab_ids = g.tab_ids;
+        }
+        const totalDuration = now - s.first_seen;
+        const idleTotal = s.idle_periods.reduce((sum, p) => sum + p.duration, 0);
+        const summary = {
+          product_id: s.product_id,
           tab_id: tabId,
+          tab_ids: s.tab_ids,
+          tab_count: s.tab_ids.length,
+          multi_tab_session: s.tab_ids.length > 1,
           total_duration: totalDuration,
-          active_duration: activeDuration,
-          idle_time: totalDuration - activeDuration,
-          idle_periods_count: session.idle_periods.length,
-          longest_idle: session.idle_periods.length > 0 ? Math.max(...session.idle_periods.map(p => p.duration)) : 0,
-          total_events: session.events.length,
-          total_views: session.total_views,
-          spec_count: session.spec_count,
-          has_package_type: session.has_package_type,
-          time_to_first_spec: session.time_to_first_spec,
-          time_to_listing: session.time_to_listing,
-          final_state: session.current_state,
-          completed: session.current_state === 'LISTING_CREATED',
-          event_timeline: session.events.map(e => ({
-            type: e.type,
-            at: e.timestamp,
-            offset: e.timestamp - session.first_seen
-          }))
+          active_duration: totalDuration - idleTotal,
+          idle_time: idleTotal,
+          idle_periods_count: s.idle_periods.length,
+          longest_idle: s.idle_periods.length > 0 ? Math.max(...s.idle_periods.map(p => p.duration)) : 0,
+          total_events: s.events.length,
+          total_views: s.total_views,
+          spec_count: s.spec_count,
+          has_package_type: s.has_package_type,
+          time_to_first_spec: s.time_to_first_spec,
+          time_to_listing: s.time_to_listing,
+          final_state: s.current_state,
+          completed: s.current_state === 'LISTING_CREATED',
+          event_timeline: s.events.map(e => ({ type: e.type, at: e.at, offset: e.at - s.first_seen, tab_id: e.tab_id }))
         };
-
-        console.log(`[BD Tracker] 📋 Session summary for ${session.product_id}:`, JSON.stringify(sessionSummary, null, 2));
-
-        window.postMessage({
-          type: 'BD_TRACKER_INTERCEPTED',
-          event_type: 'session_ended',
-          data: sessionSummary
-        }, '*');
-
-        this._persistSession(session, true);
+        postToBridge('session_ended', summary);
+        g.is_ended = true;
+        g.ended_at = now;
+        g.tab_ids = s.tab_ids;
+        this._global[productId] = g;
+        this._persist(s);
       }
-    },
-
-    _resolveState(session, rawEventType, responseData, reqBody) {
-      const data = responseData?.data || responseData || {};
-      const body = reqBody || {};
-
-      // POST to /api/vendor/products = always listing_created
-      if (rawEventType === 'listing_created') return 'LISTING_CREATED';
-
-      // PUT: spec addition takes PRIORITY — body.categoryComplianceDetails = strongest signal
-      if (rawEventType === 'spec_added') {
-        return 'SPEC_ADDED';
-      }
-
-      // PUT: listing_created (detected when product was new + packageType confirmed)
-      if (rawEventType === 'product_updated' && this._hasPackageType(body) && (!session.has_package_type || session.current_state === 'PRODUCT_OPENED')) {
-        return 'LISTING_CREATED';
-      }
-
-      // PUT: generic product update
-      // Generic PUT
-      if (rawEventType === 'product_updated') {
-        return session.has_specs ? 'SPEC_REFINED' : 'PRODUCT_EDITED';
-      }
-
-      // GET = viewing (product_created = no packageType, product_viewed = has packageType)
-      if (rawEventType === 'product_opened' || rawEventType === 'product_created') {
-        return 'PRODUCT_OPENED';
-      }
-      if (rawEventType === 'product_viewed') {
-        return 'PRODUCT_VIEWED';
-      }
-
-      return session.current_state;
-    },
-
-    _hasPackageType(val) {
-      if (!val || typeof val !== 'object' || Array.isArray(val)) return false;
-      const pt = val.packageType;
-      if (!pt) return false;
-      if (typeof pt === 'string' && pt.length > 0) return true;
-      if (typeof pt === 'object' && !Array.isArray(pt) && pt._id) return true;
-      return false;
-    },
-
-    _getGlobalState(productId) {
-      try {
-        const raw = localStorage.getItem(`bd_product_${productId}`);
-        return raw ? JSON.parse(raw) : null;
-      } catch (e) { return null; }
-    },
-
-    _persistSession(session, isEnded = false) {
-      try {
-        localStorage.setItem(`bd_product_${session.product_id}`, JSON.stringify({
-          current_state: session.current_state,
-          has_package_type: session.has_package_type,
-          has_specs: session.has_specs,
-          spec_count: session.spec_count,
-          total_views: session.total_views,
-          time_to_first_spec: session.time_to_first_spec,
-          time_to_listing: session.time_to_listing,
-          last_activity: session.last_event_at,
-          last_tab: session.tab_id,
-          events: session.events,
-          is_ended: isEnded,
-          ended_at: isEnded ? Date.now() : null
-        }));
-      } catch (e) {}
     }
   };
 
-  // ═══════════════════════════════════════════════════════════════
-  // PATTERN MATCHING
-  // ═══════════════════════════════════════════════════════════════
-  function matchPattern(method, url) {
-    const matches = [];
-    for (const apiPattern of API_PATTERNS) {
-      if (method !== apiPattern.method) continue;
-      if (!url.includes(apiPattern.pattern)) continue;
-      if (apiPattern.suffix && !url.includes(apiPattern.suffix)) continue;
-      if (apiPattern.rejectPattern && url.includes(apiPattern.rejectPattern)) continue;
-      if (apiPattern.requiredParams) {
-        const hasAll = apiPattern.requiredParams.every(p => url.includes(p));
-        if (!hasAll) continue;
+  function resolveWorkflowState(session, eventType, body, responseData) {
+    if (eventType === 'listing_created') return 'LISTING_CREATED';
+    if (eventType === 'spec_added') return 'SPEC_ADDED';
+    if (eventType === 'product_viewed') return 'PRODUCT_VIEWED';
+    if (eventType === 'product_updated') {
+      if (hasPackageType(body) || hasPackageType(responseData)) {
+        if (!session.has_package_type) return 'LISTING_CREATED';
       }
-      matches.push(apiPattern);
+      if (hasSpecs(body) || hasSpecs(responseData)) {
+        return session.has_specs ? 'SPEC_REFINED' : 'SPEC_ADDED';
+      }
+      return session.has_specs ? 'SPEC_REFINED' : 'PRODUCT_EDITED';
     }
-    return matches;
+    return session.current_state;
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // EVENT DETECTION — determines what actually happened
-  // ═══════════════════════════════════════════════════════════════
-  function detectEventType(matched, reqBody, responseData, method, url) {
-    const productId = extractProductId(url);
-
-    // ── POST /api/vendor/products = always listing_created ──
-    if (matched.event_type === 'listing_created' && method === 'POST') {
-      console.log(`[BD Tracker] ✅ listing_created detected (POST)`);
-      return 'listing_created';
-    }
-
-    // ── GET /api/vendor/products/{id} = product opened ──
-    if (matched.event_type === 'product_opened' && method === 'GET') {
-      const data = responseData?.data || responseData || {};
-      const hasPackageType = data.packageType && (
-        (typeof data.packageType === 'string' && data.packageType.length > 0) ||
-        (typeof data.packageType === 'object' && !Array.isArray(data.packageType))
-      );
-
-      // Cache what we see on this GET
-      if (productId) {
-        cacheProductContext(productId, responseData);
-      }
-
-      if (hasPackageType) {
-        console.log(`[BD Tracker] ✅ product_viewed detected (GET with packageType)`);
-        return 'product_viewed';
-      }
-
-      console.log(`[BD Tracker] ✅ product_created detected (GET, no packageType)`);
-      return 'product_created';
-    }
-
-    // ── PUT /api/vendor/products/{id} = need context to decide ──
-    if (matched.event_type === 'product_updated' && method === 'PUT') {
-      const body = reqBody || {};
-      const data = responseData?.data || responseData || {};
-      const ctx = productId ? getProductContext(productId) : null;
-
-      const bodyHasSpecs = (body.categoryComplianceDetails && Object.keys(body.categoryComplianceDetails).length > 0) || (body.productComplianceDetails && Object.keys(body.productComplianceDetails).length > 0);
-      const responseHasSpecs = (data.categoryComplianceDetails && Object.keys(data.categoryComplianceDetails).length > 0) || (data.productComplianceDetails && Object.keys(data.productComplianceDetails).length > 0);
-
-      console.log(`[BD Tracker] 🔍 PUT detection for ${productId}:`, JSON.stringify({
-        bodyHasSpecs,
-        responseHasSpecs,
-        ctx_packageTypeID: ctx?.packageTypeID_present,
-        ctx_specs_present: ctx?.specs_present,
-        body_packageType: !!body.packageType,
-        response_packageType: typeof data.packageType === 'string' ? data.packageType : (data.packageType?._id || null)
-      }));
-
-      // Check 1: Body has categoryComplianceDetails = spec addition
-      // This is the STRONGEST signal — staff is saving specs
-      // (Both listing creation and spec addition echo back packageType in body,
-      //  so packageType alone can't distinguish them. categoryComplianceDetails can.)
-      if (bodyHasSpecs) {
-        console.log(`[BD Tracker] ✅ spec_added detected (PUT body has categoryComplianceDetails)`);
-        return 'spec_added';
-      }
-
-      // Check 2: Response has categoryComplianceDetails AND context says product had no specs = spec added (response-side)
-      if (responseHasSpecs && ctx && ctx.packageTypeID_present && !ctx.specs_present) {
-        console.log(`[BD Tracker] ✅ spec_added detected (PUT response has categoryComplianceDetails, context confirms new)`);
-        return 'spec_added';
-      }
-
-      // Check 3: Body has packageType AND context says product did NOT have packageType = listing created
-      // Only fire if the product was NEW (no prior packageType in context)
-      if (body.packageType && (!ctx || !ctx.packageTypeID_present)) {
-        const responseConfirmed = data.packageTypeID || (typeof data.packageType === 'string' && data.packageType) || (data.packageType?._id);
-        if (responseConfirmed) {
-          console.log(`[BD Tracker] ✅ listing_created detected (PUT body has packageType, product was new, response confirmed)`);
-          return 'listing_created';
-        }
-      }
-
-      // Default: generic product update
-      console.log(`[BD Tracker] ✅ product_updated detected (PUT, no special fields)`);
-      return 'product_updated';
-    }
-
-    console.log(`[BD Tracker] ⚠️ No detection rule matched, returning: ${matched.event_type}`);
-    return matched.event_type;
+  // ═══════════════════════════════════════════════════════════════════════
+  // HELPERS
+  // ═══════════════════════════════════════════════════════════════════════
+  function unwrap(responseData) {
+    if (!responseData) return {};
+    if (responseData.data && typeof responseData.data === 'object') return responseData.data;
+    return responseData;
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // DATA EXTRACTION
-  // ═══════════════════════════════════════════════════════════════
-  function extractData(responseData, eventType, reqBody, url) {
-    if (eventType === 'qc_pending') {
-      const pendingCount = responseData?.pagination?.total ?? null;
-      return {
-        product_id: null, vendor_id: null, product_name: null,
-        qc_status: 'pending', is_qc_approved: false, product_sku: null,
-        event_type: eventType, pending_count: pendingCount,
-        timestamp: new Date().toISOString()
-      };
+  function getPath(url) {
+    try {
+      const u = new URL(url, window.location.origin);
+      return u.pathname;
+    } catch (e) {
+      return url.split('?')[0];
     }
-
-    const data = responseData?.data || responseData || {};
-    const body = reqBody || {};
-
-    // For spec_added, prioritize request body fields (what staff actually submitted)
-    const categoryComplianceDetails = body.categoryComplianceDetails || data.categoryComplianceDetails || body.productComplianceDetails || data.productComplianceDetails || null;
-
-    return {
-      product_id: data._id || data.id || body._id || body.id || (url ? extractProductId(url) : null) || null,
-      vendor_id: typeof data.vendor === 'object' ? data.vendor?._id : (data.vendor || body.vendor || null),
-      product_name: data.productName || body.productName || data.name || body.name || null,
-      qc_status: data.qcStatus || null,
-      is_qc_approved: data.isQCApproved || false,
-      product_sku: data.productSku || body.productSku || null,
-      event_type: eventType,
-      timestamp: new Date().toISOString(),
-      categoryComplianceDetails: categoryComplianceDetails
-    };
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // EVENT SENDER
-  // ═══════════════════════════════════════════════════════════════
-  // LISTING-CREATED DEDUP — suppress spec_added within 15min of listing_created
-  // ═══════════════════════════════════════════════════════════════
-  const recentlyListed = {};  // { product_id: timestamp }
-  const SPEC_SUPPRESS_WINDOW = 15 * 60 * 1000; // 15 minutes
+  function extractProductId(url) {
+    const m = getPath(url).match(/\/products\/([a-f0-9]{24})/i);
+    return m ? m[1] : null;
+  }
 
-  // ═══════════════════════════════════════════════════════════════
-  function sendEvent(eventType, data, reqBody) {
-    const productId = data.product_id;
-
-    // Track listing_created timestamp per product
-    if (eventType === 'listing_created' && productId) {
-      recentlyListed[productId] = Date.now();
-      console.log(`[BD Tracker] ⏱️ Listing-created recorded for ${productId}, suppressing spec_added for 15min`);
-    }
-
-    // Suppress spec_added if listing_created just fired for same product
-    if (eventType === 'spec_added' && productId && recentlyListed[productId]) {
-      const elapsed = Date.now() - recentlyListed[productId];
-      if (elapsed < SPEC_SUPPRESS_WINDOW) {
-        console.log(`[BD Tracker] ⏭️ Skipping spec_added for ${productId} — listing_created was ${Math.round(elapsed / 1000)}s ago (within 15min window)`);
-        return;
-      }
-    }
-    let enrichedData = { ...data };
-
-    // Enrich product_name from ProductContext cache if missing
-    if (!enrichedData.product_name && productId) {
-      const ctx = getProductContext(productId);
-      if (ctx?.product_name) enrichedData.product_name = ctx.product_name;
-      if (!enrichedData.vendor_id && ctx?.vendor_id) enrichedData.vendor_id = ctx.vendor_id;
-      if (!enrichedData.product_sku && ctx?.product_sku) enrichedData.product_sku = ctx.product_sku;
-    }
-
-    // Track the product session
-    if (productId) {
-      const sessionInfo = ProductTracker.track(productId, eventType, data, reqBody);
-
-      if (sessionInfo) {
-        enrichedData = {
-          ...enrichedData,
-          workflow_state: sessionInfo.workflow_state,
-          previous_state: sessionInfo.previous_state,
-          session_duration: sessionInfo.session_duration,
-          time_to_first_spec: sessionInfo.time_to_first_spec,
-          time_to_listing: sessionInfo.time_to_listing,
-          total_views: sessionInfo.total_views,
-          spec_count: sessionInfo.spec_count,
-          has_package_type: sessionInfo.has_package_type,
-          tab_id: sessionInfo.tab_id
-        };
-      }
-    }
-
-    console.log(`[BD Tracker] 📤 Sending event: ${enrichedData.event_type || eventType}`, JSON.stringify({
-      product_id: enrichedData.product_id,
-      product_name: enrichedData.product_name,
-      workflow_state: enrichedData.workflow_state,
-      vendor_id: enrichedData.vendor_id
-    }));
-
+  function postToBridge(eventType, data) {
     window.postMessage({
       type: 'BD_TRACKER_INTERCEPTED',
-      event_type: enrichedData.event_type || eventType,
-      data: enrichedData,
-      reqBody: reqBody || null
+      event_type: eventType,
+      data: data
     }, '*');
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // FETCH INTERCEPTOR
-  // ═══════════════════════════════════════════════════════════════
-  const _nativeFetch = window.fetch;
+  function extractData(responseData, reqBody, url, fallbackProductId) {
+    const d = unwrap(responseData);
+    const b = reqBody || {};
+    return {
+      product_id: d._id || d.id || b._id || b.id || fallbackProductId || null,
+      vendor_id: typeof d.vendor === 'object' ? (d.vendor && d.vendor._id) : (d.vendor || b.vendor || null),
+      product_name: d.productName || b.productName || d.name || b.name || null,
+      qc_status: d.qcStatus || null,
+      product_sku: d.productSku || b.productSku || null,
+      vendor_updated_at: d.updatedAt || b.updatedAt || null,
+      categoryComplianceDetails: b.categoryComplianceDetails || d.categoryComplianceDetails || b.productComplianceDetails || d.productComplianceDetails || null
+    };
+  }
 
-  window.fetch = async function(...args) {
-    const reqObj = args[0];
-    const url = typeof reqObj === 'string' ? reqObj : reqObj?.url || '';
-    const method = (args[1]?.method || reqObj?.method || 'GET').toUpperCase();
+  // ═══════════════════════════════════════════════════════════════════════
+  // 15-MIN SPEC SUPPRESSION
+  //   If spec_added fires within 15 minutes of listing_created for the same
+  //   product, suppress the spec_added. Per-tab in-memory state.
+  // ═══════════════════════════════════════════════════════════════════════
+  const recentlyListed = {};
+  const SPEC_SUPPRESS_MS = 15 * 60 * 1000;
 
-    // Get request body
-    let reqBody = null;
-    if (args[1]?.body) {
-      try {
-        reqBody = typeof args[1].body === 'string' ? JSON.parse(args[1].body) : args[1].body;
-      } catch (e) {}
+  // ═══════════════════════════════════════════════════════════════════════
+  // QC PENDING DEDUP
+  //   Backend dedups globally, but we still post a message on every page
+  //   load. Cache the last fire time per page-load-batch so we only post
+  //   once per page lifetime (re-suppressed by tab switch or reload).
+  // ═══════════════════════════════════════════════════════════════════════
+  let lastQcPendingAt = 0;
+  const QC_PENDING_DEDUP_MS = 30 * 1000;
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // PATTERN MATCHING
+  // ═══════════════════════════════════════════════════════════════════════
+  function matchPattern(method, url) {
+    const path = getPath(url);
+    for (const p of PATTERNS) {
+      if (method !== p.method) continue;
+      if (!p.pathRe.test(path)) continue;
+      if (p.excludeRe && p.excludeRe.test(path)) continue;
+      if (p.queryCheck && !p.queryCheck(url)) continue;
+      return p;
     }
-    if (!reqBody && reqObj?.clone && (method === 'POST' || method === 'PUT')) {
+    return null;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // DETECTION
+  //   Decides the actual event_type from request body + response data.
+  // ═══════════════════════════════════════════════════════════════════════
+  function detectEventType(matched, method, url, reqBody, responseData) {
+    const productId = extractProductId(url);
+    const d = unwrap(responseData);
+    const b = reqBody || {};
+
+    if (matched.event_type === 'qc_bulk_approved') {
+      const productIds = Array.isArray(b) ? b : (b && b.productIds) || [];
+      const isApprove = /\/bulk-approve/.test(url);
+      sendBulkQCEvents(productIds, isApprove ? 'qc_approved' : 'qc_rejected', method, url, responseData);
+      return null;
+    }
+
+    if (matched.event_type === 'qc_pending') {
+      const now = Date.now();
+      if (now - lastQcPendingAt < QC_PENDING_DEDUP_MS) {
+        return null;
+      }
+      lastQcPendingAt = now;
+      const pendingCount = (responseData && responseData.pagination && responseData.pagination.total) || null;
+      sendEvent('qc_pending', {
+        product_id: null,
+        qc_status: 'pending',
+        pending_count: pendingCount,
+        url: getPath(url),
+        method,
+        timestamp: new Date().toISOString()
+      }, null);
+      return null;
+    }
+
+    if (matched.event_type === 'qc_approved') {
+      return /\/reject/.test(url) ? 'qc_rejected' : 'qc_approved';
+    }
+
+    if (method === 'GET' && matched.event_type === 'product_viewed' && productId) {
+      cacheProductContext(productId, responseData);
+      return 'product_viewed';
+    }
+
+    if (matched.event_type === 'listing_created') {
+      return 'listing_created';
+    }
+
+    if (method === 'PUT' && productId) {
+      const ctx = ProductContext[productId];
+
+      if (hasSpecs(b)) return 'spec_added';
+      if (hasSpecs(d) && ctx && ctx.has_package_type && !ctx.has_specs) return 'spec_added';
+      if (b.packageType && (!ctx || !ctx.has_package_type) && hasPackageType(d)) {
+        return 'listing_created';
+      }
+      return 'product_updated';
+    }
+
+    return matched.event_type;
+  }
+
+  function sendBulkQCEvents(productIds, eventType, method, url, responseData) {
+    if (!Array.isArray(productIds) || productIds.length === 0) return;
+    if (responseData && responseData.success === false) return;
+    const d = unwrap(responseData);
+    const firstId = productIds[0];
+    const data = {
+      product_id: firstId,
+      qc_status: eventType === 'qc_approved' ? 'approved' : 'rejected',
+      bulk: true,
+      bulk_count: productIds.length,
+      product_ids: productIds,
+      vendor_updated_at: d.updatedAt || null,
+      url: getPath(url),
+      method,
+      timestamp: new Date().toISOString()
+    };
+    if (firstId) {
+      const sessionInfo = State.track(firstId, eventType, data, null);
+      Object.assign(data, sessionInfo || {});
+    }
+    postToBridge(eventType, data);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // EVENT SENDER
+  //   Applies 15-min suppression, enriches with state, and posts to bridge.
+  // ═══════════════════════════════════════════════════════════════════════
+  function sendEvent(eventType, data, reqBody) {
+    if (!eventType || !data) return;
+    const productId = data.product_id;
+
+    if (eventType === 'listing_created' && productId) {
+      recentlyListed[productId] = Date.now();
+    }
+    if (eventType === 'spec_added' && productId && recentlyListed[productId]) {
+      const elapsed = Date.now() - recentlyListed[productId];
+      if (elapsed < SPEC_SUPPRESS_MS) return;
+    }
+
+    const sessionInfo = productId ? State.track(productId, eventType, data, reqBody) : null;
+    const enriched = {
+      ...data,
+      event_type: eventType,
+      timestamp: data.timestamp || new Date().toISOString(),
+      url: data.url || (reqBody && reqBody.url) || null,
+      method: data.method || null,
+      ...(sessionInfo || {})
+    };
+    postToBridge(eventType, enriched);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // FETCH INTERCEPTOR
+  // ═══════════════════════════════════════════════════════════════════════
+  const _nativeFetch = window.fetch;
+  window.fetch = async function(...args) {
+    const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
+    const init = args[1] || {};
+    const method = (init.method || (typeof args[0] === 'object' && args[0] && args[0].method) || 'GET').toUpperCase();
+
+    let reqBody = null;
+    if (init.body) {
+      try { reqBody = typeof init.body === 'string' ? JSON.parse(init.body) : init.body; } catch (e) {}
+    }
+    if (!reqBody && args[0] && typeof args[0].clone === 'function' && (method === 'POST' || method === 'PUT')) {
       try {
-        const clonedReq = reqObj.clone();
-        const bodyText = await clonedReq.text();
-        if (bodyText) reqBody = JSON.parse(bodyText);
+        const cloned = args[0].clone();
+        const txt = await cloned.text();
+        if (txt) reqBody = JSON.parse(txt);
       } catch (e) {}
     }
 
     try {
-      const matches = matchPattern(method, url);
-      if (matches.length > 0) {
-        console.log(`[BD Tracker] 🔗 Fetch intercepted: ${method} ${url.split('?')[0]}`);
-
+      const matched = matchPattern(method, url);
+      if (matched) {
         const response = await _nativeFetch.apply(this, args);
-        const clone = response.clone();
-        let responseData = {};
-        try { responseData = await clone.json(); } catch(e) {}
+        if (response.ok) {
+          const clone = response.clone();
+          let responseData = {};
+          try { responseData = await clone.json(); } catch (e) {}
 
-        for (const matched of matches) {
-          // ── Bulk approve: expand into individual qc_approved events ──
-          if (matched.event_type === 'qc_bulk_approved') {
-            const productIds = Array.isArray(reqBody) ? reqBody : (reqBody?.productIds || []);
-            console.log(`[BD Tracker] 📦 Bulk approve matched! productIds=${JSON.stringify(productIds)}`);
-            if (responseData && responseData.success !== false && productIds.length > 0) {
-              for (const pid of productIds) {
-                sendEvent('qc_approved', {
-                  product_id: pid, vendor_id: null, product_name: null, product_sku: null,
-                  qc_status: 'approved', bulk: true, url: url.split('?')[0], method,
-                  timestamp: new Date().toISOString()
-                }, null);
-              }
-              console.log(`[BD Tracker] ✅ Bulk QC approved: ${productIds.length} products`);
-            }
-            continue;
+          const eventType = detectEventType(matched, method, url, reqBody, responseData);
+          if (eventType) {
+            const productId = extractProductId(url);
+            const data = extractData(responseData, reqBody, url, productId);
+            data.url = getPath(url);
+            data.method = method;
+            sendEvent(eventType, data, reqBody);
           }
-
-          // ── Bulk reject: expand into individual qc_rejected events ──
-          if (matched.event_type === 'qc_bulk_rejected') {
-            const productIds = Array.isArray(reqBody) ? reqBody : (reqBody?.productIds || []);
-            console.log(`[BD Tracker] 📦 Bulk reject matched! productIds=${JSON.stringify(productIds)}`);
-            if (responseData && responseData.success !== false && productIds.length > 0) {
-              for (const pid of productIds) {
-                sendEvent('qc_rejected', {
-                  product_id: pid, vendor_id: null, product_name: null, product_sku: null,
-                  qc_status: 'rejected', bulk: true, url: url.split('?')[0], method,
-                  timestamp: new Date().toISOString()
-                }, null);
-              }
-              console.log(`[BD Tracker] ✅ Bulk QC rejected: ${productIds.length} products`);
-            }
-            continue;
-          }
-
-          // ── Detect and send normal events ──
-          let eventType = detectEventType(matched, reqBody, responseData, method, url);
-          if (!eventType) continue;
-
-          const data = extractData(responseData, eventType, reqBody, url);
-          data.url = url.split('?')[0];
-          data.method = method;
-
-          // If opened product, also cache context
-          if (eventType === 'product_created' || eventType === 'product_viewed') {
-            const pid = data.product_id || extractProductId(url);
-            if (pid) cacheProductContext(pid, responseData);
-          }
-
-          sendEvent(eventType, data, reqBody);
         }
         return response;
       }
     } catch (err) {
-      console.error(`[BD Tracker] ❌ Fetch interceptor error:`, err);
+      console.error('[BD Tracker] fetch interceptor error:', err);
     }
-
     return _nativeFetch.apply(this, args);
   };
 
-  // ═══════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════
   // XMLHttpRequest INTERCEPTOR
-  // ═══════════════════════════════════════════════════════════════
-  const _nativeOpen = XMLHttpRequest.prototype.open;
-  const _nativeSend = XMLHttpRequest.prototype.send;
+  // ═══════════════════════════════════════════════════════════════════════
+  const _xhrOpen = XMLHttpRequest.prototype.open;
+  const _xhrSend = XMLHttpRequest.prototype.send;
 
   XMLHttpRequest.prototype.open = function(method, url, ...rest) {
     this._bdMethod = method;
     this._bdUrl = url;
-    return _nativeOpen.apply(this, [method, url, ...rest]);
+    return _xhrOpen.apply(this, [method, url, ...rest]);
   };
 
   XMLHttpRequest.prototype.send = function(body) {
     const method = (this._bdMethod || 'GET').toUpperCase();
     const url = this._bdUrl || '';
-
     let reqBody = null;
-    if ((method === 'PUT' || method === 'POST') && body) {
-      try {
-        reqBody = typeof body === 'string' ? JSON.parse(body) : body;
-      } catch (e) {}
+    if ((method === 'POST' || method === 'PUT') && body) {
+      try { reqBody = typeof body === 'string' ? JSON.parse(body) : body; } catch (e) {}
     }
-
     this.addEventListener('load', function() {
       try {
-        const matches = matchPattern(method, url);
-        if (matches.length > 0) {
-          console.log(`[BD Tracker] 🔗 XHR intercepted: ${method} ${url.split('?')[0]}`);
-
+        if (this.status < 200 || this.status >= 300) return;
+        const matched = matchPattern(method, url);
+        if (matched) {
           let responseData = {};
-          try { responseData = JSON.parse(this.responseText); } catch(e) {}
-
-          for (const matched of matches) {
-            // ── Bulk approve ──
-            if (matched.event_type === 'qc_bulk_approved') {
-              const productIds = Array.isArray(reqBody) ? reqBody : (reqBody?.productIds || []);
-              if (responseData && responseData.success !== false && productIds.length > 0) {
-                for (const pid of productIds) {
-                  sendEvent('qc_approved', {
-                    product_id: pid, vendor_id: null, product_name: null, product_sku: null,
-                    qc_status: 'approved', bulk: true, url: url.split('?')[0], method,
-                    timestamp: new Date().toISOString()
-                  }, null);
-                }
-                console.log(`[BD Tracker] ✅ Bulk QC approved (XHR): ${productIds.length} products`);
-              }
-              continue;
-            }
-
-            // ── Bulk reject ──
-            if (matched.event_type === 'qc_bulk_rejected') {
-              const productIds = Array.isArray(reqBody) ? reqBody : (reqBody?.productIds || []);
-              if (responseData && responseData.success !== false && productIds.length > 0) {
-                for (const pid of productIds) {
-                  sendEvent('qc_rejected', {
-                    product_id: pid, vendor_id: null, product_name: null, product_sku: null,
-                    qc_status: 'rejected', bulk: true, url: url.split('?')[0], method,
-                    timestamp: new Date().toISOString()
-                  }, null);
-                }
-                console.log(`[BD Tracker] ✅ Bulk QC rejected (XHR): ${productIds.length} products`);
-              }
-              continue;
-            }
-
-            let eventType = detectEventType(matched, reqBody, responseData, method, url);
-            if (!eventType) continue;
-
-            const data = extractData(responseData, eventType, reqBody, url);
-            data.url = url.split('?')[0];
+          try { responseData = JSON.parse(this.responseText); } catch (e) {}
+          const eventType = detectEventType(matched, method, url, reqBody, responseData);
+          if (eventType) {
+            const productId = extractProductId(url);
+            const data = extractData(responseData, reqBody, url, productId);
+            data.url = getPath(url);
             data.method = method;
-
-            if (eventType === 'product_created' || eventType === 'product_viewed') {
-              const pid = data.product_id || extractProductId(url);
-              if (pid) cacheProductContext(pid, responseData);
-            }
-
             sendEvent(eventType, data, reqBody);
           }
         }
       } catch (err) {
-        console.error(`[BD Tracker] ❌ XHR interceptor error:`, err);
+        console.error('[BD Tracker] xhr interceptor error:', err);
       }
     });
-    return _nativeSend.apply(this, [body]);
+    return _xhrSend.apply(this, [body]);
   };
 
-  // ═══════════════════════════════════════════════════════════════
-  // TAB CLOSE HANDLER — send session_ended for all products
-  // ═══════════════════════════════════════════════════════════════
-  window.addEventListener('beforeunload', () => {
-    console.log(`[BD Tracker] 🔚 Tab closing, ending all sessions...`);
-    ProductTracker.endAllSessions();
-  });
+  // ═══════════════════════════════════════════════════════════════════════
+  // TAB CLOSE
+  //   pagehide is more reliable than beforeunload (fires on mobile,
+  //   force-close, and BFCache). beforeunload is kept for desktop
+  //   browsers that prefer it.
+  // ═══════════════════════════════════════════════════════════════════════
+  function handleTabClose() {
+    State.endAllSessions();
+  }
+  window.addEventListener('pagehide', handleTabClose);
+  window.addEventListener('beforeunload', handleTabClose);
 
-  // Periodic flush to localStorage (every 5 min) — protects against browser crash
+  // Periodic flush of state to localStorage
   setInterval(() => {
-    for (const session of Object.values(ProductTracker._sessions)) {
-      ProductTracker._persistSession(session);
+    for (const s of Object.values(State._sessions)) {
+      State._persist(s);
     }
   }, 5 * 60 * 1000);
 
-  // Cleanup stale localStorage entries (older than 24h) on script load
-  (function cleanupStaleEntries() {
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith('bd_product_')) {
-          try {
-            const data = JSON.parse(localStorage.getItem(key));
-            if (data.is_ended && data.ended_at && data.ended_at < cutoff) {
-              localStorage.removeItem(key);
-              i--; // index shifted after removal
-            }
-          } catch (e) {}
-        }
-      }
-    } catch (e) {}
-  })();
-
-  console.log(`[BD Tracker] ✅ Content script fully initialized`);
+  State.init();
+  console.log('[BD Tracker] Content script ready');
 })();

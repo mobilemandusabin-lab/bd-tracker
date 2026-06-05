@@ -32,9 +32,16 @@ chrome.storage.local.get(['authToken', 'deviceId']).then((stored) => {
 
 async function injectIntoExistingTabs() {
   const urls = ['https://commerce.thecanbrand.com/*', 'https://demo.commerce.thecanbrand.com/*'];
-  const tabs = await chrome.tabs.query({ url: urls });
+  let tabs = [];
+  try {
+    tabs = await chrome.tabs.query({ url: urls });
+  } catch (e) {
+    console.log(`[BD Tracker BG] ⚠️ tabs.query failed: ${e.message}`);
+    return;
+  }
   console.log(`[BD Tracker BG] 💉 Injecting into ${tabs.length} existing tabs`);
   for (const tab of tabs) {
+    if (!tab || !tab.id) continue;
     try {
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
@@ -195,9 +202,9 @@ async function handleEvent(message) {
 
   // ── Normal events: dedup + log ──
   const dedupKey = data.product_id || data.product_name || data.url || '';
-  const dedupWindow = (eventType === 'listing_created' || eventType === 'product_created') ? 5000
-    : eventType === 'spec_added' ? 300000  // 5 min — specs should not be added twice to same product
-    : DEDUP_WINDOW;
+  let dedupWindow = DEDUP_WINDOW;
+  if (eventType === 'listing_created' || eventType === 'product_created') dedupWindow = 5000;
+  else if (eventType === 'spec_added') dedupWindow = 300000; // 5 min — specs should not be added twice to same product
 
   if (isDuplicate(eventType, dedupKey, dedupWindow)) {
     console.log(`[BD Tracker BG] 🔄 Duplicate event ignored: ${eventType} for ${dedupKey}`);
@@ -421,13 +428,47 @@ async function syncNow() {
 }
 
 function generateDeviceId() {
-  const id = 'ext_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
+  const id = 'ext_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 11);
   console.log(`[BD Tracker BG] 🆕 Generated device ID: ${id}`);
   return id;
 }
 
 const recentEvents = new Map();
 const DEDUP_WINDOW = 60000;
+const DEDUP_STORAGE_KEY = 'bd_dedup_state';
+
+async function loadDedupState() {
+  try {
+    if (!chrome.storage || !chrome.storage.session) return;
+    const stored = await chrome.storage.session.get(DEDUP_STORAGE_KEY);
+    const entries = stored[DEDUP_STORAGE_KEY];
+    if (entries && typeof entries === 'object') {
+      const now = Date.now();
+      for (const [k, t] of Object.entries(entries)) {
+        if (now - t < DEDUP_WINDOW * 2) {
+          recentEvents.set(k, t);
+        }
+      }
+      console.log(`[BD Tracker BG] 🔄 Restored ${recentEvents.size} dedup entries from session storage`);
+    }
+  } catch (e) {
+    console.log(`[BD Tracker BG] ⚠️ loadDedupState failed: ${e.message}`);
+  }
+}
+
+let dedupFlushTimer = null;
+function scheduleDedupFlush() {
+  if (dedupFlushTimer) return;
+  dedupFlushTimer = setTimeout(async () => {
+    dedupFlushTimer = null;
+    try {
+      if (!chrome.storage || !chrome.storage.session) return;
+      const obj = {};
+      recentEvents.forEach((v, k) => { obj[k] = v; });
+      await chrome.storage.session.set({ [DEDUP_STORAGE_KEY]: obj });
+    } catch (e) {}
+  }, 500);
+}
 
 function isDuplicate(eventType, dedupKey, windowOverride) {
   const key = eventType + '|' + dedupKey;
@@ -441,8 +482,11 @@ function isDuplicate(eventType, dedupKey, windowOverride) {
   for (const [k, t] of recentEvents) {
     if (now - t > DEDUP_WINDOW * 2) recentEvents.delete(k);
   }
+  scheduleDedupFlush();
   return false;
 }
+
+loadDedupState();
 
 function extractProductIdFromUrl(url) {
   const match = url.match(/\/products\/([^\/]+)/);

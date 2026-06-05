@@ -80,7 +80,7 @@
     <div class="info-grid">
       <div class="info-item">
         <span class="info-label">Version</span>
-        <span class="info-value" id="version">1.0.0</span>
+        <span class="info-value" id="version">…</span>
       </div>
       <div class="info-item">
         <span class="info-label">Last Sync</span>
@@ -90,12 +90,17 @@
 
     <div id="updateBanner" class="update-banner" style="display:none;">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y1="3"/>
       </svg>
       <div class="update-info">
-        <span class="update-title">Update available: v<span id="latestVersion">1.0.0</span></span>
+        <span class="update-title">Update available: v<span id="latestVersion">…</span></span>
         <span class="update-changelog" id="updateChangelog"></span>
       </div>
+    </div>
+
+    <div id="errorBanner" class="error-banner" style="display:none;">
+      <span id="errorBannerText">Stats failed to load.</span>
+    </div>
     </div>
 
     <div class="actions">

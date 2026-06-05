@@ -1,3 +1,6 @@
+const SEND_TIMEOUT_MS = 5000;
+const STATS_TIMEOUT_MS = 8000;
+
 document.addEventListener('DOMContentLoaded', async () => {
   const status = await sendMessage({ type: 'GET_STATUS' });
 
@@ -7,6 +10,24 @@ document.addEventListener('DOMContentLoaded', async () => {
   } else {
     showLoggedOut();
   }
+
+  // Listen for auth changes (login from another tab) and refresh
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if (changes.authToken) {
+      const has = !!changes.authToken.newValue;
+      if (has) {
+        sendMessage({ type: 'GET_STATUS' }).then((s) => {
+          if (s.isLoggedIn) {
+            showLoggedIn(s);
+            fetchStats();
+          }
+        });
+      } else {
+        showLoggedOut();
+      }
+    }
+  });
 
   // Tab switching
   document.querySelectorAll('.tab').forEach(tab => {
@@ -48,6 +69,11 @@ document.addEventListener('DOMContentLoaded', async () => {
           btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg> Clear QC Pending';
           fetchStats();
         }, 1500);
+      } else if (response.status === 401) {
+        await sendMessage({ type: 'LOGOUT' });
+        showLoggedOut();
+        btn.disabled = false;
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg> Clear QC Pending';
       } else {
         btn.textContent = 'Failed';
         setTimeout(() => {
@@ -77,20 +103,29 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 async function fetchStats() {
+  hideError();
   try {
     const stored = await chrome.storage.local.get(['authToken']);
     const token = stored.authToken;
     if (!token) return;
 
-    const response = await fetch(`${CONFIG.API_BASE_URL}/extension/my-stats`, {
+    const response = await fetchWithTimeout(`${CONFIG.API_BASE_URL}/extension/my-stats`, {
       headers: { 'Authorization': `Bearer ${token}` }
-    });
+    }, STATS_TIMEOUT_MS);
+
+    if (response.status === 401) {
+      await sendMessage({ type: 'LOGOUT' });
+      showLoggedOut();
+      showError('Session expired. Please sign in again.');
+      return;
+    }
 
     if (!response.ok) {
       console.log('[BD Tracker Popup] Stats fetch failed:', response.status);
       document.getElementById('myListings').textContent = '0';
       document.getElementById('mySpecs').textContent = '0';
       document.getElementById('myQc').textContent = '0';
+      showError(`Stats unavailable (${response.status})`);
       return;
     }
 
@@ -134,12 +169,14 @@ async function fetchStats() {
 
   } catch (err) {
     console.log('[BD Tracker Popup] Stats error:', err.message);
+    showError(err.message === 'fetch timeout' ? 'Stats request timed out' : 'Stats unavailable');
   }
 }
 
 function showLoggedOut() {
   document.getElementById('loggedOut').style.display = 'block';
   document.getElementById('loggedIn').style.display = 'none';
+  hideError();
 }
 
 function showLoggedIn(status) {
@@ -149,15 +186,17 @@ function showLoggedIn(status) {
   const name = status.userName || 'User';
   document.getElementById('userName').textContent = name;
   document.getElementById('userAvatar').textContent = name.charAt(0).toUpperCase();
-  document.getElementById('version').textContent = status.version || '1.0.0';
+  document.getElementById('version').textContent = status.version || '…';
 
   updateLastSync(status.lastSync);
 
-  chrome.storage.local.get(['updateAvailable', 'latestVersion'], (data) => {
+  chrome.storage.local.get(['updateAvailable', 'latestVersion', 'changelog'], (data) => {
     if (data.updateAvailable) {
       document.getElementById('updateBanner').style.display = 'flex';
       document.getElementById('latestVersion').textContent = data.latestVersion || '?';
-      document.getElementById('updateChangelog').textContent = 'Please reinstall to fix listing & spec tracking issues.';
+      const changelog = (data.changelog || '').trim();
+      document.getElementById('updateChangelog').textContent =
+        changelog ? changelog.replace(/^Extension v\S+\s*[-—]?\s*/i, '').trim() : 'A new version is available — please reinstall.';
     }
   });
 }
@@ -184,10 +223,44 @@ function updateLastSync(timestamp) {
   }
 }
 
+function showError(message) {
+  const banner = document.getElementById('errorBanner');
+  document.getElementById('errorBannerText').textContent = message;
+  if (banner) banner.style.display = 'block';
+}
+
+function hideError() {
+  const banner = document.getElementById('errorBanner');
+  if (banner) banner.style.display = 'none';
+}
+
+function fetchWithTimeout(url, options, timeoutMs) {
+  return Promise.race([
+    fetch(url, options),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('fetch timeout')), timeoutMs))
+  ]);
+}
+
 function sendMessage(message) {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage(message, (response) => {
-      resolve(response || {});
-    });
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve({});
+    }, SEND_TIMEOUT_MS);
+    try {
+      chrome.runtime.sendMessage(message, (response) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(response || {});
+      });
+    } catch (e) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({});
+    }
   });
 }
