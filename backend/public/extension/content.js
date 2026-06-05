@@ -600,11 +600,11 @@
     if (method === 'PUT' && productId) {
       const ctx = getContext(productId);
 
-      if (hasSpecValues(b)) return 'spec_added';
-      if (hasSpecValues(d) && ctx && ctx.has_package_type && !ctx.has_specs) return 'spec_added';
       if (hasPackageType(b) && (!ctx || !ctx.has_package_type) && hasPackageType(d)) {
         return 'listing_created';
       }
+      if (hasSpecValues(b)) return 'spec_added';
+      if (hasSpecValues(d) && ctx && ctx.has_package_type && !ctx.has_specs) return 'spec_added';
       return 'product_updated';
     }
 
