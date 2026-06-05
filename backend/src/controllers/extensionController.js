@@ -680,6 +680,7 @@ exports.getAnalytics = async (req, res) => {
     res.status(200).json({
       status: 'success',
       data: {
+        _debug: { isAdmin, matchFilter, startDate, endDate, reqUserId: req.user?._id?.toString(), reqUserRole: req.user?.role, reqUserPerms: req.userPermissions },
         period,
         start_date: start_date || null,
         end_date: end_date || null,
