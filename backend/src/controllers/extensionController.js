@@ -495,6 +495,8 @@ exports.getAnalytics = async (req, res) => {
       matchFilter.user_id = new mongoose.Types.ObjectId(user_id);
     }
 
+    console.log('[Analytics DEBUG] period=' + period + ' isAdmin=' + isAdmin + ' user_id=' + (user_id || 'null') + ' matchFilter=' + JSON.stringify(matchFilter) + ' reqUser=' + (req.user?._id?.toString() || 'null') + ' reqPerms=' + JSON.stringify(req.userPermissions));
+
     // Lead model for vendor name lookups
     const Lead = require('../models/Lead');
 
