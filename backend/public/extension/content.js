@@ -48,11 +48,50 @@
   ];
 
   // ═══════════════════════════════════════════════════════════════════════
-  // PRODUCT CONTEXT CACHE (per-tab, in-memory)
+  // PRODUCT CONTEXT CACHE
   //   Stores what we saw on the initial GET for a product, used by the
   //   PUT branch to decide between "new listing" and "edit".
+  //   Backed by localStorage (bd_ctx_{productId}) so multiple tabs of the
+  //   same product share the cache; an in-memory mirror keeps reads fast.
+  //   5-minute TTL handles stale entries after long idle periods.
   // ═══════════════════════════════════════════════════════════════════════
   const ProductContext = {};
+  const PRODUCT_CONTEXT_KEY_PREFIX = 'bd_ctx_';
+  const PRODUCT_CONTEXT_TTL_MS = 5 * 60 * 1000;
+
+  function _ctxKey(productId) {
+    return PRODUCT_CONTEXT_KEY_PREFIX + productId;
+  }
+
+  function getContext(productId) {
+    if (!productId) return null;
+    const now = Date.now();
+    const mem = ProductContext[productId];
+    if (mem && now - mem.seen_at < PRODUCT_CONTEXT_TTL_MS) return mem;
+    let stored = null;
+    try {
+      const raw = localStorage.getItem(_ctxKey(productId));
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && now - parsed.seen_at < PRODUCT_CONTEXT_TTL_MS) {
+          stored = parsed;
+        } else {
+          localStorage.removeItem(_ctxKey(productId));
+        }
+      }
+    } catch (e) {}
+    ProductContext[productId] = stored;
+    return stored;
+  }
+
+  function setContext(productId, ctx) {
+    if (!productId || !ctx) return;
+    ctx.seen_at = Date.now();
+    ProductContext[productId] = ctx;
+    try {
+      localStorage.setItem(_ctxKey(productId), JSON.stringify(ctx));
+    } catch (e) {}
+  }
 
   function hasPackageType(d) {
     if (!d) return false;
@@ -62,21 +101,33 @@
     return false;
   }
 
-  function hasSpecs(d) {
+  function hasSpecValues(d) {
     if (!d) return false;
     if (d.categoryComplianceDetails && Object.keys(d.categoryComplianceDetails).length) return true;
     if (d.productComplianceDetails && Object.keys(d.productComplianceDetails).length) return true;
     return false;
   }
 
+  function hasSpecSchema(d) {
+    if (!d) return false;
+    const pkg = d.packageType;
+    if (!pkg || typeof pkg !== 'object') return false;
+    const hasKeys = (arr) => Array.isArray(arr) && arr.length > 0;
+    return hasKeys(pkg.categoryComplianceKeys) || hasKeys(pkg.productComplianceKeys);
+  }
+
+  function hasSpecs(d) {
+    return hasSpecValues(d);
+  }
+
   function cacheProductContext(productId, responseData) {
     if (!productId) return;
     const d = unwrap(responseData);
-    ProductContext[productId] = {
+    setContext(productId, {
       has_package_type: hasPackageType(d),
-      has_specs: hasSpecs(d),
-      seen_at: Date.now()
-    };
+      has_specs: hasSpecValues(d),
+      has_spec_schema: hasSpecSchema(d)
+    });
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -143,6 +194,11 @@
         const productId = e.key.slice('bd_state_'.length);
         try {
           this._global[productId] = e.newValue ? JSON.parse(e.newValue) : null;
+        } catch (err) {}
+      } else if (e.key.startsWith(PRODUCT_CONTEXT_KEY_PREFIX)) {
+        const productId = e.key.slice(PRODUCT_CONTEXT_KEY_PREFIX.length);
+        try {
+          ProductContext[productId] = e.newValue ? JSON.parse(e.newValue) : null;
         } catch (err) {}
       }
     },
@@ -260,8 +316,8 @@
       const d = unwrap(responseData);
       const b = reqBody || {};
 
-      if (b.packageType || d.packageType) s.has_package_type = true;
-      if (b.categoryComplianceDetails || d.categoryComplianceDetails || b.productComplianceDetails || d.productComplianceDetails) {
+      if (hasPackageType(b) || hasPackageType(d)) s.has_package_type = true;
+      if (hasSpecValues(b) || hasSpecValues(d)) {
         s.has_specs = true;
         s.spec_count++;
       }
@@ -505,11 +561,11 @@
     }
 
     if (method === 'PUT' && productId) {
-      const ctx = ProductContext[productId];
+      const ctx = getContext(productId);
 
-      if (hasSpecs(b)) return 'spec_added';
-      if (hasSpecs(d) && ctx && ctx.has_package_type && !ctx.has_specs) return 'spec_added';
-      if (b.packageType && (!ctx || !ctx.has_package_type) && hasPackageType(d)) {
+      if (hasSpecValues(b)) return 'spec_added';
+      if (hasSpecValues(d) && ctx && ctx.has_package_type && !ctx.has_specs) return 'spec_added';
+      if (hasPackageType(b) && (!ctx || !ctx.has_package_type) && hasPackageType(d)) {
         return 'listing_created';
       }
       return 'product_updated';
