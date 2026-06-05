@@ -194,12 +194,38 @@ function showLoggedIn(status) {
     if (data.updateAvailable) {
       document.getElementById('updateBanner').style.display = 'flex';
       document.getElementById('latestVersion').textContent = data.latestVersion || '?';
+      document.getElementById('installUpdateVersion').textContent = data.latestVersion || '?';
       const changelog = (data.changelog || '').trim();
       document.getElementById('updateChangelog').textContent =
         changelog ? changelog.replace(/^Extension v\S+\s*[-—]?\s*/i, '').trim() : 'A new version is available — please reinstall.';
     }
   });
 }
+
+async function installUpdate() {
+  const btn = document.getElementById('installUpdateBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Downloading…'; }
+  try {
+    // Same endpoint the frontend uses — always serves the latest zip
+    const url = (window.CONFIG?.API_BASE_URL || 'http://localhost:5000') + '/extension/download';
+    const response = await fetch(url, { credentials: 'include' });
+    if (!response.ok) throw new Error('Download failed (HTTP ' + response.status + ')');
+    const blob = await response.blob();
+    const objUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objUrl;
+    const v = document.getElementById('installUpdateVersion').textContent || 'latest';
+    link.setAttribute('download', `bd-tracker-extension-v${v}.zip`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(objUrl);
+    if (btn) btn.textContent = 'Downloaded — re-install from chrome://extensions';
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Download failed — try again'; }
+  }
+}
+document.getElementById('installUpdateBtn')?.addEventListener('click', installUpdate);
 
 function updateLastSync(timestamp) {
   const el = document.getElementById('lastSync');

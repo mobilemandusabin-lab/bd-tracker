@@ -482,12 +482,49 @@
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // 15-MIN SPEC SUPPRESSION
-  //   If spec_added fires within 15 minutes of listing_created for the same
-  //   product, suppress the spec_added. Per-tab in-memory state.
+  // 1-HOUR SPEC SUPPRESSION
+  //   If spec_added fires within 1 hour of listing_created for the same
+  //   product, suppress the spec_added. Persisted to localStorage so
+  //   suppression survives page reloads and new tabs (where the in-memory
+  //   Map would otherwise be empty).
   // ═══════════════════════════════════════════════════════════════════════
-  const recentlyListed = {};
-  const SPEC_SUPPRESS_MS = 15 * 60 * 1000;
+  const RECENTLY_LISTED_KEY = 'bd_recently_listed';
+  const SPEC_SUPPRESS_MS = 60 * 60 * 1000;
+
+  function loadRecentlyListed() {
+    try {
+      const raw = localStorage.getItem(RECENTLY_LISTED_KEY);
+      if (!raw) return {};
+      const now = Date.now();
+      const all = JSON.parse(raw);
+      // Prune expired entries on load
+      const fresh = {};
+      for (const [pid, ts] of Object.entries(all || {})) {
+        if (typeof ts === 'number' && now - ts < SPEC_SUPPRESS_MS) {
+          fresh[pid] = ts;
+        }
+      }
+      return fresh;
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function saveRecentlyListed(map) {
+    try {
+      // Prune expired before saving so the localStorage entry stays small
+      const now = Date.now();
+      const fresh = {};
+      for (const [pid, ts] of Object.entries(map)) {
+        if (typeof ts === 'number' && now - ts < SPEC_SUPPRESS_MS) {
+          fresh[pid] = ts;
+        }
+      }
+      localStorage.setItem(RECENTLY_LISTED_KEY, JSON.stringify(fresh));
+    } catch (e) {}
+  }
+
+  const recentlyListed = loadRecentlyListed();
 
   // ═══════════════════════════════════════════════════════════════════════
   // QC PENDING DEDUP
@@ -607,6 +644,7 @@
 
     if (eventType === 'listing_created' && productId) {
       recentlyListed[productId] = Date.now();
+      saveRecentlyListed(recentlyListed);
     }
     if (eventType === 'spec_added' && productId && recentlyListed[productId]) {
       const elapsed = Date.now() - recentlyListed[productId];

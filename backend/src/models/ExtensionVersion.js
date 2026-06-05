@@ -13,7 +13,7 @@ const extensionVersionSchema = new mongoose.Schema({
   },
   zip_path: {
     type: String,
-    default: '/extension/extension.zip'
+    default: '/extension/download'
   },
   is_latest: {
     type: Boolean,

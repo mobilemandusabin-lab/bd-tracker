@@ -5,3 +5,9 @@ node_modules/
 CODEBASE_REFERENCE.md
 *.~lock.*
 backend/Nepal\ Can\ Commerce\ Master\ File\ For\ Transaction\ Record.xlsx
+# Stale extension zips — never commit these; the canonical one lives
+# at backend/public/extension/extension.zip and is served dynamically
+# via /extension/download. Static zips at public/extension.zip or
+# public/bd-tracker-extension.zip are leftovers that go stale.
+backend/public/extension.zip
+backend/public/bd-tracker-extension.zip
