@@ -283,16 +283,27 @@ exports.logActivity = async (req, res) => {
     // listing for this product_id exists within 24h, this is actually a
     // new listing (State 1 → State 3 transition).
     if (effectiveEventType === 'spec_added' && effectiveProductId && metadata?.method === 'PUT') {
-      const priorListing = await ExtensionEvent.findOne({
-        product_id: effectiveProductId,
-        event_type: { $in: ['listing_created', 'product_created'] },
-        created_at: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
-      });
-      if (!priorListing) {
-        effectiveEventType = 'listing_created';
-        console.log('[EXT] reclassify spec_added → listing_created', { product_id: effectiveProductId, user_id: req.user._id });
+      // Only reclassify spec_added → listing_created when the product is
+      // GENUINELY not listed on the server (response has_package_type is
+      // false/undefined). If the response has has_package_type: true, the
+      // product is already listed — this is a spec add on an existing
+      // listing, NOT a new listing. (A product can be listed on the
+      // server with no prior listing_created event in BD tracker if it
+      // was listed before the tracker or by a different system.)
+      if (metadata?.has_package_type === true) {
+        console.log('[EXT] reclassify check: response has packageType, product is listed, keeping spec_added', { product_id: effectiveProductId });
       } else {
-        console.log('[EXT] reclassify check: prior listing exists, keeping spec_added', { product_id: effectiveProductId, prior_id: priorListing._id, prior_type: priorListing.event_type });
+        const priorListing = await ExtensionEvent.findOne({
+          product_id: effectiveProductId,
+          event_type: { $in: ['listing_created', 'product_created'] },
+          created_at: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+        });
+        if (!priorListing) {
+          effectiveEventType = 'listing_created';
+          console.log('[EXT] reclassify spec_added → listing_created (no prior listing AND response has no packageType)', { product_id: effectiveProductId, user_id: req.user._id });
+        } else {
+          console.log('[EXT] reclassify check: prior listing exists, keeping spec_added', { product_id: effectiveProductId, prior_id: priorListing._id, prior_type: priorListing.event_type });
+        }
       }
     }
 

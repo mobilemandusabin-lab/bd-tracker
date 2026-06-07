@@ -776,26 +776,44 @@
 
     if (method === 'PUT' && productId) {
       const ctx = getContext(productId);
+      const responseHasPkg = hasPackageType(d);
+      const responseHasSpecs = hasSpecValues(d);
+      const bodyHasPkg = hasPackageType(b);
+      const bodyHasSpecs = hasSpecValues(b);
+      const ctxHasPkg = ctx && ctx.has_package_type;
 
-      // v1.0.7: response-driven listing detection
-      // The server response is the source of truth for "is this product listed?".
-      // If the response shows packageType but the cached state didn't, this is a
-      // new listing — even if the request body didn't carry packageType.
-      if (hasPackageType(d) && (!ctx || !ctx.has_package_type)) {
+      // v1.0.8: body-first detection. The request body is the most reliable
+      // signal of what the user is doing in this PUT — it doesn't depend on
+      // cached ctx state.
+
+      // PRIORITY 1: spec_added — body adds spec values without packageType
+      // (User is filling in compliance on an already-listed product, or
+      // submitting a State 2→3 transition. Ctx-independent.)
+      if (bodyHasSpecs && !bodyHasPkg) {
+        console.log('[BD Tracker] detect → spec_added (body has specs, no pkg)');
+        return 'spec_added';
+      }
+      // PRIORITY 2: listing_created — body adds packageType, response confirms,
+      // ctx shows no prior pkg (State 1→2 or State 1→3 in one PUT)
+      if (bodyHasPkg && responseHasPkg && !ctxHasPkg) {
+        console.log('[BD Tracker] detect → listing_created (body+response has pkg, no prior ctx)');
+        return 'listing_created';
+      }
+      // PRIORITY 3: listing_created — response-driven fallback (no body pkg
+      // was sent, but response has pkg and ctx says no prior listing)
+      if (responseHasPkg && !ctxHasPkg) {
         console.log('[BD Tracker] detect → listing_created (response-driven, no prior ctx)');
         return 'listing_created';
       }
-      // v1.0.6: body+response listing detection (State 1 → State 3 in one PUT)
-      if (hasPackageType(b) && (!ctx || !ctx.has_package_type) && hasPackageType(d)) {
-        console.log('[BD Tracker] detect → listing_created (body+response, State 1→3)');
-        return 'listing_created';
-      }
-      if (hasSpecValues(b)) {
-        console.log('[BD Tracker] detect → spec_added (req has spec values)');
+      // PRIORITY 4: spec_added — body has spec values (with pkg or without,
+      // ctx says pkg is present → user is editing specs on a listed product)
+      if (bodyHasSpecs && ctxHasPkg) {
+        console.log('[BD Tracker] detect → spec_added (body has specs, ctx has pkg)');
         return 'spec_added';
       }
-      if (hasSpecValues(d) && ctx && ctx.has_package_type && !ctx.has_specs) {
-        console.log('[BD Tracker] detect → spec_added (res has spec values, ctx has pkg no specs)');
+      // PRIORITY 5: spec_added — response-driven (response has specs, ctx has pkg)
+      if (responseHasSpecs && ctxHasPkg) {
+        console.log('[BD Tracker] detect → spec_added (response has specs, ctx has pkg)');
         return 'spec_added';
       }
       console.log('[BD Tracker] detect → product_updated');
