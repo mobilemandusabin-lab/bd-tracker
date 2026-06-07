@@ -775,12 +775,19 @@
     }
 
     if (method === 'PUT' && productId) {
+      // v1.0.10: refresh ctx from the PUT response so subsequent PUTs in
+      // the same session see a fresh baseline (prevents stale-ctx bugs
+      // when the SPA doesn't auto-refresh after a save). The first
+      // response's packageType is the authoritative baseline; this
+      // keeps it in sync with reality after every save.
+      cacheProductContext(productId, responseData);
       const ctx = getContext(productId);
       const responseHasPkg = hasPackageType(d);
       const responseHasSpecs = hasSpecValues(d);
       const bodyHasPkg = hasPackageType(b);
       const bodyHasSpecs = hasSpecValues(b);
       const ctxHasPkg = ctx && ctx.has_package_type;
+      console.log('[BD Tracker] PUT ctx refresh: has_pkg=' + ctxHasPkg + ', bodyHasPkg=' + bodyHasPkg + ', bodyHasSpecs=' + bodyHasSpecs);
 
       // v1.0.8: body-first detection. The request body is the most reliable
       // signal of what the user is doing in this PUT — it doesn't depend on
