@@ -155,6 +155,9 @@
             this._global[productId] = v;
             if (v.is_ended && v.ended_at && Date.now() - v.ended_at > 24 * 60 * 60 * 1000) {
               localStorage.removeItem(k);
+              try { localStorage.removeItem('bd_events_' + productId); } catch (e) {}
+              try { localStorage.removeItem('bd_idle_' + productId); } catch (e) {}
+              try { localStorage.removeItem('bd_presence_' + productId); } catch (e) {}
               delete this._global[productId];
             }
           } else if (k.startsWith('bd_presence_')) {
@@ -170,6 +173,109 @@
 
       window.addEventListener('storage', (e) => this._onStorageEvent(e));
       this._cleanupTimer = setInterval(() => this._cleanupDeadTabs(), 30 * 1000);
+
+      // Recover any sessions that ended without firing session_ended
+      // (crashed tab, force-quit, OS kill — anything that skips pagehide).
+      this._recoverOrphanedSessions();
+    },
+
+    // ═══════════════════════════════════════════════════════════════════
+    // ORPHAN SESSION RECOVERY
+    //   A "session" is orphaned when bd_state_{productId} is_ended=false
+    //   but no live tab is in bd_presence_{productId}. This happens when
+    //   the tab dies ungracefully (crash, kill, force-quit) — pagehide
+    //   never fires, so the normal endAllSessions path is skipped, and
+    //   the backend never sees the session_ended summary.
+    //
+    //   We rebuild the summary from the persisted state + the events
+    //   and idle_periods arrays we now keep in localStorage, post it
+    //   via the bridge, and mark the session as ended.
+    // ═══════════════════════════════════════════════════════════════════
+    _recoverOrphanedSessions() {
+      const cutoff = Date.now() - this._deadTabThreshold;
+      for (const productId of Object.keys(this._global)) {
+        const g = this._global[productId];
+        if (!g || g.is_ended || g.recovering) continue;
+
+        // Skip sessions younger than 1 minute — tab may not have
+        // heartbeated yet, false positive if a second tab is about to
+        // open the same product.
+        if (g.first_seen && Date.now() - g.first_seen < 60 * 1000) continue;
+
+        this._readPresence(productId);
+        const presence = this._presence[productId] || {};
+        const liveTabCount = Object.values(presence).filter(
+          (t) => t && typeof t.lastHeartbeat === 'number' && t.lastHeartbeat >= cutoff
+        ).length;
+        if (liveTabCount > 0) continue;
+
+        // Claim it synchronously to prevent a second tab from also
+        // recovering (race on init of two content scripts in parallel).
+        g.recovering = true;
+        this._global[productId] = g;
+        try {
+          localStorage.setItem('bd_state_' + productId, JSON.stringify(g));
+        } catch (e) {}
+
+        let events = [];
+        let idlePeriods = [];
+        try { events = JSON.parse(localStorage.getItem('bd_events_' + productId) || '[]'); } catch (e) {}
+        try { idlePeriods = JSON.parse(localStorage.getItem('bd_idle_' + productId) || '[]'); } catch (e) {}
+        if (!Array.isArray(events)) events = [];
+        if (!Array.isArray(idlePeriods)) idlePeriods = [];
+
+        this._postOrphanedSessionEnded(productId, g, events, idlePeriods);
+      }
+    },
+
+    _postOrphanedSessionEnded(productId, g, events, idlePeriods) {
+      const now = Date.now();
+      const lastActivity = g.last_activity || now;
+      const totalDuration = Math.max(0, lastActivity - (g.first_seen || now));
+      const idleTotal = idlePeriods.reduce((sum, p) => sum + (p && p.duration ? p.duration : 0), 0);
+      const tabIds = Array.isArray(g.tab_ids) ? g.tab_ids : [];
+
+      const summary = {
+        product_id: productId,
+        tab_id: 'recovered',
+        tab_ids: tabIds,
+        tab_count: tabIds.length,
+        multi_tab_session: tabIds.length > 1,
+        total_duration: totalDuration,
+        active_duration: Math.max(0, totalDuration - idleTotal),
+        idle_time: idleTotal,
+        idle_periods_count: idlePeriods.length,
+        longest_idle: idlePeriods.length > 0
+          ? Math.max.apply(null, idlePeriods.map((p) => (p && p.duration) || 0))
+          : 0,
+        total_events: events.length,
+        total_views: g.total_views || 0,
+        spec_count: g.spec_count || 0,
+        has_package_type: !!g.has_package_type,
+        time_to_first_spec: g.time_to_first_spec || null,
+        time_to_listing: g.time_to_listing || null,
+        final_state: g.current_state || null,
+        completed: g.current_state === 'LISTING_CREATED',
+        recovered_from_crash: true,
+        event_timeline: events.map((e) => ({
+          type: e.type,
+          at: e.at,
+          offset: e.at - (g.first_seen || now),
+          tab_id: e.tab_id
+        }))
+      };
+
+      postToBridge('session_ended', summary);
+
+      // Mark ended so we don't re-fire on next init.
+      g.is_ended = true;
+      g.ended_at = now;
+      g.recovering = false;
+      g.tab_ids = tabIds;
+      this._global[productId] = g;
+      try {
+        localStorage.setItem('bd_state_' + productId, JSON.stringify(g));
+      } catch (e) {}
     },
 
     getTabId() {
@@ -364,6 +470,35 @@
         };
         localStorage.setItem('bd_state_' + s.product_id, JSON.stringify(payload));
         this._global[s.product_id] = payload;
+
+        // Append only NEW events since last persist (delta tracking makes
+        // each persist O(new items) instead of O(total events)). The
+        // merge-append helper dedupes by at|type|tab_id so two tabs of
+        // the same product don't clobber each other.
+        if (Array.isArray(s.events) && s.events.length > 0) {
+          const start = s._persistedEventCount || 0;
+          if (s.events.length > start) {
+            appendMergedToStorage(
+              'bd_events_' + s.product_id,
+              s.events.slice(start),
+              (e) => e.at + '|' + e.type + '|' + e.tab_id,
+              500
+            );
+            s._persistedEventCount = s.events.length;
+          }
+        }
+        if (Array.isArray(s.idle_periods) && s.idle_periods.length > 0) {
+          const start = s._persistedIdleCount || 0;
+          if (s.idle_periods.length > start) {
+            appendMergedToStorage(
+              'bd_idle_' + s.product_id,
+              s.idle_periods.slice(start),
+              (p) => p.start + '|' + p.end,
+              100
+            );
+            s._persistedIdleCount = s.idle_periods.length;
+          }
+        }
       } catch (e) {}
     },
 
@@ -479,6 +614,35 @@
       vendor_updated_at: d.updatedAt || b.updatedAt || null,
       categoryComplianceDetails: b.categoryComplianceDetails || d.categoryComplianceDetails || b.productComplianceDetails || d.productComplianceDetails || null
     };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // LOCALSTORAGE MERGE-APPEND
+  //   Two tabs of the same product both write to the same localStorage key.
+  //   Naive overwrite would lose the other tab's data. This helper does a
+  //   read-merge-write with dedupe by `keyFn(item)`, then caps to maxItems
+  //   (drops oldest) to bound localStorage usage per product.
+  // ═══════════════════════════════════════════════════════════════════════
+  function appendMergedToStorage(key, newItems, keyFn, maxItems) {
+    if (!Array.isArray(newItems) || newItems.length === 0) return;
+    try {
+      let existing = [];
+      try { existing = JSON.parse(localStorage.getItem(key) || '[]'); } catch (e) {}
+      if (!Array.isArray(existing)) existing = [];
+      const seen = new Set();
+      for (const x of existing) {
+        try { seen.add(keyFn(x)); } catch (e) {}
+      }
+      for (const item of newItems) {
+        let k;
+        try { k = keyFn(item); } catch (e) { continue; }
+        if (!seen.has(k)) { existing.push(item); seen.add(k); }
+      }
+      if (existing.length > maxItems) {
+        existing = existing.slice(existing.length - maxItems);
+      }
+      localStorage.setItem(key, JSON.stringify(existing));
+    } catch (e) {}
   }
 
   // ═══════════════════════════════════════════════════════════════════════
