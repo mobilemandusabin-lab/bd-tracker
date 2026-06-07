@@ -1,7 +1,11 @@
 (function() {
   'use strict';
 
-  console.log(`[BD Tracker] Content script loaded on ${window.location.hostname}`);
+  // VERSION is the single source of truth for "is the new code active?".
+  // Manifest version stays 1.0.12 — this build suffix lets you confirm in
+  // the console which copy of the code is running without bumping manifest.
+  const VERSION = '1.0.12-bulkfix3';
+  console.log(`[BD Tracker v${VERSION}] Content script loaded on ${window.location.hostname}`);
 
   // ═══════════════════════════════════════════════════════════════════════
   // URL PATTERNS
@@ -751,10 +755,8 @@
     console.log('[BD Tracker] detect', { method, url: getPath(url), productId, matched: matched.event_type, hasSpecReq: hasSpecValues(b), hasPkgReq: hasPackageType(b), hasSpecRes: hasSpecValues(d), hasPkgRes: hasPackageType(d), ctx: getContext(productId) });
 
     if (matched.event_type === 'qc_bulk_approved') {
-      const productIds = Array.isArray(b) ? b : (b && b.productIds) || [];
       const isApprove = /\/bulk-approve/.test(url);
-      console.log('[BD Tracker] detect → qc_bulk', { count: productIds.length, type: isApprove ? 'qc_approved' : 'qc_rejected' });
-      sendBulkQCEvents(productIds, isApprove ? 'qc_approved' : 'qc_rejected', method, url, responseData);
+      sendBulkQCEvents(null, isApprove ? 'qc_approved' : 'qc_rejected', method, url, responseData);
       return null;
     }
 
@@ -883,26 +885,42 @@
   }
 
   function sendBulkQCEvents(productIds, eventType, method, url, responseData) {
-    if (!Array.isArray(productIds) || productIds.length === 0) return;
     if (responseData && responseData.success === false) return;
     const d = unwrap(responseData);
-    const firstId = productIds[0];
-    const data = {
-      product_id: firstId,
-      qc_status: eventType === 'qc_approved' ? 'approved' : 'rejected',
-      bulk: true,
-      bulk_count: productIds.length,
-      product_ids: productIds,
-      vendor_updated_at: d.updatedAt || null,
-      url: getPath(url),
-      method,
-      timestamp: new Date().toISOString()
-    };
-    if (firstId) {
-      const sessionInfo = State.track(firstId, eventType, data, null);
-      Object.assign(data, sessionInfo || {});
+
+    // The response is the source of truth for bulk QC — NOT the request
+    // body. The response shape is:
+    //   { data: { totalRequested: 4, approved: 4, alreadyApproved: 0 } }
+    // and crucially does NOT include the list of approved product IDs.
+    // So we emit one event per approved product (response.approved) and
+    // leave product_id null. The analytics aggregation counts rows, so
+    // N rows = N approvals, and the bulk_count metadata preserves the
+    // context that these came from a single bulk action.
+    const approvedCount = (d && typeof d.approved === 'number') ? d.approved : 0;
+    if (approvedCount === 0) return;
+
+    console.log('[BD Tracker] detect → qc_bulk', {
+      type: eventType,
+      responseApproved: approvedCount,
+      totalRequested: d?.totalRequested,
+      alreadyApproved: d?.alreadyApproved
+    });
+
+    for (let i = 0; i < approvedCount; i++) {
+      const data = {
+        product_id: null,
+        qc_status: eventType === 'qc_approved' ? 'approved' : 'rejected',
+        bulk: true,
+        bulk_count: approvedCount,
+        bulk_index: i,                  // ← unique per event in the batch
+        product_ids: null,
+        vendor_updated_at: d?.updatedAt || null,
+        url: getPath(url),
+        method,
+        timestamp: new Date().toISOString()
+      };
+      postToBridge(eventType, data);
     }
-    postToBridge(eventType, data);
   }
 
   // ═══════════════════════════════════════════════════════════════════════

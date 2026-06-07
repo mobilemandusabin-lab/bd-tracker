@@ -201,7 +201,14 @@ async function handleEvent(message) {
   }
 
   // ── Normal events: dedup + log ──
-  const dedupKey = data.product_id || data.product_name || data.url || '';
+  let dedupKey = data.product_id || data.product_name || data.url || '';
+  // For bulk events (e.g., 4 qc_approved from one bulk-approve), all events
+  // share the same URL and have null product_id, which would otherwise
+  // collapse them into a single dedup key and drop events 2..N. Including
+  // bulk_index makes each event in the batch unique.
+  if (data.bulk === true && typeof data.bulk_index === 'number') {
+    dedupKey = dedupKey + '|bulk_' + data.bulk_index;
+  }
   let dedupWindow = DEDUP_WINDOW;
   if (eventType === 'listing_created' || eventType === 'product_created') dedupWindow = 5000;
   else if (eventType === 'spec_added') dedupWindow = 300000; // 5 min — specs should not be added twice to same product
