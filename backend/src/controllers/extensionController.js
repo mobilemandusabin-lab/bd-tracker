@@ -336,22 +336,6 @@ exports.logActivity = async (req, res) => {
       }
     }
 
-    // === PRODUCT_UPDATED → LISTING_CREATED reclassification (response-driven) ===
-    // Safety net for v1.0.7: if the extension fired product_updated but the
-    // response shows the product is now listed (has_package_type: true in
-    // metadata) and no prior listing_created/product_created exists for this
-    // product, treat it as a new listing.
-    if (effectiveEventType === 'product_updated' && effectiveProductId && metadata?.has_package_type === true) {
-      const priorListing = await ExtensionEvent.findOne({
-        product_id: effectiveProductId,
-        event_type: { $in: ['listing_created', 'product_created'] }
-      });
-      if (!priorListing) {
-        effectiveEventType = 'listing_created';
-        console.log('[EXT] reclassify product_updated → listing_created (response has packageType, no prior listing)', { product_id: effectiveProductId, user_id: req.user._id });
-      }
-    }
-
     // Deduplicate: qc_pending recorded once, stays until manually removed
     if (event_type === 'qc_pending') {
       const existing = await ExtensionEvent.findOne({ event_type: 'qc_pending' });

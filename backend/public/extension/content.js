@@ -14,7 +14,7 @@
   const PATTERNS = [
     {
       method: 'POST',
-      pathRe: /^\/api\/vendor\/products$/,
+      pathRe: /^\/api\/vendor\/products\/?$/,
       excludeRe: /\/bulk[-\/]/i,
       event_type: 'listing_created'
     },
@@ -93,7 +93,7 @@
     } catch (e) {}
   }
 
-  function hasPackageType(d) {
+  function _hasPackageTypeInObj(d) {
     if (!d) return false;
     if (d.packageTypeID) return true;
     if (typeof d.packageType === 'string' && d.packageType.length > 0) return true;
@@ -101,10 +101,31 @@
     return false;
   }
 
-  function hasSpecValues(d) {
+  function hasPackageType(d) {
+    if (_hasPackageTypeInObj(d)) return true;
+    // Common wrapper keys: some APIs nest the product under .product,
+    // .data, .payload, or .body. Only descend into the first wrapper to
+    // avoid infinite loops on cyclic shapes.
+    if (d && typeof d === 'object') {
+      const nested = d.product || d.payload || d.body;
+      if (nested && nested !== d && _hasPackageTypeInObj(nested)) return true;
+    }
+    return false;
+  }
+
+  function _hasSpecValuesInObj(d) {
     if (!d) return false;
     if (d.categoryComplianceDetails && Object.keys(d.categoryComplianceDetails).length) return true;
     if (d.productComplianceDetails && Object.keys(d.productComplianceDetails).length) return true;
+    return false;
+  }
+
+  function hasSpecValues(d) {
+    if (_hasSpecValuesInObj(d)) return true;
+    if (d && typeof d === 'object') {
+      const nested = d.product || d.payload || d.body;
+      if (nested && nested !== d && _hasSpecValuesInObj(nested)) return true;
+    }
     return false;
   }
 
@@ -770,55 +791,85 @@
     }
 
     if (matched.event_type === 'listing_created') {
-      console.log('[BD Tracker] detect → listing_created (POST new product)');
-      return 'listing_created';
+      // v1.0.12: verify the response actually carries a packageType before
+      // calling this a complete listing. A POST that creates a stub product
+      // (no pkg yet) is logged as product_created, which the server-side
+      // reclassifier can later upgrade to listing_created once a packageType
+      // shows up via a subsequent PUT.
+      if (hasPackageType(d)) {
+        console.log('[BD Tracker] detect → listing_created (POST with packageType in response)');
+        return 'listing_created';
+      }
+      console.log('[BD Tracker] detect → product_created (POST without packageType, not a complete listing yet)');
+      return 'product_created';
     }
 
     if (method === 'PUT' && productId) {
-      // v1.0.10: refresh ctx from the PUT response so subsequent PUTs in
-      // the same session see a fresh baseline (prevents stale-ctx bugs
-      // when the SPA doesn't auto-refresh after a save). The first
-      // response's packageType is the authoritative baseline; this
-      // keeps it in sync with reality after every save.
-      cacheProductContext(productId, responseData);
+      // v1.0.12: read the BEFORE state from the cache BEFORE updating it.
+      // v1.0.10 had `cacheProductContext()` here, which made `ctx` always
+      // reflect the current response, so the `!ctxHasPkg` checks could
+      // never fire — listing_created became unreachable via PUT and the
+      // server-side reclassifier had to paper over the bug. The fix is to
+      // compare the cached BEFORE state against the current response, then
+      // write the AFTER state to the cache for the next request.
       const ctx = getContext(productId);
       const responseHasPkg = hasPackageType(d);
       const responseHasSpecs = hasSpecValues(d);
       const bodyHasPkg = hasPackageType(b);
       const bodyHasSpecs = hasSpecValues(b);
-      const ctxHasPkg = ctx && ctx.has_package_type;
-      console.log('[BD Tracker] PUT ctx refresh: has_pkg=' + ctxHasPkg + ', bodyHasPkg=' + bodyHasPkg + ', bodyHasSpecs=' + bodyHasSpecs);
+      const ctxHasPkg = !!(ctx && ctx.has_package_type);
+      const ctxHasSpecs = !!(ctx && ctx.has_specs);
 
-      // v1.0.8: body-first detection. The request body is the most reliable
-      // signal of what the user is doing in this PUT — it doesn't depend on
-      // cached ctx state.
+      console.log('[BD Tracker] PUT diff', {
+        productId,
+        before: { pkg: ctxHasPkg, specs: ctxHasSpecs },
+        after:  { pkg: responseHasPkg, specs: responseHasSpecs },
+        body:   { pkg: bodyHasPkg, specs: bodyHasSpecs }
+      });
 
-      // PRIORITY 1: spec_added — body adds spec values without packageType
-      // (User is filling in compliance on an already-listed product, or
-      // submitting a State 2→3 transition. Ctx-independent.)
-      if (bodyHasSpecs && !bodyHasPkg) {
-        console.log('[BD Tracker] detect → spec_added (body has specs, no pkg)');
+      // Always update the cache AFTER detection — the AFTER state is the
+      // new baseline for the next PUT in this session.
+      cacheProductContext(productId, responseData);
+
+      // DETECTION — compare cached BEFORE state against the AFTER response.
+      // The body is used as a fallback signal only when no cached state
+      // exists yet (e.g., user PUTs without ever doing a GET first).
+
+      // 1. listing_created: product transitioned from unlisted (no pkg)
+      //    to listed (has pkg). Covers State 1→2 and State 1→3 in one PUT.
+      if (!ctxHasPkg && responseHasPkg) {
+        console.log('[BD Tracker] detect → listing_created (before: no pkg, after: has pkg)');
+        return 'listing_created';
+      }
+      // 2. spec_added: listed product gained compliance values.
+      if (ctxHasPkg && responseHasSpecs && !ctxHasSpecs) {
+        console.log('[BD Tracker] detect → spec_added (before: no specs on listed product, after: has specs)');
         return 'spec_added';
       }
-      // PRIORITY 2: listing_created — body adds packageType, response confirms,
-      // ctx shows no prior pkg (State 1→2 or State 1→3 in one PUT)
-      if (bodyHasPkg && responseHasPkg && !ctxHasPkg) {
-        console.log('[BD Tracker] detect → listing_created (body+response has pkg, no prior ctx)');
+      // 3. spec_added (no-ctx body fallback): the user is clearly adding
+      //    specs (body has spec values, no pkg change). Trust the body's
+      //    intent when we have no cached state to compare against.
+      if (!ctx && bodyHasSpecs && !bodyHasPkg) {
+        console.log('[BD Tracker] detect → spec_added (no ctx, body has specs, no pkg in body)');
+        return 'spec_added';
+      }
+      // 4. listing_created (no-ctx body fallback): no cached state but the
+      //    body adds packageType and the response confirms it landed.
+      if (!ctx && bodyHasPkg && responseHasPkg) {
+        console.log('[BD Tracker] detect → listing_created (no ctx, body+response has pkg)');
         return 'listing_created';
       }
-      // PRIORITY 3: listing_created — response-driven fallback (no body pkg
-      // was sent, but response has pkg and ctx says no prior listing)
-      if (responseHasPkg && !ctxHasPkg) {
-        console.log('[BD Tracker] detect → listing_created (response-driven, no prior ctx)');
-        return 'listing_created';
-      }
-      // PRIORITY 4: spec_added — body has spec values (with pkg or without,
-      // ctx says pkg is present → user is editing specs on a listed product)
+      // 5. spec_added (body-fallback): cached state says listed and the
+      //    body is adding spec values. Belt-and-suspenders for the case
+      //    where the response didn't echo the spec values back.
       if (bodyHasSpecs && ctxHasPkg) {
         console.log('[BD Tracker] detect → spec_added (body has specs, ctx has pkg)');
         return 'spec_added';
       }
-      // PRIORITY 5: spec_added — response-driven (response has specs, ctx has pkg)
+      // 6. spec_added (response-only): cached state says listed, response
+      //    gained specs even though the body didn't show them (server
+      //    filled in derived values, or the body shape didn't match the
+      //    check).
       if (responseHasSpecs && ctxHasPkg) {
         console.log('[BD Tracker] detect → spec_added (response has specs, ctx has pkg)');
         return 'spec_added';
