@@ -306,6 +306,14 @@
         try {
           ProductContext[productId] = e.newValue ? JSON.parse(e.newValue) : null;
         } catch (err) {}
+      } else if (e.key === RECENTLY_LISTED_KEY) {
+        // Another tab listed a product — refresh our in-memory map so
+        // this tab also suppresses spec_added for the same 1h window.
+        try {
+          const fresh = e.newValue ? JSON.parse(e.newValue) : {};
+          for (const k of Object.keys(recentlyListed)) delete recentlyListed[k];
+          Object.assign(recentlyListed, fresh);
+        } catch (err) {}
       }
     },
 
@@ -646,12 +654,45 @@
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // 15-MIN SPEC SUPPRESSION
-  //   If spec_added fires within 15 minutes of listing_created for the same
-  //   product, suppress the spec_added. Per-tab in-memory state.
+  // 1-HOUR SPEC SUPPRESSION (localStorage-persisted, cross-tab)
+  //   If spec_added fires within 1 hour of listing_created for the same
+  //   product, suppress the spec_added. Persisted to localStorage so the
+  //   suppression survives page reloads and new tabs. Cross-tab sync via
+  //   the 'storage' event (see _onStorageEvent).
   // ═══════════════════════════════════════════════════════════════════════
-  const recentlyListed = {};
-  const SPEC_SUPPRESS_MS = 15 * 60 * 1000;
+  const RECENTLY_LISTED_KEY = 'bd_recently_listed';
+  const SPEC_SUPPRESS_MS = 60 * 60 * 1000;
+
+  function loadRecentlyListed() {
+    try {
+      const raw = localStorage.getItem(RECENTLY_LISTED_KEY);
+      if (!raw) return {};
+      const now = Date.now();
+      const all = JSON.parse(raw);
+      const fresh = {};
+      for (const [pid, ts] of Object.entries(all || {})) {
+        if (typeof ts === 'number' && now - ts < SPEC_SUPPRESS_MS) {
+          fresh[pid] = ts;
+        }
+      }
+      return fresh;
+    } catch (e) { return {}; }
+  }
+
+  function saveRecentlyListed(map) {
+    try {
+      const now = Date.now();
+      const fresh = {};
+      for (const [pid, ts] of Object.entries(map)) {
+        if (typeof ts === 'number' && now - ts < SPEC_SUPPRESS_MS) {
+          fresh[pid] = ts;
+        }
+      }
+      localStorage.setItem(RECENTLY_LISTED_KEY, JSON.stringify(fresh));
+    } catch (e) {}
+  }
+
+  const recentlyListed = loadRecentlyListed();
 
   // ═══════════════════════════════════════════════════════════════════════
   // QC PENDING DEDUP
@@ -686,9 +727,12 @@
     const d = unwrap(responseData);
     const b = reqBody || {};
 
+    console.log('[BD Tracker] detect', { method, url: getPath(url), productId, matched: matched.event_type, hasSpecReq: hasSpecValues(b), hasPkgReq: hasPackageType(b), hasSpecRes: hasSpecValues(d), hasPkgRes: hasPackageType(d), ctx: getContext(productId) });
+
     if (matched.event_type === 'qc_bulk_approved') {
       const productIds = Array.isArray(b) ? b : (b && b.productIds) || [];
       const isApprove = /\/bulk-approve/.test(url);
+      console.log('[BD Tracker] detect → qc_bulk', { count: productIds.length, type: isApprove ? 'qc_approved' : 'qc_rejected' });
       sendBulkQCEvents(productIds, isApprove ? 'qc_approved' : 'qc_rejected', method, url, responseData);
       return null;
     }
@@ -696,6 +740,7 @@
     if (matched.event_type === 'qc_pending') {
       const now = Date.now();
       if (now - lastQcPendingAt < QC_PENDING_DEDUP_MS) {
+        console.log('[BD Tracker] detect → qc_pending DEDUPED');
         return null;
       }
       lastQcPendingAt = now;
@@ -708,33 +753,56 @@
         method,
         timestamp: new Date().toISOString()
       }, null);
+      console.log('[BD Tracker] detect → qc_pending');
       return null;
     }
 
     if (matched.event_type === 'qc_approved') {
-      return /\/reject/.test(url) ? 'qc_rejected' : 'qc_approved';
+      const t = /\/reject/.test(url) ? 'qc_rejected' : 'qc_approved';
+      console.log('[BD Tracker] detect →', t);
+      return t;
     }
 
     if (method === 'GET' && matched.event_type === 'product_viewed' && productId) {
       cacheProductContext(productId, responseData);
+      console.log('[BD Tracker] detect → product_viewed');
       return 'product_viewed';
     }
 
     if (matched.event_type === 'listing_created') {
+      console.log('[BD Tracker] detect → listing_created (POST new product)');
       return 'listing_created';
     }
 
     if (method === 'PUT' && productId) {
       const ctx = getContext(productId);
 
-      if (hasSpecValues(b)) return 'spec_added';
-      if (hasSpecValues(d) && ctx && ctx.has_package_type && !ctx.has_specs) return 'spec_added';
-      if (hasPackageType(b) && (!ctx || !ctx.has_package_type) && hasPackageType(d)) {
+      // v1.0.7: response-driven listing detection
+      // The server response is the source of truth for "is this product listed?".
+      // If the response shows packageType but the cached state didn't, this is a
+      // new listing — even if the request body didn't carry packageType.
+      if (hasPackageType(d) && (!ctx || !ctx.has_package_type)) {
+        console.log('[BD Tracker] detect → listing_created (response-driven, no prior ctx)');
         return 'listing_created';
       }
+      // v1.0.6: body+response listing detection (State 1 → State 3 in one PUT)
+      if (hasPackageType(b) && (!ctx || !ctx.has_package_type) && hasPackageType(d)) {
+        console.log('[BD Tracker] detect → listing_created (body+response, State 1→3)');
+        return 'listing_created';
+      }
+      if (hasSpecValues(b)) {
+        console.log('[BD Tracker] detect → spec_added (req has spec values)');
+        return 'spec_added';
+      }
+      if (hasSpecValues(d) && ctx && ctx.has_package_type && !ctx.has_specs) {
+        console.log('[BD Tracker] detect → spec_added (res has spec values, ctx has pkg no specs)');
+        return 'spec_added';
+      }
+      console.log('[BD Tracker] detect → product_updated');
       return 'product_updated';
     }
 
+    console.log('[BD Tracker] detect →', matched.event_type);
     return matched.event_type;
   }
 
@@ -763,7 +831,8 @@
 
   // ═══════════════════════════════════════════════════════════════════════
   // EVENT SENDER
-  //   Applies 15-min suppression, enriches with state, and posts to bridge.
+  //   Applies 1-hour spec suppression (localStorage-persisted, cross-tab),
+  //   enriches with state, and posts to bridge.
   // ═══════════════════════════════════════════════════════════════════════
   function sendEvent(eventType, data, reqBody) {
     if (!eventType || !data) return;
@@ -771,10 +840,17 @@
 
     if (eventType === 'listing_created' && productId) {
       recentlyListed[productId] = Date.now();
+      saveRecentlyListed(recentlyListed);
+      console.log('[BD Tracker] send → listing_created', { productId, method: data.method, clockStarted: true });
     }
-    if (eventType === 'spec_added' && productId && recentlyListed[productId]) {
-      const elapsed = Date.now() - recentlyListed[productId];
-      if (elapsed < SPEC_SUPPRESS_MS) return;
+    if (eventType === 'spec_added' && productId) {
+      const listedAt = recentlyListed[productId];
+      if (listedAt && Date.now() - listedAt < SPEC_SUPPRESS_MS) {
+        const minutes = Math.floor((Date.now() - listedAt) / 60000);
+        console.log('[BD Tracker] SUPPRESSED spec_added', { productId, minutesSinceListing: minutes, reason: 'within 1h of listing_created' });
+        return;
+      }
+      console.log('[BD Tracker] send → spec_added', { productId, listedAt: listedAt || null });
     }
 
     const sessionInfo = productId ? State.track(productId, eventType, data, reqBody) : null;
@@ -786,6 +862,9 @@
       method: data.method || null,
       ...(sessionInfo || {})
     };
+    if (eventType !== 'spec_added') {
+      console.log('[BD Tracker] send →', eventType, { productId, method: data.method });
+    }
     postToBridge(eventType, enriched);
   }
 

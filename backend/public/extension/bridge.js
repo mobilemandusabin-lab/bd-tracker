@@ -28,17 +28,24 @@
       data: eventData.data
     };
 
+    console.log('[BD Tracker] bridge → sendMessage', { type: eventData.event_type, product: eventData.data && eventData.data.product_id, ctxValid: isContextValid() });
+
     if (!isContextValid()) {
+      console.warn('[BD Tracker] bridge → context INVALID, falling back to chrome.storage.local');
       fallbackToStorage(message);
       return;
     }
 
     try {
       var promise = chrome.runtime.sendMessage(message);
-      withTimeout(promise, SEND_TIMEOUT_MS).catch(function() {
+      withTimeout(promise, SEND_TIMEOUT_MS).then(function() {
+        console.log('[BD Tracker] bridge → ack', { type: eventData.event_type });
+      }).catch(function(err) {
+        console.warn('[BD Tracker] bridge → sendMessage failed/timeout, falling back', err && err.message);
         fallbackToStorage(message);
       });
     } catch (e) {
+      console.error('[BD Tracker] bridge → sync error, falling back', e);
       fallbackToStorage(message);
     }
   }

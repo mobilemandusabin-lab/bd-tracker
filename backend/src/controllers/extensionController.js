@@ -193,6 +193,8 @@ exports.logActivity = async (req, res) => {
   try {
     const { event_type, product_id, vendor_id, product_name, qc_status, product_sku, pending_count, metadata, workflow_state, session_duration } = req.body;
 
+    console.log('[EXT] logActivity', { event_type, product_id, user_id: req.user?._id, method: metadata?.method, url: metadata?.url });
+
     // Verify required fields
     if (!event_type) {
       return res.status(400).json({ status: 'fail', message: 'event_type is required' });
@@ -242,22 +244,100 @@ exports.logActivity = async (req, res) => {
     if (event_type === 'listing_created' && effectiveProductId) {
       const isPost = metadata?.method === 'POST';
       if (isPost) {
+        // POST is always a new listing
       } else {
-        // PUT = check if this is a new listing or an edit
+        // PUT: disambiguate new listing vs edit
         // Increased window to 24 hours — staff may create products in bulk then list later
         const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-        const recentCreation = await ExtensionEvent.findOne({
+        const recentProductCreated = await ExtensionEvent.findOne({
           event_type: 'product_created',
           product_id: effectiveProductId,
           created_at: { $gte: oneDayAgo }
         });
-        if (recentCreation) {
-          // New listing: delete product_created signal, keep listing_created
-          await ExtensionEvent.deleteOne({ _id: recentCreation._id });
+        if (recentProductCreated) {
+          // Old extension flow: clean up the pre-signal, keep as listing_created
+          await ExtensionEvent.deleteOne({ _id: recentProductCreated._id });
+          console.log('[EXT] listing_created PUT: product_created pre-signal found, cleaned up', { product_id: effectiveProductId });
         } else {
-          // Edit of existing listing: convert to product_updated
-          effectiveEventType = 'product_updated';
+          // v1.0.4+ flow: no product_created pre-signal. Check for any
+          // prior listing for this product (per-product, any user). If
+          // none, it's a new listing; if one exists, it's an edit.
+          const priorListing = await ExtensionEvent.findOne({
+            event_type: 'listing_created',
+            product_id: effectiveProductId
+          });
+          if (priorListing) {
+            effectiveEventType = 'product_updated';
+            console.log('[EXT] listing_created PUT: prior listing exists, downgrading to product_updated', { product_id: effectiveProductId, prior_id: priorListing._id });
+          } else {
+            console.log('[EXT] listing_created PUT: no prior listing, keeping as listing_created (NEW listing)', { product_id: effectiveProductId });
+          }
         }
+      }
+    }
+
+    // === SPEC_ADDED → LISTING_CREATED reclassification (per-product) ===
+    // v1.0.4 and older extensions misclassify a PUT that adds BOTH
+    // packageType and spec values in one request as 'spec_added' instead
+    // of 'listing_created'. Per-product check (any user): if no prior
+    // listing for this product_id exists within 24h, this is actually a
+    // new listing (State 1 → State 3 transition).
+    if (effectiveEventType === 'spec_added' && effectiveProductId && metadata?.method === 'PUT') {
+      const priorListing = await ExtensionEvent.findOne({
+        product_id: effectiveProductId,
+        event_type: { $in: ['listing_created', 'product_created'] },
+        created_at: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+      });
+      if (!priorListing) {
+        effectiveEventType = 'listing_created';
+        console.log('[EXT] reclassify spec_added → listing_created', { product_id: effectiveProductId, user_id: req.user._id });
+      } else {
+        console.log('[EXT] reclassify check: prior listing exists, keeping spec_added', { product_id: effectiveProductId, prior_id: priorListing._id, prior_type: priorListing.event_type });
+      }
+    }
+
+    // === 1-HOUR SPEC_ADDED SUPPRESSION (per-user, per-product) ===
+    // When the same user lists a product and adds specs within 1h, the
+    // spec add is part of the same workflow as the listing. The clock
+    // starts at the listing_created (including reclassified ones from
+    // the block above). Cross-user, cross-browser safety net for the
+    // extension's localStorage-based 1h suppression.
+    if (effectiveEventType === 'spec_added' && effectiveProductId) {
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+      const recentListing = await ExtensionEvent.findOne({
+        product_id: effectiveProductId,
+        user_id: req.user._id,
+        event_type: 'listing_created',
+        created_at: { $gte: oneHourAgo }
+      });
+      if (recentListing) {
+        console.log('[EXT] SUPPRESSED spec_added (1h rule)', { product_id: effectiveProductId, user_id: req.user._id, listing_id: recentListing._id, minutes_since_listing: Math.floor((Date.now() - recentListing.created_at.getTime()) / 60000) });
+        return res.status(200).json({
+          status: 'success',
+          data: {
+            suppressed: true,
+            reason: 'spec_added within 1h of listing_created',
+            product_id: effectiveProductId,
+            listing_event_id: recentListing._id,
+            minutes_since_listing: Math.floor((Date.now() - recentListing.created_at.getTime()) / 60000)
+          }
+        });
+      }
+    }
+
+    // === PRODUCT_UPDATED → LISTING_CREATED reclassification (response-driven) ===
+    // Safety net for v1.0.7: if the extension fired product_updated but the
+    // response shows the product is now listed (has_package_type: true in
+    // metadata) and no prior listing_created/product_created exists for this
+    // product, treat it as a new listing.
+    if (effectiveEventType === 'product_updated' && effectiveProductId && metadata?.has_package_type === true) {
+      const priorListing = await ExtensionEvent.findOne({
+        product_id: effectiveProductId,
+        event_type: { $in: ['listing_created', 'product_created'] }
+      });
+      if (!priorListing) {
+        effectiveEventType = 'listing_created';
+        console.log('[EXT] reclassify product_updated → listing_created (response has packageType, no prior listing)', { product_id: effectiveProductId, user_id: req.user._id });
       }
     }
 
@@ -326,6 +406,8 @@ exports.logActivity = async (req, res) => {
       session_duration: session_duration || metadata?.session_duration || null,
       metadata: metadata || {}
     });
+
+    console.log('[EXT] logActivity → INSERTED', { _id: extensionEvent._id, event_type: effectiveEventType, product_id: effectiveProductId });
 
     res.status(201).json({
       status: 'success',
