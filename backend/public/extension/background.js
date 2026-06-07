@@ -336,9 +336,6 @@ async function registerDevice() {
   }
 }
 
-let lastSyncWrittenAt = 0;
-const LAST_SYNC_THROTTLE_MS = 60 * 1000;
-
 async function sendHeartbeat() {
   if (!authToken || !deviceId) return;
 
@@ -354,12 +351,7 @@ async function sendHeartbeat() {
     });
 
     if (response.ok) {
-      const now = Date.now();
-      // Throttle lastSync write — avoid waking up popup/storage listeners every 5 min
-      if (now - lastSyncWrittenAt > LAST_SYNC_THROTTLE_MS) {
-        await chrome.storage.local.set({ lastSync: new Date(now).toISOString() });
-        lastSyncWrittenAt = now;
-      }
+      await chrome.storage.local.set({ lastSync: new Date().toISOString() });
       resetAuthFailures();
       console.log(`[BD Tracker BG] ✅ Heartbeat success`);
     } else if (response.status === 401) {
@@ -521,11 +513,10 @@ chrome.webRequest.onCompleted.addListener(
 
     console.log(`[BD Tracker BG] 🔍 webRequest QC match: ${details.method} ${details.url}`);
 
-    // Use in-memory authToken first to avoid a storage roundtrip per request
-    const token = authToken;
-    if (!token) return;
+    chrome.storage.local.get(['authToken'], async (stored) => {
+      const token = stored.authToken || authToken;
+      if (!token) return;
 
-    (async () => {
       for (const matched of matches) {
         const pid = extractProductIdFromUrl(details.url);
         const dedupKey = pid || details.url.split('?')[0];
@@ -555,7 +546,7 @@ chrome.webRequest.onCompleted.addListener(
           console.log(`[BD Tracker BG] ❌ webRequest QC error: ${err.message}`);
         }
       }
-    })();
+    });
   },
   { urls: ['https://commerce.thecanbrand.com/*', 'https://demo.commerce.thecanbrand.com/*'] },
   ['responseHeaders']
