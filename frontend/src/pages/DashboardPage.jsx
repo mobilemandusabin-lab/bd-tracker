@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { useSelector } from 'react-redux';
@@ -88,6 +88,10 @@ const DashboardPage = () => {
   const [showSyncLog, setShowSyncLog] = useState(false);
   const [syncLogs, setSyncLogs] = useState([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
+  const syncingRef = useRef(false);
+
+  useEffect(() => { syncingRef.current = syncing; }, [syncing]);
+
   const { token, user } = useSelector((state) => state.auth);
 
   const fetchSyncStatus = async () => {
@@ -103,7 +107,7 @@ const DashboardPage = () => {
         setSyncElapsed(Math.floor((Date.now() - started) / 1000));
         return true;
       }
-      if (syncing) {
+      if (syncingRef.current) {
         setSyncing(false);
         setServerSyncing(false);
         setSyncElapsed(0);

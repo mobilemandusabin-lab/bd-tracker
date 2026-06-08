@@ -1911,20 +1911,16 @@ exports.getSyncStatus = async (req, res) => {
   }
 };
 
-// POST /dashboard/sync-all — Manual full sync
+// POST /dashboard/sync-all — Manual full sync (fire-and-forget)
 exports.triggerFullSync = async (req, res) => {
-  try {
-    const { runFullSync } = require('../services/unifiedSyncService');
-    const log = await runFullSync('manual', req.user?._id);
-    res.status(200).json({
-      status: 'success',
-      message: 'Sync completed',
-      data: log
-    });
-  } catch (err) {
-    console.error('[Sync] Manual sync failed:', err);
-    res.status(409).json({ status: 'fail', message: err.message });
-  }
+  const { runFullSync } = require('../services/unifiedSyncService');
+  runFullSync('manual', req.user?._id).catch(err =>
+    console.error('[Sync] Background sync failed:', err)
+  );
+  res.status(200).json({
+    status: 'success',
+    message: 'Sync started in background'
+  });
 };
 
 // GET /dashboard/sync-logs — Get recent sync logs

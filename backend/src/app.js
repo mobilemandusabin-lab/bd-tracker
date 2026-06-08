@@ -115,16 +115,13 @@ app.use('/api/v1/team-targets', teamTargetRoutes);
 app.use('/api/v1/finance', financeRoutes);
 if (aiRoutes) app.use('/api/v1/ai', aiRoutes);
 
-// Vercel cron endpoint — no auth
+// Vercel cron endpoint — no auth (fire-and-forget)
 app.get('/api/cron/sync', async (req, res) => {
-  try {
-    const { runFullSync } = require('./services/unifiedSyncService');
-    const log = await runFullSync('cron');
-    res.status(200).json({ status: 'success', data: log });
-  } catch (err) {
-    console.error('[Cron] Full sync failed:', err);
-    res.status(500).json({ status: 'fail', message: err.message });
-  }
+  const { runFullSync } = require('./services/unifiedSyncService');
+  runFullSync('cron').catch(err =>
+    console.error('[Cron] Background sync failed:', err)
+  );
+  res.status(200).json({ status: 'success', message: 'Sync started' });
 });
 
 // Serve Static Frontend in Production
