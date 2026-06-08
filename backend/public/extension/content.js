@@ -4,7 +4,7 @@
   // VERSION is the single source of truth for "is the new code active?".
   // Manifest version stays 1.0.12 — this build suffix lets you confirm in
   // the console which copy of the code is running without bumping manifest.
-  const VERSION = '1.0.12-bulkfix3';
+  const VERSION = '1.0.12-bulkcnt';
   console.log(`[BD Tracker v${VERSION}] Content script loaded on ${window.location.hostname}`);
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -148,10 +148,15 @@
   function cacheProductContext(productId, responseData) {
     if (!productId) return;
     const d = unwrap(responseData);
+    const product_name = d.productName || d.name ||
+                         d.product?.productName || d.product?.name ||
+                         d.payload?.productName || d.payload?.name ||
+                         d.body?.productName || d.body?.name || null;
     setContext(productId, {
       has_package_type: hasPackageType(d),
       has_specs: hasSpecValues(d),
-      has_spec_schema: hasSpecSchema(d)
+      has_spec_schema: hasSpecSchema(d),
+      product_name
     });
   }
 
@@ -262,6 +267,7 @@
 
       const summary = {
         product_id: productId,
+        product_name: g.product_name || null,
         tab_id: 'recovered',
         tab_ids: tabIds,
         tab_count: tabIds.length,
@@ -418,6 +424,7 @@
         const g = this._global[productId] || {};
         this._sessions[productId] = {
           product_id: productId,
+          product_name: g.product_name || null,
           tab_id: tabId,
           first_seen: g.first_seen || Date.now(),
           last_event_at: Date.now(),
@@ -455,6 +462,7 @@
       const d = unwrap(responseData);
       const b = reqBody || {};
 
+      if (responseData?.product_name) s.product_name = responseData.product_name;
       if (hasPackageType(b) || hasPackageType(d)) s.has_package_type = true;
       if (hasSpecValues(b) || hasSpecValues(d)) {
         s.has_specs = true;
@@ -490,6 +498,7 @@
       try {
         const payload = {
           first_seen: s.first_seen,
+          product_name: s.product_name || null,
           current_state: s.current_state,
           previous_state: s.previous_state,
           has_package_type: s.has_package_type,
@@ -559,6 +568,7 @@
         const idleTotal = s.idle_periods.reduce((sum, p) => sum + p.duration, 0);
         const summary = {
           product_id: s.product_id,
+          product_name: s.product_name || null,
           tab_id: tabId,
           tab_ids: s.tab_ids,
           tab_count: s.tab_ids.length,
@@ -638,10 +648,19 @@
   function extractData(responseData, reqBody, url, fallbackProductId) {
     const d = unwrap(responseData);
     const b = reqBody || {};
+    const productId = d._id || d.id ||
+                      d.product?._id || d.product?.id ||
+                      d.payload?._id || d.payload?.id ||
+                      b._id || b.id || fallbackProductId || null;
+    const ctx = productId ? getContext(productId) : null;
     return {
-      product_id: d._id || d.id || b._id || b.id || fallbackProductId || null,
+      product_id: productId,
       vendor_id: typeof d.vendor === 'object' ? (d.vendor && d.vendor._id) : (d.vendor || b.vendor || null),
-      product_name: d.productName || b.productName || d.name || b.name || null,
+      product_name: d.productName || b.productName || d.name || b.name ||
+                    d.product?.productName || d.product?.name ||
+                    d.payload?.productName || d.payload?.name ||
+                    d.body?.productName || d.body?.name ||
+                    ctx?.product_name || null,
       qc_status: d.qcStatus || null,
       product_sku: d.productSku || b.productSku || null,
       vendor_updated_at: d.updatedAt || b.updatedAt || null,
@@ -891,11 +910,10 @@
     // The response is the source of truth for bulk QC — NOT the request
     // body. The response shape is:
     //   { data: { totalRequested: 4, approved: 4, alreadyApproved: 0 } }
-    // and crucially does NOT include the list of approved product IDs.
-    // So we emit one event per approved product (response.approved) and
-    // leave product_id null. The analytics aggregation counts rows, so
-    // N rows = N approvals, and the bulk_count metadata preserves the
-    // context that these came from a single bulk action.
+    // We emit ONE event per bulk action, with bulk_count set to the number
+    // of approved products. The backend stores bulk_count and uses it in
+    // analytics aggregations: { $sum: { $ifNull: ['$bulk_count', 1] } }.
+    // This means a single row with bulk_count=3 contributes 3 to the total.
     const approvedCount = (d && typeof d.approved === 'number') ? d.approved : 0;
     if (approvedCount === 0) return;
 
@@ -906,21 +924,18 @@
       alreadyApproved: d?.alreadyApproved
     });
 
-    for (let i = 0; i < approvedCount; i++) {
-      const data = {
-        product_id: null,
-        qc_status: eventType === 'qc_approved' ? 'approved' : 'rejected',
-        bulk: true,
-        bulk_count: approvedCount,
-        bulk_index: i,                  // ← unique per event in the batch
-        product_ids: null,
-        vendor_updated_at: d?.updatedAt || null,
-        url: getPath(url),
-        method,
-        timestamp: new Date().toISOString()
-      };
-      postToBridge(eventType, data);
-    }
+    const data = {
+      product_id: null,
+      qc_status: eventType === 'qc_approved' ? 'approved' : 'rejected',
+      bulk: true,
+      bulk_count: approvedCount,
+      product_ids: null,
+      vendor_updated_at: d?.updatedAt || null,
+      url: getPath(url),
+      method,
+      timestamp: new Date().toISOString()
+    };
+    postToBridge(eventType, data);
   }
 
   // ═══════════════════════════════════════════════════════════════════════

@@ -30,6 +30,10 @@ const extensionEventSchema = new mongoose.Schema({
     type: Number,
     default: null
   },
+  bulk_count: {
+    type: Number,
+    default: null
+  },
   user_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

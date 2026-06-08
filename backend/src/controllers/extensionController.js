@@ -191,7 +191,7 @@ exports.heartbeat = async (req, res) => {
 // POST /extension/activity-log
 exports.logActivity = async (req, res) => {
   try {
-    const { event_type, product_id, vendor_id, product_name, qc_status, product_sku, pending_count, metadata, workflow_state, session_duration } = req.body;
+    const { event_type, product_id, vendor_id, product_name, qc_status, product_sku, pending_count, bulk_count, metadata, workflow_state, session_duration } = req.body;
 
     console.log('[EXT] logActivity', { event_type, product_id, user_id: req.user?._id, method: metadata?.method, url: metadata?.url });
 
@@ -227,6 +227,33 @@ exports.logActivity = async (req, res) => {
         session_duration: metadata?.total_duration || null,
         metadata: metadata || {}
       });
+
+      // Reclassifier: if the session ended in LISTING_CREATED state and no
+      // listing_created exists for this product, create one. Safety net for
+      // cases where the extension's real-time detection didn't fire (old
+      // extension version, cache miss on first PUT, etc.).
+      if (effectiveProductId && metadata?.final_state === 'LISTING_CREATED') {
+        const existingListing = await ExtensionEvent.findOne({
+          product_id: effectiveProductId,
+          event_type: 'listing_created'
+        });
+        if (!existingListing) {
+          await ExtensionEvent.create({
+            event_type: 'listing_created',
+            product_id: effectiveProductId,
+            vendor_id: vendor_id || null,
+            product_name: product_name || null,
+            product_sku: null,
+            qc_status: null,
+            pending_count: null,
+            user_id: req.user._id,
+            workflow_state: 'LISTING_CREATED',
+            metadata: metadata || {}
+          });
+          console.log('[EXT] reclassifier: created listing_created from session_ended', { product_id: effectiveProductId });
+        }
+      }
+
       return res.status(201).json({
         status: 'success',
         data: {
@@ -395,6 +422,7 @@ exports.logActivity = async (req, res) => {
       product_sku,
       qc_status,
       pending_count: pending_count || metadata?.pending_count || null,
+      bulk_count: bulk_count || null,
       user_id: req.user._id,
       lead_id: lead_id || undefined,
       workflow_state: workflow_state || metadata?.workflow_state || null,
@@ -580,28 +608,29 @@ exports.getAnalytics = async (req, res) => {
     // Atlas-over-HTTP driver quirk). Separate queries match the pattern used
     // by getTeamPerformance, which works.
     const baseMatch = { $match: matchFilter };
+    const BULK_SUM = { $ifNull: ['$bulk_count', 1] };
     const [eventsByType, dailyEvents, topProducts, topVendorsRaw, hourlyActivity, eventsByUser, recentEvents, latestPendingAgg] = await Promise.all([
-      ExtensionEvent.aggregate([baseMatch, { $group: { _id: '$event_type', count: { $sum: 1 } } }]),
-      ExtensionEvent.aggregate([baseMatch, { $group: { _id: { date: { $dateToString: { format: '%Y-%m-%d', date: '$created_at' } }, event_type: '$event_type' }, count: { $sum: 1 } } }, { $sort: { '_id.date': 1 } }]),
+      ExtensionEvent.aggregate([baseMatch, { $group: { _id: '$event_type', count: { $sum: BULK_SUM } } }]),
+      ExtensionEvent.aggregate([baseMatch, { $group: { _id: { date: { $dateToString: { format: '%Y-%m-%d', date: '$created_at' } }, event_type: '$event_type' }, count: { $sum: BULK_SUM } } }, { $sort: { '_id.date': 1 } }]),
       ExtensionEvent.aggregate([
         baseMatch,
         { $match: { product_name: { $ne: null } } },
-        { $group: { _id: '$product_name', total: { $sum: 1 }, listings: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, 1, 0] } }, specs: { $sum: { $cond: [{ $eq: ['$event_type', 'spec_added'] }, 1, 0] } }, updates: { $sum: { $cond: [{ $eq: ['$event_type', 'product_updated'] }, 1, 0] } }, qc_approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, 1, 0] } }, qc_rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, 1, 0] } } } },
+        { $group: { _id: '$product_name', total: { $sum: BULK_SUM }, listings: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, 1, 0] } }, specs: { $sum: { $cond: [{ $eq: ['$event_type', 'spec_added'] }, 1, 0] } }, updates: { $sum: { $cond: [{ $eq: ['$event_type', 'product_updated'] }, 1, 0] } }, qc_approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, BULK_SUM, 0] } }, qc_rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, BULK_SUM, 0] } } } },
         { $sort: { total: -1 } },
         { $limit: 10 }
       ]),
       ExtensionEvent.aggregate([
         baseMatch,
         { $match: { vendor_id: { $ne: null } } },
-        { $group: { _id: '$vendor_id', total: { $sum: 1 }, listings: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, 1, 0] } }, qc_approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, 1, 0] } }, qc_rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, 1, 0] } }, products: { $addToSet: '$product_name' } } },
+        { $group: { _id: '$vendor_id', total: { $sum: BULK_SUM }, listings: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, 1, 0] } }, qc_approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, BULK_SUM, 0] } }, qc_rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, BULK_SUM, 0] } }, products: { $addToSet: '$product_name' } } },
         { $addFields: { product_count: { $size: '$products' } } },
         { $sort: { total: -1 } },
         { $limit: 10 }
       ]),
-      ExtensionEvent.aggregate([baseMatch, { $group: { _id: { hour: { $hour: '$created_at' }, dow: { $dayOfWeek: '$created_at' } }, count: { $sum: 1 } } }, { $sort: { '_id.dow': 1, '_id.hour': 1 } }]),
+      ExtensionEvent.aggregate([baseMatch, { $group: { _id: { hour: { $hour: '$created_at' }, dow: { $dayOfWeek: '$created_at' } }, count: { $sum: BULK_SUM } } }, { $sort: { '_id.dow': 1, '_id.hour': 1 } }]),
       ExtensionEvent.aggregate([
         baseMatch,
-        { $group: { _id: { user_id: '$user_id', event_type: '$event_type' }, count: { $sum: 1 } } },
+        { $group: { _id: { user_id: '$user_id', event_type: '$event_type' }, count: { $sum: BULK_SUM } } },
         { $lookup: { from: 'users', localField: '_id.user_id', foreignField: '_id', as: 'user' } },
         { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
         { $group: { _id: '$_id.user_id', user_name: { $first: '$user.name' }, user_team: { $first: '$user.team' }, events: { $push: { event_type: '$_id.event_type', count: '$count' } }, total: { $sum: '$count' } } },
@@ -835,7 +864,7 @@ exports.getMyStats = async (req, res) => {
     // Get user's own event counts
     const myEvents = await ExtensionEvent.aggregate([
       { $match: { user_id: userId, created_at: { $gte: todayStart, $lte: now } } },
-      { $group: { _id: '$event_type', count: { $sum: 1 } } }
+      { $group: { _id: '$event_type', count: { $sum: { $ifNull: ['$bulk_count', 1] } } } }
     ]);
 
     const myStats = { listing_created: 0, product_created: 0, product_updated: 0, qc_approved: 0, qc_rejected: 0, spec_added: 0, session_ended: 0 };
@@ -863,7 +892,7 @@ exports.getMyStats = async (req, res) => {
     // Get all team events for today
     const teamEvents = await ExtensionEvent.aggregate([
       { $match: { user_id: { $in: teamUserIds }, created_at: { $gte: todayStart, $lte: now } } },
-      { $group: { _id: { user_id: '$user_id', event_type: '$event_type' }, count: { $sum: 1 } } }
+      { $group: { _id: { user_id: '$user_id', event_type: '$event_type' }, count: { $sum: { $ifNull: ['$bulk_count', 1] } } } }
     ]);
 
     // Build leaderboard
@@ -984,7 +1013,7 @@ exports.getTeamPerformance = async (req, res) => {
         {
           $group: {
             _id: { user_id: '$user_id', date: { $dateToString: { format: '%Y-%m-%d', date: '$created_at' } } },
-            count: { $sum: 1 }
+            count: { $sum: { $ifNull: ['$bulk_count', 1] } }
           }
         },
         { $sort: { '_id.date': 1 } }
