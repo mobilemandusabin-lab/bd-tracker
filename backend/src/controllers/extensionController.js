@@ -363,9 +363,15 @@ exports.logActivity = async (req, res) => {
       }
     }
 
-    // Deduplicate: qc_pending recorded once, stays until manually removed
+    // Deduplicate: only the first qc_pending of the day is stored.
+    // Next day resets — the new first count replaces the old.
     if (event_type === 'qc_pending') {
-      const existing = await ExtensionEvent.findOne({ event_type: 'qc_pending' });
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const existing = await ExtensionEvent.findOne({
+        event_type: 'qc_pending',
+        created_at: { $gte: todayStart }
+      });
       if (existing) {
         return res.status(200).json({
           status: 'success',
@@ -374,7 +380,7 @@ exports.logActivity = async (req, res) => {
             event_type: 'qc_pending',
             pending_count: existing.pending_count,
             duplicate: true,
-            message: 'Already recorded — remove from DB to re-sync'
+            message: 'First pending count of the day already recorded'
           }
         });
       }

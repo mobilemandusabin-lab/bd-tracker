@@ -45,9 +45,9 @@
     },
     {
       method: 'GET',
-      pathRe: /^\/api\/quality-check\/products(\?.*)?$/,
+      pathRe: /^\/api\/quality-check\/products\/?(\?.*)?$/,
       event_type: 'qc_pending',
-      queryCheck: (url) => url.includes('qcStatus=pending')
+      queryCheck: (url) => /qcStatus=pending/i.test(url) || /[?&]status=pending/i.test(url)
     }
   ];
 
@@ -756,7 +756,12 @@
       if (method !== p.method) continue;
       if (!p.pathRe.test(path)) continue;
       if (p.excludeRe && p.excludeRe.test(path)) continue;
-      if (p.queryCheck && !p.queryCheck(url)) continue;
+      if (p.queryCheck && !p.queryCheck(url)) {
+        if (p.event_type === 'qc_pending') {
+          console.warn('[BD Tracker] ⚠️ QC path matched but queryCheck failed', { url, path, query: url.split('?')[1] });
+        }
+        continue;
+      }
       return p;
     }
     return null;
