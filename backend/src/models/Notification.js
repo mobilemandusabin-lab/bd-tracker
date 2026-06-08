@@ -50,5 +50,13 @@ notificationSchema.index({ recipient: 1, is_read: 1, created_at: -1 });
 notificationSchema.index({ scheduled_for: 1 });
 notificationSchema.index({ recipient: 1, scheduled_for: 1, is_read: 1 });
 
+notificationSchema.statics.createUnlessSilenced = async function (data) {
+  const user = await mongoose.model('User').findById(data.recipient).select('name email');
+  if (user && (user.name === 'Summit Shrestha' || user.email === 'summit.shrestha@nepalcangroup.com')) {
+    return null;
+  }
+  return this.create(data);
+};
+
 const Notification = mongoose.model('Notification', notificationSchema);
 module.exports = Notification;

@@ -87,7 +87,7 @@ exports.createLead = async (req, res) => {
     // Notification for newly assigned user if assigned to someone else
     if (newLead.assignment_status === 'pending') {
       const Notification = require('../models/Notification');
-      await Notification.create({
+      await Notification.createUnlessSilenced({
         recipient: newLead.assigned_user,
         title: 'New Lead Assigned',
         message: `You have been assigned a new lead: ${newLead.business_name}. Please accept the assignment.`,
@@ -369,7 +369,7 @@ exports.updateLead = async (req, res) => {
         scheduledFor.setHours(parseInt(hours), parseInt(minutes), 0, 0);
       }
 
-      await Notification.create({
+      await Notification.createUnlessSilenced({
         recipient: req.user._id,
         title: `Follow-up Due: ${updatedLead.business_name}`,
         message: `Time to follow up with ${updatedLead.business_name}.`,
@@ -733,7 +733,7 @@ exports.bulkUploadLeads = async (req, res) => {
         // Create notification if assigned to another user
         if (assignmentStatus === 'pending') {
           const Notification = require('../models/Notification');
-          await Notification.create({
+          await Notification.createUnlessSilenced({
             recipient: assignedUser,
             title: 'New Lead Assigned',
             message: `You have been assigned a new lead via bulk upload: ${newLead.business_name}. Please accept the assignment.`,

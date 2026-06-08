@@ -88,7 +88,7 @@ exports.createActivity = async (req, res) => {
         }
       }
 
-      await Notification.create({
+      await Notification.createUnlessSilenced({
         recipient: req.user._id,
         title: `Follow-up Required: ${activity.description.slice(0, 20)}...`,
         message: `Scheduled follow-up for lead: ${activity.description}`,

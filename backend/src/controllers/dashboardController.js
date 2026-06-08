@@ -815,7 +815,7 @@ exports.bulkUploadLeads = async (req, res) => {
             scheduledFor.setHours(parseInt(hours), parseInt(minutes), 0, 0);
           }
 
-          await Notification.create({
+          await Notification.createUnlessSilenced({
             recipient: assigned_user,
             title: `Follow-up: ${newLead.business_name}`,
             message: `Bulk uploaded follow-up for ${newLead.business_name}`,
@@ -828,7 +828,7 @@ exports.bulkUploadLeads = async (req, res) => {
 
         // Assignment Notification (Always notify if assigned to someone else)
         if (assigned_user && assigned_user.toString() !== req.user._id.toString()) {
-          await Notification.create({
+          await Notification.createUnlessSilenced({
             recipient: assigned_user,
             title: 'New Lead Directly Assigned',
             message: `Lead directly assigned via bulk upload: ${newLead.business_name}`,

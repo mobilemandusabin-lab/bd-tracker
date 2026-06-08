@@ -34,7 +34,7 @@ const checkOverdueFollowups = async () => {
       await followup.save();
 
       // Notify the assigned user
-      await Notification.create({
+      await Notification.createUnlessSilenced({
         recipient: followup.user_id._id,
         title: 'Overdue Follow-up',
         message: `Follow-up for ${followup.lead_id?.business_name || 'Unknown Lead'} is overdue!`,
@@ -55,7 +55,7 @@ const checkOverdueFollowups = async () => {
         });
 
         for (const manager of managers) {
-          await Notification.create({
+          await Notification.createUnlessSilenced({
             recipient: manager._id,
             title: 'Critical: Overdue Follow-up',
             message: `${followup.user_id.name} has a follow-up overdue by ${Math.floor(overdueTime / twentyFourHours)} day(s) for ${followup.lead_id?.business_name}`,
@@ -110,7 +110,7 @@ const checkEscalationTriggers = async () => {
       });
 
       for (const manager of managers) {
-        await Notification.create({
+        await Notification.createUnlessSilenced({
           recipient: manager._id,
           title: 'Escalation Alert',
           message: `User has ${count} overdue follow-ups. Immediate attention required.`,

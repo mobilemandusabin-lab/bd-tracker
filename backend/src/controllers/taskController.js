@@ -208,7 +208,7 @@ exports.createTask = async (req, res) => {
 
     // Create notification for assigned user
     if (task.assigned_to) {
-      await Notification.create({
+      await Notification.createUnlessSilenced({
         recipient: task.assigned_to._id || task.assigned_to,
         title: 'New Task Assigned',
         message: `You have been assigned a new task: ${task.title}`,
@@ -296,7 +296,7 @@ exports.updateTask = async (req, res) => {
       
       // Notify the creator (assigner) if they are different from the updater
       if (task.created_by && (task.created_by._id || task.created_by).toString() !== userId.toString()) {
-        await Notification.create({
+        await Notification.createUnlessSilenced({
           recipient: task.created_by._id || task.created_by,
           title: `Task ${status}`,
           message: `${statusMessages[status]}: ${task.title}`,

@@ -23,7 +23,7 @@ const checkAndCreateOverdueNotifications = async () => {
       followup.status = 'overdue';
       await followup.save();
 
-      await Notification.create({
+      await Notification.createUnlessSilenced({
         recipient: followup.user_id._id,
         title: 'Overdue Follow-up',
         message: `Follow-up for ${followup.lead_id?.business_name || 'Unknown Lead'} is overdue!`,
