@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Edit, Trash2, Save, X, ChevronUp, ChevronDown, ChevronRight, Cog, Layers, RefreshCw, Loader2, MapPin, Store } from 'lucide-react';
 import { cn } from '../utils/cn';
+import { API_URL } from '../config/api';
 
 const PipelineSettingsPage = () => {
   const [stages, setStages] = useState([]);
@@ -22,7 +23,7 @@ const PipelineSettingsPage = () => {
   const fetchStages = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/v1/settings/pipeline', { headers });
+      const res = await fetch(`${API_URL}/settings/pipeline`, { headers });
       const data = await res.json();
       setStages(data.data.stages || []);
     } catch (err) { console.error('Error fetching stages:', err); }
@@ -32,7 +33,7 @@ const PipelineSettingsPage = () => {
   const fetchZoneGroups = async () => {
     setZonesLoading(true);
     try {
-      const res = await fetch('/api/v1/delivery-zones', { headers });
+      const res = await fetch(`${API_URL}/delivery-zones`, { headers });
       const data = await res.json();
       setZoneGroups(data.data.groups || []);
     } catch (err) { console.error('Error fetching zone groups:', err); }
@@ -42,7 +43,7 @@ const PipelineSettingsPage = () => {
   const syncZoneGroups = async () => {
     setSyncing(true);
     try {
-      const res = await fetch('/api/v1/delivery-zones/sync', {
+      const res = await fetch(`${API_URL}/delivery-zones/sync`, {
         method: 'POST',
         headers: { ...headers, 'Content-Type': 'application/json' }
       });
@@ -78,7 +79,7 @@ const PipelineSettingsPage = () => {
     setStages(orderedStages);
     try {
       const stagesToUpdate = newCategoryStages.map((s, idx) => ({ _id: s._id, category: s.category, order: idx + 1 }));
-      await fetch('/api/v1/settings/pipeline/reorder', {
+      await fetch(`${API_URL}/settings/pipeline/reorder`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...headers },
         body: JSON.stringify({ stages: stagesToUpdate })
@@ -90,7 +91,7 @@ const PipelineSettingsPage = () => {
     e.preventDefault();
     const categoryStages = stages.filter(s => s.category === newStage.category);
     try {
-      const res = await fetch('/api/v1/settings/pipeline', {
+      const res = await fetch(`${API_URL}/settings/pipeline`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...headers },
         body: JSON.stringify({ ...newStage, order: categoryStages.length + 1 })
@@ -104,7 +105,7 @@ const PipelineSettingsPage = () => {
 
   const handleUpdate = async (id, updates) => {
     try {
-      await fetch(`/api/v1/settings/pipeline/${id}`, {
+      await fetch(`${API_URL}/settings/pipeline/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...headers },
         body: JSON.stringify(updates)
@@ -117,7 +118,7 @@ const PipelineSettingsPage = () => {
   const handleDelete = async (id) => {
     if (!confirm('Delete this stage?')) return;
     try {
-      await fetch(`/api/v1/settings/pipeline/${id}`, {
+      await fetch(`${API_URL}/settings/pipeline/${id}`, {
         method: 'DELETE',
         headers
       });
