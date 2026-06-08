@@ -4,6 +4,7 @@ const morganBody = require('morgan-body');
 const helmet = require('helmet');
 const cors = require('cors');
 const compression = require('compression');
+const mongoose = require('mongoose');
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const leadRoutes = require('./routes/leadRoutes');
@@ -63,6 +64,24 @@ app.use(helmet({
 }));
 app.use(cors(corsOptions));
 app.use(express.json());
+
+// Connection-ready middleware — ensures MongoDB is connected before any
+// route handler runs. On Vercel cold starts, connectDB() (fired from
+// server.js at module load time) may still be completing when the first
+// request arrives. Without this guard, Mongoose buffers queries for 10s
+// (default bufferTimeoutMS), which exceeds Vercel Hobby's 10s function
+// timeout and returns a 500. We poll for up to 14s and fail fast with a
+// friendly 503 instead.
+app.use(async (req, res, next) => {
+  if (mongoose.connection.readyState === 1) return next();
+  const deadline = Date.now() + 14000;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 100));
+    if (mongoose.connection.readyState === 1) return next();
+  }
+  console.error('[App] MongoDB not connected within 14s');
+  res.status(503).json({ status: 'fail', message: 'Database connection timed out, please retry' });
+});
 
 // Enhanced API logging
 if (process.env.NODE_ENV === 'development') {

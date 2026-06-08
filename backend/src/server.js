@@ -3,7 +3,10 @@ const path = require('path');
 const connectDB = require('./config/db');
 
 dotenv.config({ path: path.join(__dirname, '../.env') });
-connectDB();
+connectDB().catch(err => {
+  console.error('[Server] connectDB failed:', err.message);
+  process.exit(1);
+});
 
 const app = require('./app');
 const seedPipelineStages = require('./services/pipelineStageSeeder');
