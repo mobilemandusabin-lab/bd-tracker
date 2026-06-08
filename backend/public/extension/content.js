@@ -919,21 +919,23 @@
     // of approved products. The backend stores bulk_count and uses it in
     // analytics aggregations: { $sum: { $ifNull: ['$bulk_count', 1] } }.
     // This means a single row with bulk_count=3 contributes 3 to the total.
-    const approvedCount = (d && typeof d.approved === 'number') ? d.approved : 0;
-    if (approvedCount === 0) return;
+    const isApprove = eventType === 'qc_approved';
+    const countKey = isApprove ? 'approved' : 'rejected';
+    const bulkCount = (d && typeof d[countKey] === 'number') ? d[countKey] : 0;
+    if (bulkCount === 0) return;
 
     console.log('[BD Tracker] detect → qc_bulk', {
       type: eventType,
-      responseApproved: approvedCount,
+      responseCount: bulkCount,
       totalRequested: d?.totalRequested,
-      alreadyApproved: d?.alreadyApproved
+      alreadyRejected: d?.alreadyRejected
     });
 
     const data = {
       product_id: null,
-      qc_status: eventType === 'qc_approved' ? 'approved' : 'rejected',
+      qc_status: isApprove ? 'approved' : 'rejected',
       bulk: true,
-      bulk_count: approvedCount,
+      bulk_count: bulkCount,
       product_ids: null,
       vendor_updated_at: d?.updatedAt || null,
       url: getPath(url),
