@@ -226,6 +226,7 @@ async function handleEvent(message) {
         product_sku: data.product_sku,
         qc_status: data.qc_status,
         pending_count: data.pending_count,
+        bulk_count: data.bulk_count,
         metadata: {
           ...data,
           // Include session context in metadata
