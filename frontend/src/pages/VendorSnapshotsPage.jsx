@@ -16,7 +16,7 @@ function formatCountdown(ms) {
   return { days, hours, minutes, seconds };
 }
 
-function CountdownDisplay({ targetDate, label }) {
+function CountdownDisplay({ targetDate, label, light }) {
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -28,8 +28,12 @@ function CountdownDisplay({ targetDate, label }) {
   const { days, hours, minutes, seconds } = formatCountdown(msLeft);
   const isDue = msLeft <= 3600000 && msLeft > 0;
 
+  const colorClass = light
+    ? (isDue ? 'text-yellow-200' : 'text-red-100')
+    : (isDue ? 'text-amber-600' : 'text-slate-400');
+
   return (
-    <div className={`flex items-center gap-1.5 ${isDue ? 'text-amber-600' : 'text-slate-400'}`}>
+    <div className={`flex items-center gap-1.5 ${colorClass}`}>
       <Clock size={11} />
       <span className="text-[10px] font-semibold">{label}:</span>
       <span className="text-[11px] font-bold tabular-nums">
@@ -181,10 +185,10 @@ export default function VendorSnapshotsPage({ embedded }) {
                 </p>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
                   {nextSchedule.weekly?.targetDate && (
-                    <CountdownDisplay targetDate={nextSchedule.weekly.targetDate} label="Auto weekly" />
+                    <CountdownDisplay targetDate={nextSchedule.weekly.targetDate} label="Auto weekly" light />
                   )}
                   {nextSchedule.monthly?.targetDate && (
-                    <CountdownDisplay targetDate={nextSchedule.monthly.targetDate} label="Auto monthly" />
+                    <CountdownDisplay targetDate={nextSchedule.monthly.targetDate} label="Auto monthly" light />
                   )}
                 </div>
                 {latest && (
