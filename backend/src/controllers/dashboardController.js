@@ -9,6 +9,19 @@ const User = require('../models/User');
 
 exports.getStats = async (req, res) => {
   try {
+    const pipelineOrder = [
+      'New',
+      'Contacted',
+      'Interested',
+      'Document Pending',
+      'Activated',
+      'Active Seller',
+      'Lost',
+      'Self Registered',
+      'Nepalcan',
+      'Proposal Dropped'
+    ];
+
     const [leadFacet, totalLeads, totalVendors, verifiedVendors, activeSellers, pendingTasks, pendingFollowups] = await Promise.all([
       Lead.aggregate([
         {
@@ -30,6 +43,14 @@ exports.getStats = async (req, res) => {
     ]);
 
     const facet = leadFacet[0] || {};
+    const leadStats = (facet.byStatus || []).sort((a, b) => {
+      const idxA = pipelineOrder.indexOf(a._id);
+      const idxB = pipelineOrder.indexOf(b._id);
+      if (idxA === -1 && idxB === -1) return 0;
+      if (idxA === -1) return 1;
+      if (idxB === -1) return -1;
+      return idxA - idxB;
+    });
 
     res.status(200).json({
       status: 'success',
@@ -42,7 +63,7 @@ exports.getStats = async (req, res) => {
           pendingTasks,
           pendingFollowups
         },
-        leadStats: facet.byStatus || [],
+        leadStats,
         onboardingStats: facet.byOnboarding || [],
         __userRole: req.user.role
       }
