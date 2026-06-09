@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { useSelector } from 'react-redux';
+import { motion, useAnimation } from 'framer-motion';
 import {
   Users,
   UserCheck,
@@ -54,38 +55,33 @@ const CustomTooltip = ({ active, payload, label }) => {
   );
 };
 
-const StatCard = ({ title, value, icon: Icon, trend, color, subValue, accent }) => {
-  const colorMap = {
-    red: { icon: 'bg-gradient-to-br from-red-500 to-red-600', text: 'text-red-600', accent: 'border-l-red-500' },
-    emerald: { icon: 'bg-gradient-to-br from-emerald-500 to-emerald-600', text: 'text-emerald-600', accent: 'border-l-emerald-500' },
-    blue: { icon: 'bg-gradient-to-br from-blue-500 to-blue-600', text: 'text-blue-600', accent: 'border-l-blue-500' },
-    amber: { icon: 'bg-gradient-to-br from-amber-500 to-amber-600', text: 'text-amber-600', accent: 'border-l-amber-500' },
-    green: { icon: 'bg-gradient-to-br from-green-500 to-green-600', text: 'text-green-600', accent: 'border-l-green-500' },
-  };
-  const c = colorMap[color] || colorMap.red;
-
+const StatCard = ({ title, value, icon: Icon, trend, subValue, index = 0 }) => {
   return (
-    <div className={`relative bg-white p-4 lg:p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-xl transition-all duration-300 group ${accent ? c.accent + ' border-l-4' : ''} overflow-hidden`}>
-      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
-      <div className="flex items-center justify-between mb-3 relative z-10">
-        <div className={`p-3 ${c.icon} rounded-2xl shadow-lg shadow-primary/20 group-hover:scale-105 transition-transform duration-300 flex items-center justify-center`}>
-          <Icon size={20} className="text-white drop-shadow-sm" />
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ type: 'spring', stiffness: 200, damping: 25, delay: index * 0.06 }}
+      className="relative bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 group p-3 overflow-hidden"
+    >
+      <div className="flex items-start justify-between mb-1.5">
+        <div className="p-2 bg-gradient-to-br from-red-500 to-red-600 rounded-xl shadow-sm group-hover:scale-105 transition-transform duration-200 flex items-center justify-center">
+          <Icon size={15} className="text-white" />
         </div>
         {trend && (
-          <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-0.5 bg-emerald-50 px-2 py-1 rounded-full">
-            <ArrowUpRight size={10} /> {trend}
+          <span className="text-[9px] font-bold text-red-600 flex items-center gap-0.5 bg-red-50 px-1.5 py-0.5 rounded-full">
+            <ArrowUpRight size={8} /> {trend}
           </span>
         )}
       </div>
-      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 relative z-10">{title}</p>
-      <h3 className="text-2xl lg:text-3xl font-black text-slate-900 mt-1 relative z-10">{value}</h3>
+      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{title}</p>
+      <h3 className="text-lg font-black text-slate-900 mt-0.5">{value.toLocaleString()}</h3>
       {subValue && (
-        <p className="text-[11px] font-medium text-slate-500 mt-2 relative z-10 flex items-center gap-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-current" />
+        <p className="text-[10px] font-medium text-slate-500 mt-1 flex items-center gap-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-red-400 inline-block shrink-0" />
           {subValue}
         </p>
       )}
-    </div>
+    </motion.div>
   );
 };
 
@@ -355,14 +351,14 @@ const DashboardPage = () => {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-5">
-        <StatCard title="Total Leads" value={stats.summary.totalLeads} icon={Users} color="red" trend="12.5%" accent />
-        <StatCard title="Total Vendors" value={stats.summary.totalVendors ?? 0} icon={Store} color="blue" 
-          subValue={stats.summary.totalVendors > 0 ? `${Math.round((stats.summary.verifiedVendors / stats.summary.totalVendors) * 100)}% verified` : '0% verified'} accent />
-        <StatCard title="Verified Vendors" value={stats.summary.verifiedVendors ?? 0} icon={ShieldCheck} color="emerald" 
-          subValue={stats.summary.totalVendors > 0 ? `${stats.summary.activeSellers} active sellers` : '0 active'} accent />
-        <StatCard title="Active Sellers" value={stats.summary.activeSellers} icon={UserCheck} color="green" trend="8.2%" accent />
-        <StatCard title="Pending Tasks" value={stats.summary.pendingTasks} icon={ClipboardList} color="blue" trend="24.1%" />
-        <StatCard title="Pending Follow-ups" value={stats.summary.pendingFollowups} icon={Clock} color="amber" />
+        <StatCard title="Total Leads" value={stats.summary.totalLeads} icon={Users} trend="12.5%" index={0} />
+        <StatCard title="Total Vendors" value={stats.summary.totalVendors ?? 0} icon={Store} 
+          subValue={stats.summary.totalVendors > 0 ? `${Math.round((stats.summary.verifiedVendors / stats.summary.totalVendors) * 100)}% verified` : '0% verified'} index={1} />
+        <StatCard title="Verified Vendors" value={stats.summary.verifiedVendors ?? 0} icon={ShieldCheck} 
+          subValue={stats.summary.totalVendors > 0 ? `${stats.summary.activeSellers} active sellers` : '0 active'} index={2} />
+        <StatCard title="Active Sellers" value={stats.summary.activeSellers} icon={UserCheck} trend="8.2%" index={3} />
+        <StatCard title="Pending Tasks" value={stats.summary.pendingTasks} icon={ClipboardList} trend="24.1%" index={4} />
+        <StatCard title="Pending Follow-ups" value={stats.summary.pendingFollowups} icon={Clock} index={5} />
       </div>
 
       {/* Charts */}
