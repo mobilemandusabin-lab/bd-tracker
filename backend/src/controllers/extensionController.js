@@ -657,6 +657,12 @@ exports.getAnalytics = async (req, res) => {
           { $sort: { created_at: -1 } },
           { $limit: 1 },
           { $project: { _id: 0, pending_count: 1 } }
+        ],
+        userSessions: [
+          { $sort: { user_id: 1, created_at: 1 } },
+          { $group: { _id: '$user_id', events: { $push: { type: '$event_type', time: '$created_at' } } } },
+          { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'user' } },
+          { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } }
         ]
       } }
     ]);
@@ -669,9 +675,9 @@ exports.getAnalytics = async (req, res) => {
     const eventsByUser = facetResult.eventsByUser || [];
     const recentEvents = facetResult.recentEvents || [];
     const latestPendingCount = (facetResult.latestPending || [])[0]?.pending_count ?? null;
+    const userSessions = facetResult.userSessions || [];
 
     const dailyPendingCounts = []; // Folded into latestPendingCount
-    const userSessions = []; // Session reconstruction was an over-engineered feature; skip until needed
 
     // Derive qcStats (approved/rejected) from eventsByType — bulk/individual
     // breakdown is in the summary's metadata but the frontend only needs the
