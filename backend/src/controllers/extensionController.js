@@ -677,12 +677,12 @@ exports.getAnalytics = async (req, res) => {
     // breakdown is in the summary's metadata but the frontend only needs the
     // totals for the approval-rate widget.
     const findCount = (id) => (eventsByType.find(x => x._id === id) || {}).count || 0;
-    const qcStats = [{
+    const qcStats = {
       approved: findCount('qc_approved'),
       rejected: findCount('qc_rejected'),
       bulk_approved: 0, bulk_rejected: 0,
       individual_approved: 0, individual_rejected: 0
-    }];
+    };
 
     // Lookup vendor names from Leads (depends on topVendorsRaw)
     const vendorIds = topVendorsRaw.map(v => v._id).filter(Boolean);

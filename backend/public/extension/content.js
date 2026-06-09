@@ -664,6 +664,7 @@
       qc_status: d.qcStatus || null,
       product_sku: d.productSku || b.productSku || null,
       vendor_updated_at: d.updatedAt || b.updatedAt || null,
+      bulk_count: typeof d.bulk_count === 'number' ? d.bulk_count : null,
       categoryComplianceDetails: b.categoryComplianceDetails || d.categoryComplianceDetails || b.productComplianceDetails || d.productComplianceDetails || null
     };
   }
