@@ -19,7 +19,9 @@ import {
   XCircle,
   ChevronDown,
   ChevronUp,
-  Loader2
+  Loader2,
+  Store,
+  ShieldCheck
 } from 'lucide-react';
 import {
   BarChart,
@@ -344,9 +346,11 @@ const DashboardPage = () => {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-5">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-5">
         <StatCard title="Total Leads" value={stats.summary.totalLeads} icon={Users} color="red" trend="12.5%" />
-        <StatCard title="Active Sellers" value={stats.summary.activeSellers} icon={UserCheck} color="emerald" trend="8.2%" />
+        <StatCard title="Total Vendors" value={stats.summary.totalVendors ?? 0} icon={Store} color="blue" />
+        <StatCard title="Verified Vendors" value={stats.summary.verifiedVendors ?? 0} icon={ShieldCheck} color="emerald" />
+        <StatCard title="Active Sellers" value={stats.summary.activeSellers} icon={UserCheck} color="green" trend="8.2%" />
         <StatCard title="Pending Tasks" value={stats.summary.pendingTasks} icon={ClipboardList} color="blue" trend="24.1%" />
         <StatCard title="Pending Follow-ups" value={stats.summary.pendingFollowups} icon={Clock} color="amber" />
       </div>

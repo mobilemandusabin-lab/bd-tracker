@@ -9,7 +9,7 @@ const User = require('../models/User');
 
 exports.getStats = async (req, res) => {
   try {
-    const [leadFacet, totalLeads, activeSellers, pendingTasks, pendingFollowups] = await Promise.all([
+    const [leadFacet, totalLeads, totalVendors, verifiedVendors, activeSellers, pendingTasks, pendingFollowups] = await Promise.all([
       Lead.aggregate([
         {
           $facet: {
@@ -22,6 +22,8 @@ exports.getStats = async (req, res) => {
         }
       ]),
       Lead.countDocuments(),
+      Lead.countDocuments({ type: 'vendor' }),
+      Lead.countDocuments({ type: 'vendor', $or: [{ is_verified: true }, { verification_status: 'verified' }] }),
       Lead.countDocuments({ lead_status: 'Active Seller' }),
       Task.countDocuments({ status: 'pending' }),
       Activity.countDocuments({ follow_up_required: true, status: 'pending' })
@@ -34,6 +36,8 @@ exports.getStats = async (req, res) => {
       data: {
         summary: {
           totalLeads,
+          totalVendors,
+          verifiedVendors,
           activeSellers,
           pendingTasks,
           pendingFollowups
