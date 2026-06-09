@@ -8,7 +8,8 @@ import {
   ShoppingBag, Cog, Store, Package, ChevronRight, Puzzle, Activity, Award, DollarSign
 } from 'lucide-react';
 import { cn } from '../utils/cn';
-import NotificationBell from '../components/NotificationBell';
+import { NotificationProvider } from '../components/NotificationPoller';
+import NotificationBellIcon from '../components/NotificationBellIcon';
 
 const SidebarLink = ({ to, icon: Icon, label, onClick }) => {
   const location = useLocation();
@@ -126,7 +127,8 @@ const Layout = () => {
   ];
 
   return (
-    <div className="flex h-dvh bg-[#fafafa] overflow-hidden">
+    <NotificationProvider token={token}>
+      <div className="flex h-dvh bg-[#fafafa] overflow-hidden">
       {/* Mobile Header */}
       <header className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-white border-b border-slate-100 z-[300] flex items-center justify-between px-4">
         <div className="flex items-center gap-2">
@@ -138,7 +140,7 @@ const Layout = () => {
           </h1>
         </div>
         <div className="flex items-center gap-3">
-          <NotificationBell token={token} />
+          <NotificationBellIcon />
           <button
             onClick={toggleMobileMenu}
             className="p-2 text-slate-500 hover:bg-slate-50 rounded-xl transition-all"
@@ -229,14 +231,14 @@ const Layout = () => {
         {/* Desktop Header */}
         <header className="hidden lg:flex h-14 items-center justify-between px-8 border-b border-slate-100 bg-white/80 backdrop-blur-md shrink-0 relative z-[300]">
           <div />
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-              <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-              <span>Secure Session</span>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                <span>Secure Session</span>
+              </div>
+              <div className="w-px h-5 bg-slate-100" />
+              <NotificationBellIcon />
             </div>
-            <div className="w-px h-5 bg-slate-100" />
-            <NotificationBell token={token} />
-          </div>
         </header>
 
         {/* Page Content */}
@@ -247,6 +249,7 @@ const Layout = () => {
         </div>
       </main>
     </div>
+    </NotificationProvider>
   );
 };
 
