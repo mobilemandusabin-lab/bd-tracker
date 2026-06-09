@@ -761,103 +761,125 @@ console.log(`[Nepalcan Vendor Sync] Total vendors to process: ${allVendors.lengt
         const productCountFromAPI = activeMarketplaceProductCount || productCount || activeProductsCount || 0;
         console.log(`[Sync Vendor] ${name}: activeMarketplaceProductCount=${activeMarketplaceProductCount}, productCount=${productCount}, activeProductsCount=${activeProductsCount}`);
 
-        const existingLead = await Lead.findOne({
-          $or: [
-            { nepalcanId: _id },
-            { email: email },
-            { phone: phone },
-            { business_name: { $regex: `^${name}$`, $options: 'i' } }
-          ]
-        });
-
-const leadData = {
-             business_name: name,
-             contact_person: name,
-             email: email || 'TBD',
-             phone: phone || 'TBD',
-             location: address || 'TBD',
-             lead_source: 'Nepalcan',
-             expected_product_count: productCountFromAPI,
-             nepalcanId: _id,
-             type: 'vendor',
-             is_verified: isVerified,
-             verification_status: isVerified ? 'verified' : 'pending',
-             onboarding_stage: isVerified ? 'seller_activated' : 'documents_pending',
-             activation_status: isVerified ? 'active' : 'inactive',
-             lead_status: isVerified ? 'Activated' : 'Document Pending',
-             rawData: {
-               canId: canId?.canId,
-               slug,
-               createdAt,
-               updatedAt,
-               address
-             }
-           };
-
-        if (existingLead) {
-          const previousNepalcanStatus = existingLead.last_nepalcan_status;
-          const newNepalcanStatus = leadData.lead_status;
-
-          // Never downgrade from 'Active Seller' to 'Activated' — aggregation handles the upgrade
-          if (existingLead.lead_status === 'Active Seller' && newNepalcanStatus === 'Activated') {
-            // Only update non-status fields, keep Active Seller status
-            existingLead.business_name = leadData.business_name;
-            existingLead.contact_person = leadData.contact_person;
-            existingLead.email = leadData.email;
-            existingLead.phone = leadData.phone;
-            existingLead.location = leadData.location;
-            existingLead.expected_product_count = leadData.expected_product_count;
-            existingLead.is_verified = leadData.is_verified;
-            existingLead.verification_status = leadData.verification_status;
-            existingLead.onboarding_stage = leadData.onboarding_stage;
-            existingLead.activation_status = leadData.activation_status;
-            if (!existingLead.nepalcanId) existingLead.nepalcanId = _id;
-            existingLead.last_nepalcan_status = newNepalcanStatus;
-            await existingLead.save();
-            updated++;
-            continue;
+        const leadData = {
+          business_name: name,
+          contact_person: name,
+          email: email || 'TBD',
+          phone: phone || 'TBD',
+          location: address || 'TBD',
+          lead_source: 'Nepalcan',
+          expected_product_count: productCountFromAPI,
+          nepalcanId: _id,
+          type: 'vendor',
+          is_verified: isVerified,
+          verification_status: isVerified ? 'verified' : 'pending',
+          onboarding_stage: isVerified ? 'seller_activated' : 'documents_pending',
+          activation_status: isVerified ? 'active' : 'inactive',
+          lead_status: isVerified ? 'Activated' : 'Document Pending',
+          rawData: {
+            canId: canId?.canId,
+            slug,
+            createdAt,
+            updatedAt,
+            address
           }
+        };
 
-          Object.assign(existingLead, leadData);
-          if (!existingLead.nepalcanId) existingLead.nepalcanId = _id;
-          existingLead.last_nepalcan_status = newNepalcanStatus;
-          // Track activation date — only when transitioning from a known prior status (not first sync)
-          if (previousNepalcanStatus && newNepalcanStatus === 'Activated' && previousNepalcanStatus !== 'Activated') {
-            if (!existingLead.converted_at) existingLead.converted_at = new Date();
-          }
-          await existingLead.save();
+        try {
+          const existingLead = await Lead.findOne({ nepalcanId: _id });
+          
+          if (existingLead) {
+            const previousNepalcanStatus = existingLead.last_nepalcan_status;
+            const newNepalcanStatus = leadData.lead_status;
 
-          // Only log activity if Nepalcan's own status changed (not our internal lead_status)
-          if (previousNepalcanStatus && previousNepalcanStatus !== newNepalcanStatus) {
-            const Activity = require('../models/Activity');
-            const syncUserId = userId || (await getDefaultSyncUser())?._id;
-            if (syncUserId) {
-              await Activity.create({
-                lead_id: existingLead._id,
-                user_id: syncUserId,
-                activity_type: 'status_change',
-                description: `Pipeline changed (sync): ${previousNepalcanStatus} → ${newNepalcanStatus}`,
-                status: 'completed'
-              });
+            // Never downgrade from 'Active Seller' to 'Activated' — aggregation handles the upgrade
+            if (existingLead.lead_status === 'Active Seller' && newNepalcanStatus === 'Activated') {
+              // Only update non-status fields, keep Active Seller status
+              existingLead.business_name = leadData.business_name;
+              existingLead.contact_person = leadData.contact_person;
+              existingLead.email = leadData.email;
+              existingLead.phone = leadData.phone;
+              existingLead.location = leadData.location;
+              existingLead.expected_product_count = leadData.expected_product_count;
+              existingLead.is_verified = leadData.is_verified;
+              existingLead.verification_status = leadData.verification_status;
+              existingLead.onboarding_stage = leadData.onboarding_stage;
+              existingLead.activation_status = leadData.activation_status;
+              existingLead.last_nepalcan_status = newNepalcanStatus;
+              await existingLead.save();
+              updated++;
+              synced++;
+              continue;
             }
-          }
 
-          updated++;
-          console.log(`[Sync Vendor] Updated lead ${name}`);
-        } else {
-          const creatorId = userId || (await getDefaultSyncUser())?._id;
-          leadData.creator_id = creatorId;
-          leadData.last_nepalcan_status = leadData.lead_status;
-          if (leadData.lead_status === 'Activated') {
-            leadData.converted_at = new Date();
-          }
+            Object.assign(existingLead, leadData);
+            existingLead.last_nepalcan_status = newNepalcanStatus;
+            // Track activation date — only when transitioning from a known prior status (not first sync)
+            if (previousNepalcanStatus && newNepalcanStatus === 'Activated' && previousNepalcanStatus !== 'Activated') {
+              if (!existingLead.converted_at) existingLead.converted_at = new Date();
+            }
+            await existingLead.save();
 
-          const newLead = new Lead(leadData);
-          await newLead.save();
-          created++;
-          console.log(`[Sync Vendor] Created lead ${name}`);
+            // Only log activity if Nepalcan's own status changed (not our internal lead_status)
+            if (previousNepalcanStatus && previousNepalcanStatus !== newNepalcanStatus) {
+              const Activity = require('../models/Activity');
+              const syncUserId = userId || (await getDefaultSyncUser())?._id;
+              if (syncUserId) {
+                await Activity.create({
+                  lead_id: existingLead._id,
+                  user_id: syncUserId,
+                  activity_type: 'status_change',
+                  description: `Pipeline changed (sync): ${previousNepalcanStatus} → ${newNepalcanStatus}`,
+                  status: 'completed'
+                });
+              }
+            }
+
+            updated++;
+            synced++;
+            console.log(`[Sync Vendor] Updated lead ${name}`);
+          } else {
+            // Use upsert with nepalcanId to avoid duplicate key race conditions
+            const creatorId = userId || (await getDefaultSyncUser())?._id;
+            const upsertData = {
+              ...leadData,
+              creator_id: creatorId,
+              last_nepalcan_status: leadData.lead_status
+            };
+            if (upsertData.lead_status === 'Activated') {
+              upsertData.converted_at = new Date();
+            }
+
+            await Lead.findOneAndUpdate(
+              { nepalcanId: _id },
+              { $set: upsertData },
+              { upsert: true, new: true, setDefaultsOnInsert: true }
+            );
+            created++;
+            synced++;
+            console.log(`[Sync Vendor] Upserted lead ${name}`);
+          }
+        } catch (err) {
+          // Handle duplicate key error for edge cases (e.g. concurrent upsert or matched by email/phone)
+          if (err.code === 11000 && err.keyPattern?.nepalcanId) {
+            console.warn(`[Sync Vendor] Duplicate nepalcanId for ${name}, retrying with find+update`);
+            // Find by nepalcanId and update
+            const existingLead = await Lead.findOne({ nepalcanId: _id });
+            if (existingLead) {
+              Object.assign(existingLead, leadData);
+              existingLead.last_nepalcan_status = leadData.lead_status;
+              await existingLead.save();
+              updated++;
+              synced++;
+              console.log(`[Sync Vendor] Retried update for lead ${name}`);
+            } else {
+              // Extremely rare: another process created it between our check and upsert
+              console.error(`[Sync Vendor] Could not resolve duplicate for ${name}`);
+            }
+          } else {
+            throw err;
+          }
         }
-        synced++;
       }
 
 const durationMs = Date.now() - startTime;
