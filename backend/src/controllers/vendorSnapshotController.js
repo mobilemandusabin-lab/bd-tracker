@@ -1,6 +1,6 @@
 const VendorSnapshot = require('../models/VendorSnapshot');
 const { takeSnapshot } = require('../services/vendorSnapshotService');
-const { getNextSchedule } = require('../services/snapshotScheduler');
+const NepaliDate = require('nepali-date-converter').default;
 
 // GET /api/v1/vendor-snapshots
 exports.getSnapshots = async (req, res) => {
@@ -47,10 +47,52 @@ exports.getLatestSnapshot = async (req, res) => {
   }
 };
 
+function computeNextTargetDate(type) {
+  const now = new Date();
+  const bsNow = new NepaliDate(now);
+  let targetDate;
+
+  if (type === 'weekly') {
+    const daysUntilFriday = bsNow.getDay() === 5 ? 0 : (5 - bsNow.getDay() + 7) % 7;
+    targetDate = bsNow.toJsDate();
+    targetDate.setDate(targetDate.getDate() + daysUntilFriday);
+  } else {
+    let nextMonth = bsNow.getMonth() + 1;
+    let nextYear = bsNow.getYear();
+    if (nextMonth > 11) { nextMonth = 0; nextYear++; }
+    const firstOfNext = new NepaliDate(nextYear, nextMonth, 1);
+    targetDate = new Date(firstOfNext.toJsDate().getTime() - 86400000);
+  }
+
+  targetDate.setHours(23, 59, 59, 999);
+  if (targetDate.getTime() <= now.getTime()) {
+    if (type === 'weekly') {
+      targetDate.setDate(targetDate.getDate() + 7);
+    } else {
+      let nextMonth = bsNow.getMonth() + 2;
+      let nextYear = bsNow.getYear();
+      if (nextMonth > 11) { nextMonth -= 12; nextYear++; }
+      const firstOfNextNext = new NepaliDate(nextYear, nextMonth, 1);
+      targetDate = new Date(firstOfNextNext.toJsDate().getTime() - 86400000);
+      targetDate.setHours(23, 59, 59, 999);
+    }
+  }
+
+  return {
+    type,
+    targetDate: targetDate.toISOString(),
+    delayMs: targetDate.getTime() - now.getTime(),
+    scheduledAt: now.toISOString()
+  };
+}
+
 // GET /api/v1/vendor-snapshots/next-schedule
 exports.getNextSchedule = async (req, res) => {
   try {
-    const schedule = getNextSchedule();
+    const schedule = {
+      weekly: computeNextTargetDate('weekly'),
+      monthly: computeNextTargetDate('monthly')
+    };
     res.status(200).json({ status: 'success', data: schedule });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
