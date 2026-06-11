@@ -19,6 +19,14 @@ import ActiveSellersPage from './pages/ActiveSellersPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import BDTierPage from './pages/BDTierPage';
 import BDLeaderboardDetailPage from './pages/BDLeaderboardDetailPage';
+import ReportsPage from './pages/ReportsPage';
+import ReportFormPage from './pages/ReportFormPage';
+import ReportDetailPage from './pages/ReportDetailPage';
+import ReportHeadingsPage from './pages/ReportHeadingsPage';
+import DailyReportPage from './pages/DailyReportPage';
+import ListingSnapshotsPage from './pages/ListingSnapshotsPage';
+import VendorSnapshotsPage from './pages/VendorSnapshotsPage';
+import DepartmentsPage from './pages/DepartmentsPage';
 import ExtensionPage from './pages/ExtensionPage';
 import OperationsAnalyticsPage from './pages/OperationsAnalyticsPage';
 import OperationalGoalsPage from './pages/OperationalGoalsPage';
@@ -124,6 +132,15 @@ function App() {
                 <FinancePage />
               </ProtectedRoute>
             } />
+            <Route path="reports" element={<ReportsPage />} />
+            <Route path="reports/new" element={<ReportFormPage />} />
+            <Route path="reports/:id" element={<ReportDetailPage />} />
+            <Route path="reports/:id/edit" element={<ReportFormPage />} />
+            <Route path="reports/headings" element={<ReportHeadingsPage />} />
+            <Route path="reports/daily" element={<DailyReportPage />} />
+            <Route path="listing-snapshots" element={<ListingSnapshotsPage />} />
+            <Route path="vendor-snapshots" element={<VendorSnapshotsPage />} />
+            <Route path="departments" element={<DepartmentsPage />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

@@ -5,7 +5,7 @@ import { logout } from '../store/authSlice';
 import {
   LayoutDashboard, Users, UserCheck, ClipboardList, BarChart3, LogOut,
   ShieldCheck, Settings, Menu, X, Target, MessageSquare,
-  ShoppingBag, Cog, Store, Package, ChevronRight, Puzzle, Activity, Award, DollarSign
+  ShoppingBag, Cog, Store, Package, ChevronRight, Puzzle, Activity, Award, DollarSign, FileText, Camera, History, Calendar
 } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { NotificationProvider } from '../components/NotificationPoller';
@@ -107,6 +107,25 @@ const Layout = () => {
           : []),
         ...(hasPermission('pipeline.manage')
           ? [{ to: '/settings', icon: Cog, label: 'Settings' }]
+          : []),
+      ]
+    },
+    {
+      label: 'Reporting',
+      items: [
+        { to: '/reports', icon: FileText, label: 'Weekly Reports' },
+        { to: '/reports/headings', icon: FileText, label: 'Report Headings' },
+        { to: '/reports/daily', icon: Calendar, label: 'Daily Reports' },
+      ]
+    },
+    {
+      label: 'Snapshots',
+      items: [
+        ...(hasPermission('listing.snapshots')
+          ? [{ to: '/listing-snapshots', icon: Camera, label: 'Listing Snapshots' }]
+          : []),
+        ...(hasPermission('vendors.snapshots')
+          ? [{ to: '/vendor-snapshots', icon: History, label: 'Vendor Snapshots' }]
           : []),
       ]
     },
