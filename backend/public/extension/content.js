@@ -4,7 +4,7 @@
   // VERSION is the single source of truth for "is the new code active?".
   // Manifest version stays 1.0.12 — this build suffix lets you confirm in
   // the console which copy of the code is running without bumping manifest.
-  const VERSION = '1.0.12-bulkcnt';
+  const VERSION = '1.0.13';
   console.log(`[BD Tracker v${VERSION}] Content script loaded on ${window.location.hostname}`);
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -422,6 +422,8 @@
       this._readPresence(productId);
       if (!this._sessions[productId]) {
         const g = this._global[productId] || {};
+        const ctx = getContext(productId);
+        const initialHasSpecs = !!(ctx && ctx.has_specs);
         this._sessions[productId] = {
           product_id: productId,
           product_name: g.product_name || null,
@@ -433,7 +435,8 @@
           previous_state: g.previous_state || null,
           has_package_type: !!g.has_package_type,
           has_specs: !!g.has_specs,
-          spec_count: g.spec_count || 0,
+          initial_has_specs: initialHasSpecs,
+          spec_count: initialHasSpecs ? 1 : 0,
           total_views: g.total_views || 0,
           time_to_first_spec: g.time_to_first_spec || null,
           time_to_listing: g.time_to_listing || null,
@@ -464,7 +467,10 @@
 
       if (responseData?.product_name) s.product_name = responseData.product_name;
       if (hasPackageType(b) || hasPackageType(d)) s.has_package_type = true;
-      if (hasSpecValues(b) || hasSpecValues(d)) {
+
+      const hasSpecsInBodyOrResponse = hasSpecValues(b) || hasSpecValues(d);
+      const isNewSpecAddition = !s.initial_has_specs && !s.has_specs && hasSpecsInBodyOrResponse;
+      if (isNewSpecAddition) {
         s.has_specs = true;
         s.spec_count++;
       }
@@ -873,11 +879,21 @@
         console.log('[BD Tracker] detect → spec_added (before: no specs on listed product, after: has specs)');
         return 'spec_added';
       }
+      // Get persistent session state
+      const session = State.getSession(productId);
+      const initialHasSpecs = session?.initial_has_specs === true;
+
+      // Debug log for suppressed events
+      if (initialHasSpecs && (bodyHasSpecs || responseHasSpecs)) {
+        console.log('[BD Tracker] SUPPRESSED spec_added (initial_has_specs=true)', { productId });
+        return 'product_updated'; // Suppress spec_added, treat as regular update
+      }
+
       // 3. spec_added (no-ctx body fallback): the user is clearly adding
       //    specs (body has spec values, no pkg change). Trust the body's
       //    intent when we have no cached state to compare against.
-      if (!ctx && bodyHasSpecs && !bodyHasPkg) {
-        console.log('[BD Tracker] detect → spec_added (no ctx, body has specs, no pkg in body)');
+      if (!ctx && bodyHasSpecs && !bodyHasPkg && !initialHasSpecs) {
+        console.log('[BD Tracker] detect → spec_added (no ctx, body has specs, no pkg in body, initial specs false)');
         return 'spec_added';
       }
       // 4. listing_created (no-ctx body fallback): no cached state but the
@@ -889,16 +905,16 @@
       // 5. spec_added (body-fallback): cached state says listed and the
       //    body is adding spec values. Belt-and-suspenders for the case
       //    where the response didn't echo the spec values back.
-      if (bodyHasSpecs && ctxHasPkg) {
-        console.log('[BD Tracker] detect → spec_added (body has specs, ctx has pkg)');
+      if (bodyHasSpecs && ctxHasPkg && !initialHasSpecs) {
+        console.log('[BD Tracker] detect → spec_added (body has specs, ctx has pkg, initial specs false)');
         return 'spec_added';
       }
       // 6. spec_added (response-only): cached state says listed, response
       //    gained specs even though the body didn't show them (server
       //    filled in derived values, or the body shape didn't match the
       //    check).
-      if (responseHasSpecs && ctxHasPkg) {
-        console.log('[BD Tracker] detect → spec_added (response has specs, ctx has pkg)');
+      if (responseHasSpecs && ctxHasPkg && !initialHasSpecs) {
+        console.log('[BD Tracker] detect → spec_added (response has specs, ctx has pkg, initial specs false)');
         return 'spec_added';
       }
       console.log('[BD Tracker] detect → product_updated');
