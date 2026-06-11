@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bd-tracker-v3';
+const CACHE_NAME = 'bd-tracker-v4';
 
 self.addEventListener('install', (event) => {
   // Activate immediately
