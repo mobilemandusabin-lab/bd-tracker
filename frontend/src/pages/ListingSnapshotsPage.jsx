@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import axios from 'axios';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { Store, ShieldCheck, Package, Calendar, TrendingUp, ArrowUpRight, ArrowDownRight, RefreshCw, Loader2, AlertCircle, Camera, Clock, Target, Save, CheckCircle2 } from 'lucide-react';
+import { Package, ListChecks, FileText, Calendar, TrendingUp, ArrowUpRight, ArrowDownRight, RefreshCw, Loader2, AlertCircle, Camera, Clock, Target, Save, CheckCircle2 } from 'lucide-react';
 import { formatNepaliDate } from '../utils/nepaliDate';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
@@ -70,10 +70,9 @@ const CustomTooltip = ({ active, payload, label }) => {
   );
 };
 
-export default function VendorSnapshotsPage({ embedded }) {
+export default function ListingSnapshotsPage({ embedded }) {
   const [snapshots, setSnapshots] = useState([]);
   const [latestSnapshots, setLatestSnapshots] = useState(null);
-  const [liveData, setLiveData] = useState(null);
   const [comparisonData, setComparisonData] = useState([]);
   const [nextSchedule, setNextSchedule] = useState({ weekly: null, monthly: null });
   const [snapshotType, setSnapshotType] = useState('weekly');
@@ -82,7 +81,11 @@ export default function VendorSnapshotsPage({ embedded }) {
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [targetInputs, setTargetInputs] = useState({ totalVendors: '', verifiedVendors: '', activeSellers: '' });
+  const [targetInputs, setTargetInputs] = useState({
+    totalListings: '',
+    dailyAverageListings: '',
+    totalSpecificationsAdded: ''
+  });
 
   const token = localStorage.getItem('token');
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
@@ -91,14 +94,12 @@ export default function VendorSnapshotsPage({ embedded }) {
     setLoading(true);
     setError(null);
     try {
-      const [liveRes, snapshotsRes, latestRes, compareRes, scheduleRes] = await Promise.all([
-        axios.get(`${API_URL}/vendor-snapshots/live`, { headers }),
-        axios.get(`${API_URL}/vendor-snapshots?type=${snapshotType}&limit=24`, { headers }),
-        axios.get(`${API_URL}/vendor-snapshots/latest`, { headers }),
-        axios.get(`${API_URL}/vendor-snapshots/compare?type=${snapshotType}&count=12`, { headers }),
-        axios.get(`${API_URL}/vendor-snapshots/next-schedule`, { headers })
+      const [snapshotsRes, latestRes, compareRes, scheduleRes] = await Promise.all([
+        axios.get(`${API_URL}/listing-snapshots?type=${snapshotType}&limit=24`, { headers }),
+        axios.get(`${API_URL}/listing-snapshots/latest`, { headers }),
+        axios.get(`${API_URL}/listing-snapshots/compare?type=${snapshotType}&count=12`, { headers }),
+        axios.get(`${API_URL}/listing-snapshots/next-schedule`, { headers })
       ]);
-      setLiveData(liveRes.data.data);
       setSnapshots(snapshotsRes.data.data.snapshots);
       setLatestSnapshots(latestRes.data.data);
       setComparisonData(compareRes.data.data.snapshots);
@@ -112,14 +113,13 @@ export default function VendorSnapshotsPage({ embedded }) {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Sync target inputs when latest data or type changes
   useEffect(() => {
     const latest = latestSnapshots?.[snapshotType];
     if (latest?.targets) {
       setTargetInputs({
-        totalVendors: latest.targets.totalVendors?.toString() || '',
-        verifiedVendors: latest.targets.verifiedVendors?.toString() || '',
-        activeSellers: latest.targets.activeSellers?.toString() || ''
+        totalListings: latest.targets.totalListings?.toString() || '',
+        dailyAverageListings: latest.targets.dailyAverageListings?.toString() || '',
+        totalSpecificationsAdded: latest.targets.totalSpecificationsAdded?.toString() || ''
       });
     }
   }, [latestSnapshots, snapshotType]);
@@ -129,11 +129,11 @@ export default function VendorSnapshotsPage({ embedded }) {
     setSaveSuccess(false);
     try {
       const targets = {
-        totalVendors: parseInt(targetInputs.totalVendors) || null,
-        verifiedVendors: parseInt(targetInputs.verifiedVendors) || null,
-        activeSellers: parseInt(targetInputs.activeSellers) || null
+        totalListings: parseInt(targetInputs.totalListings) || null,
+        dailyAverageListings: parseInt(targetInputs.dailyAverageListings) || null,
+        totalSpecificationsAdded: parseInt(targetInputs.totalSpecificationsAdded) || null
       };
-      await axios.patch(`${API_URL}/vendor-snapshots/targets`, { type: snapshotType, targets }, { headers });
+      await axios.patch(`${API_URL}/listing-snapshots/targets`, { type: snapshotType, targets }, { headers });
       setSaveSuccess(true);
       await fetchData();
       setTimeout(() => setSaveSuccess(false), 2500);
@@ -149,16 +149,26 @@ export default function VendorSnapshotsPage({ embedded }) {
   const chartData = useMemo(() => {
     return [...comparisonData].reverse().map(s => ({
       name: s.nepaliDate,
-      'Total Vendors': s.totalVendors,
-      'Verified Vendors': s.verifiedVendors,
-      'Active Sellers': s.activeSellers
+      'Marketplace Products': s.totalMarketplaceProducts,
+      'Verified Only': s.verifiedMarketplaceProducts,
+      'Total Listings': s.totalListings,
+      'Daily Avg Listings': s.dailyAverageListings,
+      'Specs Added': s.totalSpecificationsAdded
     }));
   }, [comparisonData]);
 
   const metricConfig = [
-    { key: 'totalVendors', label: 'Total Vendors', icon: Store, color: 'red' },
-    { key: 'verifiedVendors', label: 'Verified Vendors', icon: ShieldCheck, color: 'amber' },
-    { key: 'activeSellers', label: 'Active Sellers', icon: Package, color: 'emerald' }
+    { key: 'totalMarketplaceProducts', label: 'Marketplace Products', icon: Package, color: 'red' },
+    { key: 'verifiedMarketplaceProducts', label: 'Marketplace Products (Verified Only)', icon: Package, color: 'purple' },
+    { key: 'totalListings', label: 'Total Listings', icon: Package, color: 'orange' },
+    { key: 'dailyAverageListings', label: 'Daily Avg Listings', icon: ListChecks, color: 'amber' },
+    { key: 'totalSpecificationsAdded', label: 'Specs Added', icon: FileText, color: 'emerald' }
+  ];
+
+  const targetMetrics = [
+    { key: 'totalListings', label: 'Total Listings', icon: Package, color: 'orange' },
+    { key: 'dailyAverageListings', label: 'Daily Avg Listings', icon: ListChecks, color: 'amber' },
+    { key: 'totalSpecificationsAdded', label: 'Specs Added', icon: FileText, color: 'emerald' }
   ];
 
   if (loading) {
@@ -172,7 +182,6 @@ export default function VendorSnapshotsPage({ embedded }) {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
       {!embedded && (
         <div className="bg-gradient-to-br from-red-600 to-red-700 rounded-2xl p-5 lg:p-6 relative overflow-hidden">
           <div className="absolute top-0 right-0 w-48 h-48 bg-white/5 rounded-full -translate-y-24 translate-x-24" />
@@ -180,11 +189,11 @@ export default function VendorSnapshotsPage({ embedded }) {
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2.5 mb-1.5">
-                  <Camera size={20} className="text-white/80" />
-                  <h1 className="text-xl lg:text-2xl font-extrabold text-white">Vendor Snapshots</h1>
+                  <ListChecks size={20} className="text-white/80" />
+                  <h1 className="text-xl lg:text-2xl font-extrabold text-white">Listing Snapshots</h1>
                 </div>
                 <p className="text-red-200 text-xs font-medium">
-                  Weekly and monthly vendor metrics in Nepali calendar
+                  Weekly and monthly listing metrics
                 </p>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
                   {nextSchedule.weekly?.targetDate && (
@@ -243,7 +252,6 @@ export default function VendorSnapshotsPage({ embedded }) {
         </div>
       )}
 
-      {/* Tabs */}
       <div className="flex gap-1 bg-slate-100 rounded-xl p-1">
         {[
           { id: 'overview', label: 'Overview' },
@@ -264,18 +272,13 @@ export default function VendorSnapshotsPage({ embedded }) {
         ))}
       </div>
 
-      {/* Overview Tab */}
       {activeTab === 'overview' && (
         <div className="space-y-5">
-          {/* Stat Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
             {metricConfig.map(({ key, label, icon: Icon, color }) => {
               const value = latest?.[key];
-              const target = latest?.targets?.[key];
-              const progress = target && value ? Math.min(Math.round((value / target) * 100), 100) : null;
-              const bgMap = { red: 'bg-red-50', amber: 'bg-amber-50', emerald: 'bg-emerald-50' };
-              const textMap = { red: 'text-red-600', amber: 'text-amber-600', emerald: 'text-emerald-600' };
-              const barMap = { red: 'bg-red-500', amber: 'bg-amber-500', emerald: 'bg-emerald-500' };
+              const bgMap = { red: 'bg-red-50', amber: 'bg-amber-50', emerald: 'bg-emerald-50', orange: 'bg-orange-50', purple: 'bg-purple-50' };
+              const textMap = { red: 'text-red-600', amber: 'text-amber-600', emerald: 'text-emerald-600', orange: 'text-orange-600', purple: 'text-purple-600' };
               return (
                 <div key={key} className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm hover:shadow-md transition-shadow">
                   <div className="flex items-center gap-2.5 mb-2.5">
@@ -285,24 +288,6 @@ export default function VendorSnapshotsPage({ embedded }) {
                     <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{label}</span>
                   </div>
                   <p className="text-2xl font-extrabold text-slate-900">{value ?? '-'}</p>
-                  {target && (
-                    <div className="mt-2.5">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[10px] font-semibold text-slate-400 flex items-center gap-1">
-                          <Target size={9} /> Target: {target}
-                        </span>
-                        <span className={`text-[10px] font-bold ${progress >= 100 ? 'text-emerald-600' : progress >= 70 ? 'text-amber-600' : 'text-red-500'}`}>
-                          {progress}%
-                        </span>
-                      </div>
-                      <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all ${progress >= 100 ? 'bg-emerald-500' : progress >= 70 ? 'bg-amber-500' : barMap[color]}`}
-                          style={{ width: `${Math.min(progress, 100)}%` }}
-                        />
-                      </div>
-                    </div>
-                  )}
                 </div>
               );
             })}
@@ -322,7 +307,6 @@ export default function VendorSnapshotsPage({ embedded }) {
             </div>
           </div>
 
-          {/* Chart */}
           {chartData.length > 0 && (
             <div className="bg-white border border-slate-100 rounded-2xl p-4 lg:p-5 shadow-sm">
               <h3 className="text-sm font-bold text-slate-900 mb-4">
@@ -331,15 +315,23 @@ export default function VendorSnapshotsPage({ embedded }) {
               <ResponsiveContainer width="100%" height={300}>
                 <AreaChart data={chartData}>
                   <defs>
-                    <linearGradient id="totalGrad" x1="0" y1="0" x2="0" y2="1">
+                    <linearGradient id="mpGrad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#DC2626" stopOpacity={0.12} />
                       <stop offset="95%" stopColor="#DC2626" stopOpacity={0} />
                     </linearGradient>
-                    <linearGradient id="verifiedGrad" x1="0" y1="0" x2="0" y2="1">
+                    <linearGradient id="vpGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#9333EA" stopOpacity={0.12} />
+                      <stop offset="95%" stopColor="#9333EA" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="tlGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#F97316" stopOpacity={0.12} />
+                      <stop offset="95%" stopColor="#F97316" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="dalGrad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#F59E0B" stopOpacity={0.12} />
                       <stop offset="95%" stopColor="#F59E0B" stopOpacity={0} />
                     </linearGradient>
-                    <linearGradient id="activeGrad" x1="0" y1="0" x2="0" y2="1">
+                    <linearGradient id="saGrad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#10B981" stopOpacity={0.12} />
                       <stop offset="95%" stopColor="#10B981" stopOpacity={0} />
                     </linearGradient>
@@ -349,9 +341,11 @@ export default function VendorSnapshotsPage({ embedded }) {
                   <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} />
                   <Tooltip content={<CustomTooltip />} />
                   <Legend formatter={(value) => <span className="text-[11px] font-semibold text-slate-600">{value}</span>} />
-                  <Area type="monotone" dataKey="Total Vendors" stroke="#DC2626" fill="url(#totalGrad)" strokeWidth={2} />
-                  <Area type="monotone" dataKey="Verified Vendors" stroke="#F59E0B" fill="url(#verifiedGrad)" strokeWidth={2} />
-                  <Area type="monotone" dataKey="Active Sellers" stroke="#10B981" fill="url(#activeGrad)" strokeWidth={2} />
+                  <Area type="monotone" dataKey="Marketplace Products" stroke="#DC2626" fill="url(#mpGrad)" strokeWidth={2} />
+                  <Area type="monotone" dataKey="Verified Only" stroke="#9333EA" fill="url(#vpGrad)" strokeWidth={2} />
+                  <Area type="monotone" dataKey="Total Listings" stroke="#F97316" fill="url(#tlGrad)" strokeWidth={2} />
+                  <Area type="monotone" dataKey="Daily Avg Listings" stroke="#F59E0B" fill="url(#dalGrad)" strokeWidth={2} />
+                  <Area type="monotone" dataKey="Specs Added" stroke="#10B981" fill="url(#saGrad)" strokeWidth={2} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -359,7 +353,6 @@ export default function VendorSnapshotsPage({ embedded }) {
         </div>
       )}
 
-      {/* Targets Tab */}
       {activeTab === 'targets' && (
         <div className="space-y-4">
           <div className="bg-white border border-slate-100 rounded-2xl p-5 lg:p-6 shadow-sm">
@@ -374,12 +367,12 @@ export default function VendorSnapshotsPage({ embedded }) {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-5">
-              {metricConfig.map(({ key, label, icon: Icon, color }) => {
-                const current = liveData?.[key] ?? latest?.[key];
+              {targetMetrics.map(({ key, label, icon: Icon, color }) => {
+                const current = latest?.[key];
                 const target = latest?.targets?.[key];
-                const bgMap = { red: 'bg-red-50 border-red-100', amber: 'bg-amber-50 border-amber-100', emerald: 'bg-emerald-50 border-emerald-100' };
-                const textMap = { red: 'text-red-600', amber: 'text-amber-600', emerald: 'text-emerald-600' };
-                const ringMap = { red: 'focus:ring-red-200 focus:border-red-300', amber: 'focus:ring-amber-200 focus:border-amber-300', emerald: 'focus:ring-emerald-200 focus:border-emerald-300' };
+                const bgMap = { orange: 'bg-orange-50 border-orange-100', amber: 'bg-amber-50 border-amber-100', emerald: 'bg-emerald-50 border-emerald-100' };
+                const textMap = { orange: 'text-orange-600', amber: 'text-amber-600', emerald: 'text-emerald-600' };
+                const ringMap = { orange: 'focus:ring-orange-200 focus:border-orange-300', amber: 'focus:ring-amber-200 focus:border-amber-300', emerald: 'focus:ring-emerald-200 focus:border-emerald-300' };
                 return (
                   <div key={key} className={`rounded-xl border p-4 ${bgMap[color]}`}>
                     <label className="flex items-center gap-2 text-xs font-bold text-slate-700 mb-2">
@@ -425,89 +418,37 @@ export default function VendorSnapshotsPage({ embedded }) {
                 }`}
               >
                 {saveSuccess ? (
-                  <>
-                    <CheckCircle2 size={15} />
-                    Saved
-                  </>
+                  <><CheckCircle2 size={15} /> Saved</>
                 ) : saving ? (
-                  <>
-                    <Loader2 size={15} className="animate-spin" />
-                    Saving...
-                  </>
+                  <><Loader2 size={15} className="animate-spin" /> Saving...</>
                 ) : (
-                  <>
-                    <Save size={15} />
-                    Save Targets
-                  </>
+                  <><Save size={15} /> Save Targets</>
                 )}
               </button>
             </div>
           </div>
-
-          {/* Target history from comparison data */}
-          {comparisonData.length > 0 && (
-            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
-              <h3 className="text-sm font-bold text-slate-900 mb-3">Target History</h3>
-              <div className="space-y-2">
-                {comparisonData.slice(0, 6).map((snap) => {
-                  const t = snap.targets || {};
-                  const hasTargets = t.totalVendors || t.verifiedVendors || t.activeSellers;
-                  if (!hasTargets) return null;
-                  return (
-                    <div key={snap._id} className="flex items-center gap-4 p-3 bg-slate-50 rounded-xl">
-                      <div className="shrink-0 w-28">
-                        <p className="text-xs font-bold text-slate-700">{snap.nepaliDate}</p>
-                        <p className="text-[10px] text-slate-400">{snap.type}</p>
-                      </div>
-                      <div className="flex-1 grid grid-cols-3 gap-3">
-                        {[
-                          { label: 'Total', target: t.totalVendors, actual: snap.totalVendors },
-                          { label: 'Verified', target: t.verifiedVendors, actual: snap.verifiedVendors },
-                          { label: 'Active', target: t.activeSellers, actual: snap.activeSellers }
-                        ].map(m => (
-                          <div key={m.label} className="text-center">
-                            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">{m.label}</p>
-                            {m.target ? (
-                              <>
-                                <p className="text-xs font-bold text-slate-700">{m.actual} / {m.target}</p>
-                                <p className={`text-[10px] font-bold ${m.actual >= m.target ? 'text-emerald-600' : 'text-red-500'}`}>
-                                  {m.actual >= m.target ? '✓ Met' : `${m.actual - m.target}`}
-                                </p>
-                              </>
-                            ) : (
-                              <p className="text-xs text-slate-300">-</p>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
         </div>
       )}
 
-      {/* Comparison Tab */}
       {activeTab === 'comparison' && (
         <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
-          {/* Desktop Table */}
           <div className="hidden lg:block overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="bg-slate-50/80">
                   <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-slate-400">Period</th>
-                  <th className="px-5 py-3 text-right text-[10px] font-bold uppercase tracking-widest text-slate-400">Total Vendors</th>
-                  <th className="px-5 py-3 text-right text-[10px] font-bold uppercase tracking-widest text-slate-400">Verified</th>
-                  <th className="px-5 py-3 text-right text-[10px] font-bold uppercase tracking-widest text-slate-400">Active Sellers</th>
+                  <th className="px-5 py-3 text-right text-[10px] font-bold uppercase tracking-widest text-slate-400">Marketplace Products</th>
+                  <th className="px-5 py-3 text-right text-[10px] font-bold uppercase tracking-widest text-slate-400">Verified Only</th>
+                  <th className="px-5 py-3 text-right text-[10px] font-bold uppercase tracking-widest text-slate-400">Total Listings</th>
+                  <th className="px-5 py-3 text-right text-[10px] font-bold uppercase tracking-widest text-slate-400">Daily Avg Listings</th>
+                  <th className="px-5 py-3 text-right text-[10px] font-bold uppercase tracking-widest text-slate-400">Specs Added</th>
                   <th className="px-5 py-3 text-right text-[10px] font-bold uppercase tracking-widest text-slate-400">Targets</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {comparisonData.map((snap, i) => {
                   const t = snap.targets || {};
-                  const hasTargets = t.totalVendors || t.verifiedVendors || t.activeSellers;
+                  const hasTargets = t.totalListings || t.dailyAverageListings || t.totalSpecificationsAdded;
                   return (
                   <tr key={snap._id} className={i === 0 ? 'bg-red-50/30' : 'hover:bg-slate-50/50'}>
                     <td className="px-5 py-3.5">
@@ -521,58 +462,75 @@ export default function VendorSnapshotsPage({ embedded }) {
                     </td>
                     <td className="px-5 py-3.5 text-right">
                       <div className="flex flex-col items-end">
-                        {snap.prevTotalVendors != null && (
-                          <span className="text-xs text-slate-400">{snap.prevTotalVendors}</span>
+                        {snap.prevTotalMarketplaceProducts != null && (
+                          <span className="text-xs text-slate-400">{snap.prevTotalMarketplaceProducts}</span>
                         )}
-                        <span className="text-sm font-extrabold text-slate-900">{snap.totalVendors}</span>
-                        <DeltaBadge delta={snap.totalVendorsDelta} percent={snap.totalVendorsPercentChange} />
+                        <span className="text-sm font-extrabold text-slate-900">{snap.totalMarketplaceProducts}</span>
+                        <DeltaBadge delta={snap.totalMarketplaceProductsDelta} percent={snap.totalMarketplaceProductsPercentChange} />
                       </div>
                     </td>
                     <td className="px-5 py-3.5 text-right">
                       <div className="flex flex-col items-end">
-                        {snap.prevVerifiedVendors != null && (
-                          <span className="text-xs text-slate-400">{snap.prevVerifiedVendors}</span>
+                        {snap.prevVerifiedMarketplaceProducts != null && (
+                          <span className="text-xs text-slate-400">{snap.prevVerifiedMarketplaceProducts}</span>
                         )}
-                        <span className="text-sm font-extrabold text-slate-900">{snap.verifiedVendors}</span>
-                        <DeltaBadge delta={snap.verifiedVendorsDelta} percent={snap.verifiedVendorsPercentChange} />
+                        <span className="text-sm font-extrabold text-slate-900">{snap.verifiedMarketplaceProducts}</span>
+                        <DeltaBadge delta={snap.verifiedMarketplaceProductsDelta} percent={snap.verifiedMarketplaceProductsPercentChange} />
                       </div>
                     </td>
                     <td className="px-5 py-3.5 text-right">
                       <div className="flex flex-col items-end">
-                        {snap.prevActiveSellers != null && (
-                          <span className="text-xs text-slate-400">{snap.prevActiveSellers}</span>
+                        {snap.prevTotalListings != null && (
+                          <span className="text-xs text-slate-400">{snap.prevTotalListings}</span>
                         )}
-                        <span className="text-sm font-extrabold text-slate-900">{snap.activeSellers}</span>
-                        <DeltaBadge delta={snap.activeSellersDelta} percent={snap.activeSellersPercentChange} />
+                        <span className="text-sm font-extrabold text-slate-900">{snap.totalListings}</span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-3.5 text-right">
+                      <div className="flex flex-col items-end">
+                        {snap.prevDailyAverageListings != null && (
+                          <span className="text-xs text-slate-400">{snap.prevDailyAverageListings}</span>
+                        )}
+                        <span className="text-sm font-extrabold text-slate-900">{snap.dailyAverageListings}</span>
+                        <DeltaBadge delta={snap.dailyAverageListingsDelta} percent={snap.dailyAverageListingsPercentChange} />
+                      </div>
+                    </td>
+                    <td className="px-5 py-3.5 text-right">
+                      <div className="flex flex-col items-end">
+                        {snap.prevTotalSpecificationsAdded != null && (
+                          <span className="text-xs text-slate-400">{snap.prevTotalSpecificationsAdded}</span>
+                        )}
+                        <span className="text-sm font-extrabold text-slate-900">{snap.totalSpecificationsAdded}</span>
+                        <DeltaBadge delta={snap.totalSpecificationsAddedDelta} percent={snap.totalSpecificationsAddedPercentChange} />
                       </div>
                     </td>
                     <td className="px-5 py-3.5 text-right">
                       {hasTargets ? (
                         <div className="flex flex-col items-end gap-0.5">
-                          {t.totalVendors && (
+                          {t.totalListings && (
                             <span className="text-[10px] text-slate-500">
-                              <span className="font-semibold">T:</span> {t.totalVendors}
-                              {snap.totalVendors >= t.totalVendors
+                              <span className="font-semibold">L:</span> {t.totalListings}
+                              {snap.totalListings >= t.totalListings
                                 ? <span className="text-emerald-600 ml-1">✓</span>
-                                : <span className="text-red-500 ml-1">({snap.totalVendors - t.totalVendors})</span>
+                                : <span className="text-red-500 ml-1">({snap.totalListings - t.totalListings})</span>
                               }
                             </span>
                           )}
-                          {t.verifiedVendors && (
+                          {t.dailyAverageListings && (
                             <span className="text-[10px] text-slate-500">
-                              <span className="font-semibold">V:</span> {t.verifiedVendors}
-                              {snap.verifiedVendors >= t.verifiedVendors
+                              <span className="font-semibold">D:</span> {t.dailyAverageListings}
+                              {snap.dailyAverageListings >= t.dailyAverageListings
                                 ? <span className="text-emerald-600 ml-1">✓</span>
-                                : <span className="text-red-500 ml-1">({snap.verifiedVendors - t.verifiedVendors})</span>
+                                : <span className="text-red-500 ml-1">({snap.dailyAverageListings - t.dailyAverageListings})</span>
                               }
                             </span>
                           )}
-                          {t.activeSellers && (
+                          {t.totalSpecificationsAdded && (
                             <span className="text-[10px] text-slate-500">
-                              <span className="font-semibold">A:</span> {t.activeSellers}
-                              {snap.activeSellers >= t.activeSellers
+                              <span className="font-semibold">S:</span> {t.totalSpecificationsAdded}
+                              {snap.totalSpecificationsAdded >= t.totalSpecificationsAdded
                                 ? <span className="text-emerald-600 ml-1">✓</span>
-                                : <span className="text-red-500 ml-1">({snap.activeSellers - t.activeSellers})</span>
+                                : <span className="text-red-500 ml-1">({snap.totalSpecificationsAdded - t.totalSpecificationsAdded})</span>
                               }
                             </span>
                           )}
@@ -586,10 +544,10 @@ export default function VendorSnapshotsPage({ embedded }) {
                 })}
                 {comparisonData.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-5 py-12 text-center">
-                      <Camera size={36} className="mx-auto text-slate-200 mb-3" />
+                    <td colSpan={7} className="px-5 py-12 text-center">
+                      <ListChecks size={36} className="mx-auto text-slate-200 mb-3" />
                       <p className="text-sm font-bold text-slate-400">No snapshot data yet</p>
-                      <p className="text-xs text-slate-400 mt-1">Snapshots are taken every Friday and month-end</p>
+                      <p className="text-xs text-slate-400 mt-1">Snapshots are taken every Friday</p>
                     </td>
                   </tr>
                 )}
@@ -597,7 +555,6 @@ export default function VendorSnapshotsPage({ embedded }) {
             </table>
           </div>
 
-          {/* Mobile Cards */}
           <div className="lg:hidden divide-y divide-slate-50">
             {comparisonData.map((snap) => {
               const t = snap.targets || {};
@@ -612,11 +569,12 @@ export default function VendorSnapshotsPage({ embedded }) {
                     <span className="text-[10px] text-slate-400">vs {snap.prevNepaliDate}</span>
                   )}
                 </div>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-4 gap-3">
                   {[
-                    { label: 'Total', curr: snap.totalVendors, prev: snap.prevTotalVendors, delta: snap.totalVendorsDelta, pct: snap.totalVendorsPercentChange, target: t.totalVendors },
-                    { label: 'Verified', curr: snap.verifiedVendors, prev: snap.prevVerifiedVendors, delta: snap.verifiedVendorsDelta, pct: snap.verifiedVendorsPercentChange, target: t.verifiedVendors },
-                    { label: 'Active', curr: snap.activeSellers, prev: snap.prevActiveSellers, delta: snap.activeSellersDelta, pct: snap.activeSellersPercentChange, target: t.activeSellers }
+                    { label: 'Products', curr: snap.totalMarketplaceProducts, prev: snap.prevTotalMarketplaceProducts, delta: snap.totalMarketplaceProductsDelta, pct: snap.totalMarketplaceProductsPercentChange },
+                    { label: 'Verified', curr: snap.verifiedMarketplaceProducts, prev: snap.prevVerifiedMarketplaceProducts, delta: snap.verifiedMarketplaceProductsDelta, pct: snap.verifiedMarketplaceProductsPercentChange },
+                    { label: 'Daily Avg', curr: snap.dailyAverageListings, prev: snap.prevDailyAverageListings, delta: snap.dailyAverageListingsDelta, pct: snap.dailyAverageListingsPercentChange, target: t.dailyAverageListings },
+                    { label: 'Specs', curr: snap.totalSpecificationsAdded, prev: snap.prevTotalSpecificationsAdded, delta: snap.totalSpecificationsAddedDelta, pct: snap.totalSpecificationsAddedPercentChange, target: t.totalSpecificationsAdded }
                   ].map(m => (
                     <div key={m.label}>
                       <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">{m.label}</p>
@@ -640,7 +598,7 @@ export default function VendorSnapshotsPage({ embedded }) {
             })}
             {comparisonData.length === 0 && (
               <div className="p-8 text-center">
-                <Camera size={36} className="mx-auto text-slate-200 mb-3" />
+                <ListChecks size={36} className="mx-auto text-slate-200 mb-3" />
                 <p className="text-sm font-bold text-slate-400">No snapshot data yet</p>
               </div>
             )}
