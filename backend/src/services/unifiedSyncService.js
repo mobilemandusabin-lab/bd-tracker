@@ -1,7 +1,8 @@
 const SystemSyncLog = require('../models/SystemSyncLog');
 const { checkOverdueFollowups, checkEscalationTriggers } = require('./overdueChecker');
 const { syncAllNepalcanData } = require('./nepalcanSyncService');
-const { checkAndTakeSnapshots } = require('./vendorSnapshotService');
+const { checkAndTakeSnapshots: checkVendorSnapshots } = require('./vendorSnapshotService');
+const { checkAndTakeSnapshots: checkListingSnapshots } = require('./listingSnapshotService');
 
 const STALE_SYNC_TIMEOUT_MS = 30 * 60 * 1000;
 
@@ -67,16 +68,28 @@ const runFullSync = async (triggeredBy = 'cron', userId = null) => {
       console.error('[Full Sync] Nepalcan sync failed:', err.message);
     }
 
-    const snapshotStart = Date.now();
+    const vendorSnapStart = Date.now();
     try {
       tasks.vendorSnapshots = { ran: true };
-      const snapshotResult = await checkAndTakeSnapshots();
+      const snapshotResult = await checkVendorSnapshots();
       tasks.vendorSnapshots.success = true;
       tasks.vendorSnapshots.snapshotsTaken = snapshotResult?.snapshots?.length || 0;
-      tasks.vendorSnapshots.durationMs = Date.now() - snapshotStart;
+      tasks.vendorSnapshots.durationMs = Date.now() - vendorSnapStart;
     } catch (err) {
-      tasks.vendorSnapshots = { ran: true, success: false, error: err.message, durationMs: Date.now() - snapshotStart };
+      tasks.vendorSnapshots = { ran: true, success: false, error: err.message, durationMs: Date.now() - vendorSnapStart };
       console.error('[Full Sync] Vendor snapshots failed:', err.message);
+    }
+
+    const listingSnapStart = Date.now();
+    try {
+      tasks.listingSnapshots = { ran: true };
+      const listingResult = await checkListingSnapshots();
+      tasks.listingSnapshots.success = true;
+      tasks.listingSnapshots.snapshotsTaken = listingResult?.snapshots?.length || 0;
+      tasks.listingSnapshots.durationMs = Date.now() - listingSnapStart;
+    } catch (err) {
+      tasks.listingSnapshots = { ran: true, success: false, error: err.message, durationMs: Date.now() - listingSnapStart };
+      console.error('[Full Sync] Listing snapshots failed:', err.message);
     }
 
     const durationMs = Date.now() - startTime;

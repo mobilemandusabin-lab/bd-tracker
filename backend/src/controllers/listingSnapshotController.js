@@ -4,7 +4,6 @@ const NepaliDate = require('nepali-date-converter').default;
 
 exports.getLiveData = async (req, res) => {
   try {
-    const Product = require('../models/Product');
     const Lead = require('../models/Lead');
     const ExtensionEvent = require('../models/ExtensionEvent');
 
@@ -16,8 +15,22 @@ exports.getLiveData = async (req, res) => {
     weekEnd.setDate(weekEnd.getDate() + 5);
     weekEnd.setHours(23, 59, 59, 999);
 
-    const [totalMarketplaceProducts, verifiedAgg, specAgg, listingAgg] = await Promise.all([
-      Product.countDocuments({ isActive: true }),
+    let totalMarketplaceProducts = 0;
+    try {
+      const { fetchTotalMarketplaceProducts } = require('../services/nepalcanSyncService');
+      totalMarketplaceProducts = await fetchTotalMarketplaceProducts();
+    } catch {
+      const Product = require('../models/Product');
+      totalMarketplaceProducts = await Product.countDocuments({ isActive: true });
+    }
+    if (!totalMarketplaceProducts) {
+      const latest = await ListingSnapshot.findOne().sort({ snapshotDate: -1 });
+      if (latest?.totalMarketplaceProducts) {
+        totalMarketplaceProducts = latest.totalMarketplaceProducts;
+      }
+    }
+
+    const [verifiedAgg, specAgg, listingAgg] = await Promise.all([
       Lead.aggregate([
         {
           $match: { type: 'vendor', $or: [{ is_verified: true }, { verification_status: 'verified' }] }
