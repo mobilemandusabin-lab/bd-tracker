@@ -91,14 +91,12 @@ export default function VendorSnapshotsPage({ embedded }) {
     setLoading(true);
     setError(null);
     try {
-      const [liveRes, snapshotsRes, latestRes, compareRes, scheduleRes] = await Promise.all([
-        axios.get(`${API_URL}/vendor-snapshots/live`, { headers }),
+      const [snapshotsRes, latestRes, compareRes, scheduleRes] = await Promise.all([
         axios.get(`${API_URL}/vendor-snapshots?type=${snapshotType}&limit=24`, { headers }),
         axios.get(`${API_URL}/vendor-snapshots/latest`, { headers }),
         axios.get(`${API_URL}/vendor-snapshots/compare?type=${snapshotType}&count=12`, { headers }),
         axios.get(`${API_URL}/vendor-snapshots/next-schedule`, { headers })
       ]);
-      setLiveData(liveRes.data.data);
       setSnapshots(snapshotsRes.data.data.snapshots);
       setLatestSnapshots(latestRes.data.data);
       setComparisonData(compareRes.data.data.snapshots);
@@ -107,6 +105,13 @@ export default function VendorSnapshotsPage({ embedded }) {
       setError(err.response?.data?.message || 'Failed to load snapshots');
     } finally {
       setLoading(false);
+    }
+
+    try {
+      const liveRes = await axios.get(`${API_URL}/vendor-snapshots/live`, { headers });
+      setLiveData(liveRes.data.data);
+    } catch {
+      console.warn('[VendorSnapshots] Failed to fetch live data, falling back to snapshot');
     }
   }, [snapshotType]);
 

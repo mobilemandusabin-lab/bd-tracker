@@ -6,6 +6,10 @@ const { requirePermission } = require('../middlewares/permissionMiddleware');
 
 // All routes require authentication
 router.use(authMiddleware.protect);
+
+// Get total marketplace products (lighter permission - used by ops analytics)
+router.get('/total-marketplace-products', requirePermission('nepalcan.view'), nepalcanController.getTotalMarketplaceProducts);
+
 router.use(requirePermission('nepalcan.manage'));
 
 // Login to Nepalcan.com

@@ -5,7 +5,7 @@ import axios from 'axios';
 import {
   BarChart3, Package, ShieldCheck, ShieldX, Clock, FileText,
   TrendingUp, TrendingDown, Users, ChevronLeft, RefreshCw, Calendar, Trash2,
-  Trophy, AlertTriangle, Timer, Activity, ArrowUp, ArrowDown, Flame, Target
+  Trophy, AlertTriangle, Timer, Activity, ArrowUp, ArrowDown, Flame, Target, Store
 } from 'lucide-react';
 import { API_URL } from '../config/api';
 
@@ -26,6 +26,8 @@ const OperationsAnalyticsPage = () => {
   const [editingTargets, setEditingTargets] = useState(false);
   const [targetValues, setTargetValues] = useState({ listing: 30, qc: 50 });
   const [savingTarget, setSavingTarget] = useState(false);
+  const [totalMarketplaceProducts, setTotalMarketplaceProducts] = useState(null);
+  const [mpLoading, setMpLoading] = useState(true);
 
   useEffect(() => {
     fetchAnalytics();
@@ -34,6 +36,23 @@ const OperationsAnalyticsPage = () => {
   useEffect(() => {
     if (view === 'team') fetchTeamPerformance();
   }, [view, teamFilter]);
+
+  useEffect(() => {
+    const fetchMpProducts = async () => {
+      setMpLoading(true);
+      try {
+        const res = await axios.get(`${API_URL}/nepalcan/total-marketplace-products`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setTotalMarketplaceProducts(res.data.data?.totalMarketplaceProducts ?? null);
+      } catch {
+        setTotalMarketplaceProducts(null);
+      } finally {
+        setMpLoading(false);
+      }
+    };
+    fetchMpProducts();
+  }, []);
 
   const buildDateParams = () => {
     if (startDate && endDate) return { start_date: startDate, end_date: endDate };
@@ -313,6 +332,21 @@ const OperationsAnalyticsPage = () => {
       {/* Total View */}
       {view === 'total' && (
         <>
+          {/* Total Marketplace Products */}
+          <div className="bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-2xl p-5 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="bg-white/20 p-2.5 rounded-xl">
+                <Store size={20} className="text-white" />
+              </div>
+              <div>
+                <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest">Total marketplace products till now</p>
+                <p className="text-3xl font-extrabold text-white">
+                  {mpLoading ? <span className="text-white/50">...</span> : totalMarketplaceProducts?.toLocaleString() ?? '—'}
+                </p>
+              </div>
+            </div>
+          </div>
+
           {/* Summary Metric Cards */}
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             {eventTypes.map(({ key, label, icon: Icon, color, global }) => {

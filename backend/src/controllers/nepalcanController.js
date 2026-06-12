@@ -1,5 +1,6 @@
 const axios = require('axios');
 const Lead = require('../models/Lead');
+const ListingSnapshot = require('../models/ListingSnapshot');
 const NepalcanSyncLog = require('../models/NepalcanSyncLog');
 
 const NEPLCCAN_API_BASE = 'https://commerce.thecanbrand.com/api';
@@ -271,6 +272,35 @@ exports.syncServiceBranches = async (req, res) => {
     res.status(500).json({
       status: 'fail',
       message: 'Failed to sync service branches',
+      error: err.message
+    });
+  }
+};
+
+// Get total marketplace products — returns latest snapshot value if available,
+// otherwise fetches live from Nepalcan API
+exports.getTotalMarketplaceProducts = async (req, res) => {
+  try {
+    // Try latest snapshot first
+    const latest = await ListingSnapshot.findOne().sort({ snapshotDate: -1 });
+    if (latest && latest.totalMarketplaceProducts) {
+      return res.status(200).json({
+        status: 'success',
+        data: { totalMarketplaceProducts: latest.totalMarketplaceProducts, source: 'snapshot' }
+      });
+    }
+
+    // Fallback to live Nepalcan API
+    const { fetchTotalMarketplaceProducts } = require('../services/nepalcanSyncService');
+    const total = await fetchTotalMarketplaceProducts();
+    res.status(200).json({
+      status: 'success',
+      data: { totalMarketplaceProducts: total, source: 'live' }
+    });
+  } catch (err) {
+    res.status(500).json({
+      status: 'fail',
+      message: 'Failed to fetch total marketplace products',
       error: err.message
     });
   }

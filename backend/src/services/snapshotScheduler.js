@@ -1,5 +1,6 @@
 const NepaliDate = require('nepali-date-converter').default;
-const { takeSnapshot } = require('./vendorSnapshotService');
+const { takeSnapshot: takeVendorSnapshot } = require('./vendorSnapshotService');
+const { takeSnapshot: takeListingSnapshot } = require('./listingSnapshotService');
 
 const timers = {};
 const nextSchedule = { weekly: null, monthly: null };
@@ -51,10 +52,16 @@ function scheduleNext(type) {
 
   timers[type] = setTimeout(async () => {
     try {
-      const snapshot = await takeSnapshot(type);
-      console.log(`[SnapshotScheduler] Auto-captured ${type}: ${snapshot.nepaliDate}`);
+      const vendorSnap = await takeVendorSnapshot(type);
+      console.log(`[SnapshotScheduler] Auto-captured vendor ${type}: ${vendorSnap.nepaliDate}`);
     } catch (err) {
-      console.error(`[SnapshotScheduler] ${type} failed:`, err.message);
+      console.error(`[SnapshotScheduler] Vendor ${type} failed:`, err.message);
+    }
+    try {
+      const listingSnap = await takeListingSnapshot(type);
+      console.log(`[SnapshotScheduler] Auto-captured listing ${type}: ${listingSnap.nepaliDate}`);
+    } catch (err) {
+      console.error(`[SnapshotScheduler] Listing ${type} failed:`, err.message);
     }
     scheduleNext(type);
   }, delay);

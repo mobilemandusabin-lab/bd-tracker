@@ -4,6 +4,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog"
 
 import { cn } from "../../lib/utils"
 import { Button } from "./button"
+import { Loader2 } from "lucide-react"
 
 function Dialog({
   ...props

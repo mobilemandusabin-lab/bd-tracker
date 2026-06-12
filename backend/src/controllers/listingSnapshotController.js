@@ -2,6 +2,71 @@ const ListingSnapshot = require('../models/ListingSnapshot');
 const { takeSnapshot } = require('../services/listingSnapshotService');
 const NepaliDate = require('nepali-date-converter').default;
 
+exports.getLiveData = async (req, res) => {
+  try {
+    const Product = require('../models/Product');
+    const Lead = require('../models/Lead');
+    const ExtensionEvent = require('../models/ExtensionEvent');
+
+    const now = new Date();
+    const weekStart = new Date(now);
+    weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 7 - 0) % 7));
+    weekStart.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 5);
+    weekEnd.setHours(23, 59, 59, 999);
+
+    const [totalMarketplaceProducts, verifiedAgg, specAgg, listingAgg] = await Promise.all([
+      Product.countDocuments({ isActive: true }),
+      Lead.aggregate([
+        {
+          $match: { type: 'vendor', $or: [{ is_verified: true }, { verification_status: 'verified' }] }
+        },
+        {
+          $group: {
+            _id: null,
+            total: {
+              $sum: {
+                $max: [
+                  { $ifNull: ['$total_products_listed', 0] },
+                  { $ifNull: ['$expected_product_count', 0] }
+                ]
+              }
+            }
+          }
+        }
+      ]),
+      ExtensionEvent.aggregate([
+        { $match: { event_type: 'spec_added', created_at: { $gte: weekStart, $lte: weekEnd } } },
+        { $group: { _id: null, total: { $sum: { $ifNull: ['$bulk_count', 1] } } } }
+      ]),
+      ExtensionEvent.aggregate([
+        { $match: { event_type: 'listing_created', created_at: { $gte: weekStart, $lte: weekEnd } } },
+        { $group: { _id: '$user_id', listingCount: { $sum: { $ifNull: ['$bulk_count', 1] } } } },
+        { $match: { listingCount: { $gt: 1 } } },
+        { $group: { _id: null, totalListings: { $sum: '$listingCount' } } }
+      ])
+    ]);
+
+    const verifiedMarketplaceProducts = verifiedAgg.length > 0 ? verifiedAgg[0].total : 0;
+    const totalSpecificationsAdded = specAgg.length > 0 ? specAgg[0].total : 0;
+    const weeklyListings = listingAgg.length > 0 ? listingAgg[0].totalListings : 0;
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        totalMarketplaceProducts,
+        verifiedMarketplaceProducts,
+        totalListings: weeklyListings,
+        dailyAverageListings: Math.round(weeklyListings / 6),
+        totalSpecificationsAdded
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
 exports.getSnapshots = async (req, res) => {
   try {
     const { type, limit = 24, page = 1 } = req.query;

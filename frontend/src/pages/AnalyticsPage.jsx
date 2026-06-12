@@ -5,7 +5,7 @@ import {
   BarChart3, TrendingUp, TrendingDown, Users, Target, DollarSign,
   Clock, Activity as ActivityIcon, Flame, ArrowUpRight, ArrowDownRight,
   Filter, Zap, AlertTriangle, Store, Trophy, PieChart, Camera, ShoppingBag,
-  User, CheckCircle2, Calendar, ChevronDown, Search, X
+  User, CheckCircle2, Calendar, ChevronDown, Search, X, ListChecks
 } from 'lucide-react';
 import { API_URL } from '../config/api';
 import {
@@ -18,6 +18,7 @@ const BDLeaderboardPage = lazy(() => import('./BDLeaderboardPage'));
 const DailyReportPage = lazy(() => import('./DailyReportPage'));
 const NepalcanAnalyticsPage = lazy(() => import('./NepalcanAnalyticsPage'));
 const VendorSnapshotsPage = lazy(() => import('./VendorSnapshotsPage'));
+const ListingSnapshotsPage = lazy(() => import('./ListingSnapshotsPage'));
 
 const ALL_TABS = [
   { key: 'overview', label: 'Overview', icon: BarChart3 },
@@ -27,6 +28,7 @@ const ALL_TABS = [
   { key: 'daily', label: 'Daily Report', icon: PieChart },
   { key: 'nepalcan', label: 'Nepalcan', icon: ShoppingBag },
   { key: 'vendors', label: 'Vendor Snapshots', icon: Camera },
+  { key: 'listing', label: 'Listing Snapshots', icon: ListChecks },
 ];
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -1492,6 +1494,7 @@ const AnalyticsPage = () => {
           {activeTab === 'daily' && <DailyReportPage embedded />}
           {activeTab === 'nepalcan' && <NepalcanAnalyticsPage embedded />}
           {activeTab === 'vendors' && <VendorSnapshotsPage embedded />}
+          {activeTab === 'listing' && <ListingSnapshotsPage embedded />}
         </Suspense>
       )}
     </div>

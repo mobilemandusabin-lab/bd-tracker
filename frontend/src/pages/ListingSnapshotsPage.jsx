@@ -73,6 +73,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 export default function ListingSnapshotsPage({ embedded }) {
   const [snapshots, setSnapshots] = useState([]);
   const [latestSnapshots, setLatestSnapshots] = useState(null);
+  const [liveData, setLiveData] = useState(null);
   const [comparisonData, setComparisonData] = useState([]);
   const [nextSchedule, setNextSchedule] = useState({ weekly: null, monthly: null });
   const [snapshotType, setSnapshotType] = useState('weekly');
@@ -108,6 +109,13 @@ export default function ListingSnapshotsPage({ embedded }) {
       setError(err.response?.data?.message || 'Failed to load snapshots');
     } finally {
       setLoading(false);
+    }
+
+    try {
+      const liveRes = await axios.get(`${API_URL}/listing-snapshots/live`, { headers });
+      setLiveData(liveRes.data.data);
+    } catch {
+      console.warn('[ListingSnapshots] Failed to fetch live data, falling back to snapshot');
     }
   }, [snapshotType]);
 
@@ -276,7 +284,7 @@ export default function ListingSnapshotsPage({ embedded }) {
         <div className="space-y-5">
           <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
             {metricConfig.map(({ key, label, icon: Icon, color }) => {
-              const value = latest?.[key];
+              const value = liveData?.[key] ?? latest?.[key];
               const bgMap = { red: 'bg-red-50', amber: 'bg-amber-50', emerald: 'bg-emerald-50', orange: 'bg-orange-50', purple: 'bg-purple-50' };
               const textMap = { red: 'text-red-600', amber: 'text-amber-600', emerald: 'text-emerald-600', orange: 'text-orange-600', purple: 'text-purple-600' };
               return (

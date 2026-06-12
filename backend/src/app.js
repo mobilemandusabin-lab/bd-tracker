@@ -20,11 +20,14 @@ const nepalcanRoutes = require('./routes/nepalcanRoutes');
 const nepalcanOrderRoutes = require('./routes/nepalcanOrderRoutes');
 const pipelineStageRoutes = require('./routes/pipelineStageRoutes');
 const vendorSnapshotRoutes = require('./routes/vendorSnapshotRoutes');
+const listingSnapshotRoutes = require('./routes/listingSnapshotRoutes');
 const deliveryZoneRoutes = require('./routes/deliveryZoneRoutes');
 const extensionRoutes = require('./routes/extensionRoutes');
 const roleRoutes = require('./routes/roleRoutes');
 const teamTargetRoutes = require('./routes/teamTargetRoutes');
 const financeRoutes = require('./routes/financeRoutes');
+const weeklyReportRoutes = require('./routes/weeklyReportRoutes');
+const reportHeadingRoutes = require('./routes/reportHeadingRoutes');
 let aiRoutes;
 if (process.env.GROQ_API_KEY) {
   aiRoutes = require('./routes/aiRoutes');
@@ -108,11 +111,14 @@ app.use('/api/v1/nepalcan', nepalcanRoutes);
 app.use('/api/v1/nepalcan-orders', nepalcanOrderRoutes);
 app.use('/api/v1/settings/pipeline', pipelineStageRoutes);
 app.use('/api/v1/vendor-snapshots', vendorSnapshotRoutes);
+app.use('/api/v1/listing-snapshots', listingSnapshotRoutes);
 app.use('/api/v1/delivery-zones', deliveryZoneRoutes);
 app.use('/api/v1/extension', extensionRoutes);
 app.use('/api/v1/roles', roleRoutes);
 app.use('/api/v1/team-targets', teamTargetRoutes);
 app.use('/api/v1/finance', financeRoutes);
+app.use('/api/v1/reports', weeklyReportRoutes);
+app.use('/api/v1/report-headings', reportHeadingRoutes);
 if (aiRoutes) app.use('/api/v1/ai', aiRoutes);
 
 // Vercel cron endpoint — no auth (fire-and-forget)

@@ -30,6 +30,39 @@ exports.getSnapshots = async (req, res) => {
   }
 };
 
+// GET /api/v1/vendor-snapshots/live
+exports.getLiveData = async (req, res) => {
+  try {
+    const Lead = require('../models/Lead');
+    const NepalcanOrder = require('../models/NepalcanOrder');
+
+    const [totalVendors, verifiedVendors, activeSellerAgg] = await Promise.all([
+      Lead.countDocuments({ type: 'vendor' }),
+      Lead.countDocuments({
+        type: 'vendor',
+        $or: [
+          { is_verified: true },
+          { verification_status: 'verified' }
+        ]
+      }),
+      NepalcanOrder.aggregate([
+        { $match: { orderStatus: 'Delivered' } },
+        { $group: { _id: '$vendor_lead_id' } },
+        { $count: 'total' }
+      ])
+    ]);
+
+    const activeSellers = activeSellerAgg.length > 0 ? activeSellerAgg[0].total : 0;
+
+    res.status(200).json({
+      status: 'success',
+      data: { totalVendors, verifiedVendors, activeSellers }
+    });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
 // GET /api/v1/vendor-snapshots/latest
 exports.getLatestSnapshot = async (req, res) => {
   try {

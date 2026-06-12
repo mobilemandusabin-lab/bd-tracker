@@ -69,6 +69,7 @@ const PERMISSIONS = {
   VENDORS_VIEW: 'vendors.view',
   VENDORS_MANAGE: 'vendors.manage',
   VENDORS_SNAPSHOTS: 'vendors.snapshots',
+  LISTING_SNAPSHOTS: 'listing.snapshots',
 
   // ── Delivery Zones ─────────────────────────────────────────────
   DELIVERY_ZONES_VIEW: 'delivery-zones.view',
@@ -88,6 +89,9 @@ const PERMISSIONS = {
 
   // ── Notifications ──────────────────────────────────────────────
   NOTIFICATIONS_VIEW: 'notifications.view',
+
+  // ── Reports ────────────────────────────────────────────────────
+  REPORTS_MANAGE: 'reports.manage',
 
   // ── Activities ─────────────────────────────────────────────────
   ACTIVITIES_VIEW: 'activities.view',
@@ -141,10 +145,13 @@ const DEFAULT_ROLE_PERMISSIONS = {
     PERMISSIONS.EXTENSION_ADMIN,
     PERMISSIONS.VENDORS_VIEW,
     PERMISSIONS.VENDORS_MANAGE,
+    PERMISSIONS.VENDORS_SNAPSHOTS,
+    PERMISSIONS.LISTING_SNAPSHOTS,
     PERMISSIONS.DELIVERY_ZONES_VIEW,
     PERMISSIONS.DELIVERY_ZONES_MANAGE,
     PERMISSIONS.BD_TIERS_VIEW,
     PERMISSIONS.NOTIFICATIONS_VIEW,
+    PERMISSIONS.REPORTS_MANAGE,
     PERMISSIONS.ACTIVITIES_VIEW,
     PERMISSIONS.ACTIVITIES_CREATE,
     PERMISSIONS.FINANCE_VIEW,

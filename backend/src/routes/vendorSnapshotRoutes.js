@@ -9,6 +9,7 @@ router.use(protect);
 router.use(requirePermission('vendors.snapshots'));
 
 router.get('/', vendorSnapshotController.getSnapshots);
+router.get('/live', vendorSnapshotController.getLiveData);
 router.get('/latest', vendorSnapshotController.getLatestSnapshot);
 router.get('/next-schedule', vendorSnapshotController.getNextSchedule);
 router.get('/compare', vendorSnapshotController.getComparison);

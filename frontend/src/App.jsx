@@ -138,8 +138,16 @@ function App() {
             <Route path="reports/:id/edit" element={<ReportFormPage />} />
             <Route path="reports/headings" element={<ReportHeadingsPage />} />
             <Route path="reports/daily" element={<DailyReportPage />} />
-            <Route path="listing-snapshots" element={<ListingSnapshotsPage />} />
-            <Route path="vendor-snapshots" element={<VendorSnapshotsPage />} />
+            <Route path="listing-snapshots" element={
+              <ProtectedRoute permissions={['listing.snapshots']}>
+                <ListingSnapshotsPage />
+              </ProtectedRoute>
+            } />
+            <Route path="vendor-snapshots" element={
+              <ProtectedRoute permissions={['vendors.snapshots']}>
+                <VendorSnapshotsPage />
+              </ProtectedRoute>
+            } />
             <Route path="departments" element={<DepartmentsPage />} />
           </Route>
 
