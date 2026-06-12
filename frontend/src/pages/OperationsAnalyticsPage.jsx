@@ -1,12 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import {
   BarChart3, Package, ShieldCheck, ShieldX, Clock, FileText,
   TrendingUp, TrendingDown, Users, ChevronLeft, RefreshCw, Calendar, Trash2,
-  Trophy, AlertTriangle, Timer, Activity, ArrowUp, ArrowDown, Flame, Target, Store
+  Trophy, AlertTriangle, Timer, Activity, ArrowUp, ArrowDown, Flame, Target, Store, User,
 } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, LineChart, Line, AreaChart, Area } from 'recharts';
 import { API_URL } from '../config/api';
 
 const OperationsAnalyticsPage = () => {
@@ -28,6 +29,9 @@ const OperationsAnalyticsPage = () => {
   const [savingTarget, setSavingTarget] = useState(false);
   const [totalMarketplaceProducts, setTotalMarketplaceProducts] = useState(null);
   const [mpLoading, setMpLoading] = useState(true);
+  const [selectedUserId, setSelectedUserId] = useState(null);
+  const [userDetail, setUserDetail] = useState(null);
+  const [userDetailLoading, setUserDetailLoading] = useState(false);
 
   useEffect(() => {
     fetchAnalytics();
@@ -104,6 +108,31 @@ const OperationsAnalyticsPage = () => {
       setTeamPerfLoading(false);
     }
   };
+
+  const fetchUserDetail = useCallback(async (userId) => {
+    setUserDetailLoading(true);
+    setSelectedUserId(userId);
+    try {
+      const dateParams = {};
+      if (startDate) dateParams.start_date = startDate;
+      if (endDate) dateParams.end_date = endDate;
+      if (!startDate && !endDate) dateParams.period = period === 'today' ? '7d' : period;
+      const params = new URLSearchParams(dateParams).toString();
+      const res = await axios.get(`${API_URL}/extension/user/${userId}/detail${params ? `?${params}` : ''}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setUserDetail(res.data.data);
+    } catch (err) {
+      console.error('Error fetching user detail:', err);
+      setUserDetail(null);
+    } finally {
+      setUserDetailLoading(false);
+    }
+  }, [startDate, endDate, period, token]);
+
+  useEffect(() => {
+    if (selectedUserId && fetchUserDetail) fetchUserDetail(selectedUserId);
+  }, [period, startDate, endDate, selectedUserId, fetchUserDetail]);
 
   const saveTarget = async (team) => {
     setSavingTarget(true);
@@ -265,7 +294,7 @@ const OperationsAnalyticsPage = () => {
             ].map(({ key, label, icon: Icon }) => (
               <button
                 key={key}
-                onClick={() => setView(key)}
+                onClick={() => { setView(key); setSelectedUserId(null); setUserDetail(null); }}
                 className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
                   view === key
                     ? 'bg-white text-red-600 shadow-sm'
@@ -346,6 +375,40 @@ const OperationsAnalyticsPage = () => {
               </div>
             </div>
           </div>
+
+          {/* Team Weekly Chart */}
+          {comparisonRows.length > 0 && (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-bold text-slate-700">
+                  {startDate || period !== 'today' ? 'Team Performance' : 'Team Performance — Today'}
+                </h3>
+                <span className="text-[10px] font-bold text-slate-400">{comparisonRows.length} days</span>
+              </div>
+              <div className="h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={comparisonRows} margin={{ top: 4, right: 4, left: -12, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} />
+                    <Tooltip
+                      contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }}
+                      labelStyle={{ fontWeight: 700, marginBottom: 4 }}
+                    />
+                    <Legend
+                      wrapperStyle={{ fontSize: 10, fontWeight: 600 }}
+                      iconType="circle"
+                      iconSize={8}
+                    />
+                    <Bar dataKey="listed" name="Listings" fill="#3b82f6" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="specs" name="Specs" fill="#8b5cf6" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="approved" name="QC Approved" fill="#10b981" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="rejected" name="QC Rejected" fill="#ef4444" radius={[3, 3, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
 
           {/* Summary Metric Cards */}
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
@@ -768,14 +831,30 @@ const OperationsAnalyticsPage = () => {
       {/* By Users View */}
       {view === 'users' && (
         <>
-          {userRows.length > 0 ? (
+          {selectedUserId ? (
+            /* User Detail View */
+            <UserDetailView
+              userId={selectedUserId}
+              userDetail={userDetail}
+              loading={userDetailLoading}
+              onBack={() => { setSelectedUserId(null); setUserDetail(null); }}
+              period={period}
+              startDate={startDate}
+              endDate={endDate}
+              fetchUserDetail={fetchUserDetail}
+            />
+          ) : userRows.length > 0 ? (
             <>
               {/* User Cards */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {userRows.map((user) => {
                   const userSession = analytics?.userSessions?.find(s => s.user_id === user.id);
                   return (
-                    <div key={user.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+                    <div
+                      key={user.id}
+                      onClick={() => fetchUserDetail(user.id)}
+                      className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 cursor-pointer hover:ring-2 hover:ring-red-300 hover:shadow-md transition-all"
+                    >
                       <div className="flex items-center justify-between mb-4">
                         <div>
                           <h3 className="text-base font-extrabold text-slate-900">{user.name}</h3>
@@ -790,7 +869,7 @@ const OperationsAnalyticsPage = () => {
                           </div>
                           {isAdmin && (
                             <button
-                              onClick={() => deleteUserEvents(user.id, user.name)}
+                              onClick={(e) => { e.stopPropagation(); deleteUserEvents(user.id, user.name); }}
                               className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                               title={`Delete all events for ${user.name}`}
                             >
@@ -867,7 +946,7 @@ const OperationsAnalyticsPage = () => {
                       {userRows.map((user) => {
                         const userSession = analytics?.userSessions?.find(s => s.user_id === user.id);
                         return (
-                          <tr key={user.id} className="hover:bg-slate-50">
+                          <tr key={user.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => fetchUserDetail(user.id)}>
                             <td className="px-4 py-2.5">
                               <div className="font-bold text-slate-900">{user.name}</div>
                               {user.team && <div className="text-[10px] text-slate-400 uppercase">{user.team}</div>}
@@ -1242,5 +1321,275 @@ const EmptyState = () => (
     <p className="text-xs text-slate-300 mt-1">Activity will appear here once the extension starts capturing events</p>
   </div>
 );
+
+const UserDetailView = ({ userId, userDetail, loading, onBack, period, startDate, endDate, fetchUserDetail }) => {
+  const detailTypes = [
+    { key: 'listing_created', label: 'Listings', color: 'blue' },
+    { key: 'spec_added', label: 'Specs', color: 'violet' },
+    { key: 'product_updated', label: 'Updates', color: 'slate' },
+    { key: 'qc_approved', label: 'QC Pass', color: 'emerald' },
+    { key: 'qc_rejected', label: 'QC Fail', color: 'red' },
+  ];
+
+  const detailColorMap = {
+    blue: { bg: 'bg-blue-50', text: 'text-blue-600' },
+    violet: { bg: 'bg-violet-50', text: 'text-violet-600' },
+    slate: { bg: 'bg-slate-50', text: 'text-slate-600' },
+    emerald: { bg: 'bg-emerald-50', text: 'text-emerald-600' },
+    red: { bg: 'bg-red-50', text: 'text-red-600' },
+  };
+
+  const periodLabel = startDate && endDate
+    ? `${new Date(startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+    : period === '7d' ? 'Last 7 days'
+    : period === '30d' ? 'Last 30 days'
+    : period === '90d' ? 'Last 90 days'
+    : 'Today';
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <div className="w-8 h-8 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!userDetail) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <button onClick={onBack} className="flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-slate-600">
+            <ChevronLeft size={14} />
+            Back to Users
+          </button>
+        </div>
+        <EmptyState />
+      </div>
+    );
+  }
+
+  const { user, summary, dailyBreakdown, sessions, totalSessions, totalActiveMinutes, bestWorst, recentEvents } = userDetail;
+
+  return (
+    <div className="space-y-4">
+      {/* Back + User Header */}
+      <div className="flex items-center justify-between">
+        <button
+          onClick={onBack}
+          className="flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors"
+        >
+          <ChevronLeft size={14} />
+          Back to Users
+        </button>
+        <div className="flex items-center gap-3">
+          <div className="text-right">
+            <h3 className="text-lg font-extrabold text-slate-900">{user.name}</h3>
+            <div className="flex items-center gap-2 justify-end mt-0.5">
+              {user.team && <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{user.team}</span>}
+              <span className="text-[10px] font-bold text-red-500 bg-red-50 px-1.5 py-0.5 rounded">{periodLabel}</span>
+            </div>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center">
+            <User size={18} className="text-red-600" />
+          </div>
+          <button
+            onClick={() => fetchUserDetail(userId)}
+            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw size={14} />
+          </button>
+        </div>
+      </div>
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-5 gap-3">
+        {detailTypes.map(({ key, label, color }) => {
+          const c = detailColorMap[color];
+          const count = summary[key] || 0;
+          return (
+            <div key={key} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 text-center">
+              <p className={`text-2xl font-extrabold ${c.text}`}>{count}</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">{label}</p>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Session Summary */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Sessions</p>
+          <p className="text-xl font-extrabold text-slate-900 mt-1">{totalSessions}</p>
+        </div>
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Active Time</p>
+          <p className="text-xl font-extrabold text-emerald-600 mt-1">{Math.round(totalActiveMinutes / 60)}h {totalActiveMinutes % 60}m</p>
+        </div>
+      </div>
+
+      {/* No Data Message */}
+      {summary.total === 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center gap-3">
+          <AlertTriangle size={16} className="text-amber-500 shrink-0" />
+          <div>
+            <p className="text-xs font-bold text-amber-700">No activity in this period</p>
+            <p className="text-[10px] text-amber-600 mt-0.5">Try a wider date range. Currently showing <span className="font-bold">{periodLabel}</span>.</p>
+          </div>
+        </div>
+      )}
+
+      {/* Performance Chart */}
+      {dailyBreakdown && dailyBreakdown.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+          <h3 className="text-sm font-bold text-slate-700 mb-4">Daily Performance</h3>
+          <div className="h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={dailyBreakdown} margin={{ top: 4, right: 4, left: -12, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} />
+                <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} />
+                <Tooltip
+                  contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }}
+                  labelStyle={{ fontWeight: 700, marginBottom: 4 }}
+                />
+                <Legend wrapperStyle={{ fontSize: 10, fontWeight: 600 }} iconType="circle" iconSize={8} />
+                <Bar dataKey="listing_created" name="Listings" fill="#3b82f6" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="spec_added" name="Specs" fill="#8b5cf6" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="qc_approved" name="QC Approved" fill="#10b981" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="qc_rejected" name="QC Rejected" fill="#ef4444" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {/* Sessions */}
+      {sessions && sessions.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100">
+            <h3 className="text-sm font-bold text-slate-700">
+              Sessions <span className="text-slate-400 font-normal">({sessions.length} total, {Math.round(totalActiveMinutes / 60)}h {totalActiveMinutes % 60}m active)</span>
+            </h3>
+          </div>
+          <div className="divide-y divide-slate-50">
+            {sessions.map((s) => (
+              <div key={s.session_id} className="px-5 py-3 flex items-center gap-4 hover:bg-slate-50">
+                <span className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-extrabold text-slate-500">
+                  {s.session_id}
+                </span>
+                <div className="flex-1">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-bold text-slate-700">
+                      {new Date(s.start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                      {' — '}
+                      {new Date(s.end).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                      {s.duration_min}m
+                    </span>
+                    <span className="text-[10px] font-bold text-slate-400">
+                      {s.event_count} events
+                    </span>
+                  </div>
+                  <div className="flex gap-1 mt-1">
+                    {[...new Set(s.events.map(e => e.event_type))].slice(0, 5).map(type => (
+                      <span key={type} className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                        {type.replace(/_/g, ' ')}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Best & Worst Dates */}
+      {bestWorst && (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+          <h3 className="text-sm font-bold text-slate-700 mb-4">Best & Lowest Days</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {detailTypes.map(({ key, label, color }) => {
+              const bw = bestWorst[key];
+              if (!bw?.best) return null;
+              const c = detailColorMap[color];
+              return (
+                <div key={key} className="border border-slate-100 rounded-xl p-3">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">{label}</p>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <ArrowUp size={12} className="text-emerald-500 shrink-0" />
+                      <span className="text-[10px] font-bold text-emerald-600">Best</span>
+                      <span className="text-xs font-bold text-slate-900">{bw.best.date}</span>
+                      <span className={`ml-auto text-sm font-extrabold ${c.text}`}>{bw.best.count}</span>
+                    </div>
+                    {bw.best.sessions?.length > 0 && (
+                      <div className="ml-5 text-[9px] text-slate-400">
+                        {bw.best.sessions.map(s => (
+                          <div key={s.session_id}>
+                            Session #{s.session_id}: {new Date(s.start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} {' — '} {new Date(s.end).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} ({s.duration_min}m)
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {bw.worst && bw.worst.date !== bw.best.date && (
+                      <div className="flex items-center gap-2">
+                        <ArrowDown size={12} className="text-red-500 shrink-0" />
+                        <span className="text-[10px] font-bold text-red-500">Lowest</span>
+                        <span className="text-xs font-bold text-slate-900">{bw.worst.date}</span>
+                        <span className="ml-auto text-sm font-extrabold text-slate-400">{bw.worst.count}</span>
+                      </div>
+                    )}
+                    {bw.worst?.sessions?.length > 0 && bw.worst.date !== bw.best.date && (
+                      <div className="ml-5 text-[9px] text-slate-400">
+                        {bw.worst.sessions.map(s => (
+                          <div key={s.session_id}>
+                            Session #{s.session_id}: {new Date(s.start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} {' — '} {new Date(s.end).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} ({s.duration_min}m)
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Recent Events */}
+      {recentEvents && recentEvents.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100">
+            <h3 className="text-sm font-bold text-slate-700">
+              Recent Events <span className="text-slate-400 font-normal">({recentEvents.length})</span>
+            </h3>
+          </div>
+          <div className="divide-y divide-slate-50 max-h-64 overflow-y-auto">
+            {recentEvents.map((ev, i) => (
+              <div key={i} className="px-5 py-2.5 flex items-center gap-3 hover:bg-slate-50">
+                <span className="text-[10px] font-bold text-slate-400 w-16 shrink-0">
+                  {new Date(ev.created_at).toLocaleTimeString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                </span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  ev.event_type === 'listing_created' ? 'bg-blue-50 text-blue-600' :
+                  ev.event_type === 'spec_added' ? 'bg-violet-50 text-violet-600' :
+                  ev.event_type === 'qc_approved' ? 'bg-emerald-50 text-emerald-600' :
+                  ev.event_type === 'qc_rejected' ? 'bg-red-50 text-red-600' :
+                  'bg-slate-100 text-slate-600'
+                }`}>
+                  {ev.event_type.replace(/_/g, ' ')}
+                </span>
+                <span className="text-xs font-bold text-slate-700 truncate flex-1">{ev.product_name || 'Unknown'}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export default OperationsAnalyticsPage;
