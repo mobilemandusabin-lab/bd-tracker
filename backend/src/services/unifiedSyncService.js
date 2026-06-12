@@ -68,6 +68,17 @@ const runFullSync = async (triggeredBy = 'cron', userId = null) => {
       console.error('[Full Sync] Nepalcan sync failed:', err.message);
     }
 
+    const marketplaceStart = Date.now();
+    try {
+      tasks.marketplaceProducts = { ran: true };
+      tasks.marketplaceProducts.total = result?.marketplaceProducts ?? 0;
+      tasks.marketplaceProducts.success = true;
+      tasks.marketplaceProducts.durationMs = Date.now() - marketplaceStart;
+    } catch (err) {
+      tasks.marketplaceProducts = { ran: true, success: false, error: err.message, durationMs: Date.now() - marketplaceStart };
+      console.error('[Full Sync] Marketplace products fetch failed:', err.message);
+    }
+
     const vendorSnapStart = Date.now();
     try {
       tasks.vendorSnapshots = { ran: true };

@@ -245,7 +245,7 @@ build_12slide_template('${TEMPLATE_PPTX}', '${TEMPLATE_12SLIDE}')
       `
     ], { stdio: 'pipe' });
     if (result.status !== 0) {
-      console.error('Failed to build 12-slide template:', result.stderr.toString());
+      console.error('Failed to build 12-slide template:', result.stderr?.toString() || result.error?.message || 'Unknown error');
       throw new Error('12-slide template build failed');
     }
   }

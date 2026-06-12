@@ -1069,6 +1069,7 @@ const syncAllNepalcanData = async (userId = null) => {
   let ordersResult = { synced: 0, message: '' };
   let vendorsResult = { synced: 0, updated: 0, created: 0, message: '' };
   let errorMessage = null;
+  let marketplaceProductsCount = 0;
 
   try {
     console.log('[Full Sync] Getting Nepalcan token...');
@@ -1086,6 +1087,10 @@ const syncAllNepalcanData = async (userId = null) => {
     console.log('[Full Sync] Starting service branches sync...');
     const branchesResult = await syncServiceBranches(loginToken);
     console.log(`[Full Sync] Service branches sync complete: ${branchesResult.updated} vendors updated`);
+
+    console.log('[Full Sync] Fetching marketplace products count...');
+    marketplaceProductsCount = await fetchTotalMarketplaceProducts(loginToken);
+    console.log(`[Full Sync] Marketplace products count: ${marketplaceProductsCount}`);
   } catch (err) {
     errorMessage = err.message;
     console.error('[Full Sync] Error:', errorMessage);
@@ -1100,6 +1105,7 @@ const syncAllNepalcanData = async (userId = null) => {
     vendorsSynced: vendorsResult.synced || 0,
     leadsSynced: vendorsResult.created || 0,
     mergedRecords: vendorsResult.updated || 0,
+    marketplaceProducts: marketplaceProductsCount,
     errorMessage,
     durationMs
   });
@@ -1108,6 +1114,7 @@ const syncAllNepalcanData = async (userId = null) => {
     success: !errorMessage,
     orders: ordersResult,
     vendors: vendorsResult,
+    marketplaceProducts: marketplaceProductsCount,
     durationMs
   };
 };

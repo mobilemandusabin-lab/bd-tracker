@@ -8,6 +8,7 @@
     "dev": "nodemon src/server.js",
     "seed": "node src/utils/seedData.js",
     "build": "node --check src/controllers/*.js && node --check src/services/*.js && node --check src/middlewares/*.js && node --check src/models/*.js && node --check src/routes/*.js && echo 'Syntax OK'",
+    "postinstall": "pip install -r ../scripts/requirements.txt",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

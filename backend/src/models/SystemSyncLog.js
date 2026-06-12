@@ -62,6 +62,13 @@ const systemSyncLogSchema = new mongoose.Schema({
       snapshotsTaken: { type: Number, default: 0 },
       error: { type: String, default: null },
       durationMs: { type: Number, default: 0 }
+    },
+    marketplaceProducts: {
+      ran: { type: Boolean, default: false },
+      success: { type: Boolean, default: null },
+      total: { type: Number, default: 0 },
+      error: { type: String, default: null },
+      durationMs: { type: Number, default: 0 }
     }
   },
   errorMessage: {

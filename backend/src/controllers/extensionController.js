@@ -609,73 +609,78 @@ exports.getAnalytics = async (req, res) => {
     // Lead model for vendor name lookups
     const Lead = require('../models/Lead');
 
-    // ── Single $facet aggregation — 1 collection scan instead of 8 ──
+    // ── Parallel individual aggregations (replaces single $facet to avoid silent failures) ──
     const BULK_SUM = { $ifNull: ['$bulk_count', 1] };
-    const [facetResult] = await ExtensionEvent.aggregate([
-      { $match: matchFilter },
-      { $facet: {
-        eventsByType: [
-          { $group: { _id: '$event_type', count: { $sum: BULK_SUM } } }
-        ],
-        dailyEvents: [
-          { $group: { _id: { date: { $dateToString: { format: '%Y-%m-%d', date: '$created_at' } }, event_type: '$event_type' }, count: { $sum: BULK_SUM } } },
-          { $sort: { '_id.date': 1 } }
-        ],
-        topProducts: [
-          { $match: { product_name: { $ne: null } } },
-          { $group: { _id: '$product_name', total: { $sum: BULK_SUM }, listings: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, 1, 0] } }, specs: { $sum: { $cond: [{ $eq: ['$event_type', 'spec_added'] }, 1, 0] } }, updates: { $sum: { $cond: [{ $eq: ['$event_type', 'product_updated'] }, 1, 0] } }, qc_approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, BULK_SUM, 0] } }, qc_rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, BULK_SUM, 0] } } } },
-          { $sort: { total: -1 } },
-          { $limit: 10 }
-        ],
-        topVendorsRaw: [
-          { $match: { vendor_id: { $ne: null } } },
-          { $group: { _id: '$vendor_id', total: { $sum: BULK_SUM }, listings: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, 1, 0] } }, qc_approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, BULK_SUM, 0] } }, qc_rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, BULK_SUM, 0] } }, products: { $addToSet: '$product_name' } } },
-          { $addFields: { product_count: { $size: '$products' } } },
-          { $sort: { total: -1 } },
-          { $limit: 10 }
-        ],
-        hourlyActivity: [
-          { $group: { _id: { hour: { $hour: '$created_at' }, dow: { $dayOfWeek: '$created_at' } }, count: { $sum: BULK_SUM } } },
-          { $sort: { '_id.dow': 1, '_id.hour': 1 } }
-        ],
-        eventsByUser: [
-          { $group: { _id: { user_id: '$user_id', event_type: '$event_type' }, count: { $sum: BULK_SUM } } },
-          { $lookup: { from: 'users', localField: '_id.user_id', foreignField: '_id', as: 'user' } },
-          { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
-          { $group: { _id: '$_id.user_id', user_name: { $first: '$user.name' }, user_team: { $first: '$user.team' }, events: { $push: { event_type: '$_id.event_type', count: '$count' } }, total: { $sum: '$count' } } },
-          { $sort: { total: -1 } }
-        ],
-        recentEvents: [
-          { $sort: { created_at: -1 } },
-          { $limit: 20 },
-          { $lookup: { from: 'users', localField: 'user_id', foreignField: '_id', as: 'user' } },
-          { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
-          { $project: { event_type: 1, product_id: 1, product_name: 1, vendor_id: 1, qc_status: 1, pending_count: 1, created_at: 1, user_id: { _id: '$user._id', name: '$user.name', team: '$user.team' } } }
-        ],
-        latestPending: [
-          { $match: { event_type: 'qc_pending', pending_count: { $ne: null } } },
-          { $sort: { created_at: -1 } },
-          { $limit: 1 },
-          { $project: { _id: 0, pending_count: 1 } }
-        ],
-        userSessions: [
-          { $sort: { user_id: 1, created_at: 1 } },
-          { $group: { _id: '$user_id', events: { $push: { type: '$event_type', time: '$created_at' } } } },
-          { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'user' } },
-          { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } }
-        ]
-      } }
+    const [
+      eventsByType,
+      dailyEvents,
+      topProducts,
+      topVendorsRaw,
+      hourlyActivity,
+      eventsByUser,
+      recentEvents,
+      latestPending,
+      userSessions
+    ] = await Promise.all([
+      ExtensionEvent.aggregate([
+        { $match: matchFilter },
+        { $group: { _id: '$event_type', count: { $sum: BULK_SUM } } }
+      ]),
+      ExtensionEvent.aggregate([
+        { $match: matchFilter },
+        { $group: { _id: { date: { $dateToString: { format: '%Y-%m-%d', date: '$created_at' } }, event_type: '$event_type' }, count: { $sum: BULK_SUM } } },
+        { $sort: { '_id.date': 1 } }
+      ]),
+      ExtensionEvent.aggregate([
+        { $match: { ...matchFilter, product_name: { $ne: null } } },
+        { $group: { _id: '$product_name', total: { $sum: BULK_SUM }, listings: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, 1, 0] } }, specs: { $sum: { $cond: [{ $eq: ['$event_type', 'spec_added'] }, 1, 0] } }, updates: { $sum: { $cond: [{ $eq: ['$event_type', 'product_updated'] }, 1, 0] } }, qc_approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, BULK_SUM, 0] } }, qc_rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, BULK_SUM, 0] } } } },
+        { $sort: { total: -1 } },
+        { $limit: 10 }
+      ]),
+      ExtensionEvent.aggregate([
+        { $match: { ...matchFilter, vendor_id: { $ne: null } } },
+        { $group: { _id: '$vendor_id', total: { $sum: BULK_SUM }, listings: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, 1, 0] } }, qc_approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, BULK_SUM, 0] } }, qc_rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, BULK_SUM, 0] } }, products: { $addToSet: '$product_name' } } },
+        { $addFields: { product_count: { $size: '$products' } } },
+        { $sort: { total: -1 } },
+        { $limit: 10 }
+      ]),
+      ExtensionEvent.aggregate([
+        { $match: matchFilter },
+        { $group: { _id: { hour: { $hour: '$created_at' }, dow: { $dayOfWeek: '$created_at' } }, count: { $sum: BULK_SUM } } },
+        { $sort: { '_id.dow': 1, '_id.hour': 1 } }
+      ]),
+      ExtensionEvent.aggregate([
+        { $match: matchFilter },
+        { $group: { _id: { user_id: '$user_id', event_type: '$event_type' }, count: { $sum: BULK_SUM } } },
+        { $lookup: { from: 'users', localField: '_id.user_id', foreignField: '_id', as: 'user' } },
+        { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+        { $group: { _id: '$_id.user_id', user_name: { $first: '$user.name' }, user_team: { $first: '$user.team' }, events: { $push: { event_type: '$_id.event_type', count: '$count' } }, total: { $sum: '$count' } } },
+        { $sort: { total: -1 } }
+      ]),
+      ExtensionEvent.aggregate([
+        { $match: matchFilter },
+        { $sort: { created_at: -1 } },
+        { $limit: 20 },
+        { $lookup: { from: 'users', localField: 'user_id', foreignField: '_id', as: 'user' } },
+        { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+        { $project: { event_type: 1, product_id: 1, product_name: 1, vendor_id: 1, qc_status: 1, pending_count: 1, created_at: 1, user_id: { _id: '$user._id', name: '$user.name', team: '$user.team' } } }
+      ]),
+      ExtensionEvent.aggregate([
+        { $match: { ...matchFilter, event_type: 'qc_pending', pending_count: { $ne: null } } },
+        { $sort: { created_at: -1 } },
+        { $limit: 1 },
+        { $project: { _id: 0, pending_count: 1 } }
+      ]),
+      ExtensionEvent.aggregate([
+        { $match: matchFilter },
+        { $sort: { user_id: 1, created_at: 1 } },
+        { $group: { _id: '$user_id', events: { $push: { type: '$event_type', time: '$created_at' } } } },
+        { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'user' } },
+        { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } }
+      ])
     ]);
 
-    const eventsByType = facetResult.eventsByType || [];
-    const dailyEvents = facetResult.dailyEvents || [];
-    const topProducts = facetResult.topProducts || [];
-    const topVendorsRaw = facetResult.topVendorsRaw || [];
-    const hourlyActivity = facetResult.hourlyActivity || [];
-    const eventsByUser = facetResult.eventsByUser || [];
-    const recentEvents = facetResult.recentEvents || [];
-    const latestPendingCount = (facetResult.latestPending || [])[0]?.pending_count ?? null;
-    const userSessions = facetResult.userSessions || [];
+    const latestPendingCount = (latestPending || [])[0]?.pending_count ?? null;
 
     const dailyPendingCounts = []; // Folded into latestPendingCount
 
@@ -1289,6 +1294,180 @@ exports.deleteOperationalGoal = async (req, res) => {
 
     await OperationalGoal.findByIdAndDelete(req.params.id);
     res.status(200).json({ status: 'success', message: 'Goal override deleted' });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+// GET /extension/user/:userId/detail — comprehensive per-user data for a date range
+exports.getUserDetail = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { start_date, end_date, period = '30d' } = req.query;
+
+    const isAdmin = req.userPermissions?.includes('extension.admin');
+    if (!isAdmin && req.user._id.toString() !== userId) {
+      return res.status(403).json({ status: 'fail', message: 'Not authorized' });
+    }
+
+    let startDate, endDate;
+    if (start_date) {
+      startDate = new Date(start_date + 'T00:00:00.000Z');
+      endDate = end_date
+        ? new Date(end_date + 'T23:59:59.999Z')
+        : new Date();
+    } else {
+      endDate = new Date();
+      switch (period) {
+        case '7d': startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000); break;
+        case '30d': startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); break;
+        case '90d': startDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000); break;
+        default: startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      }
+    }
+
+    const userIdObj = new mongoose.Types.ObjectId(userId);
+    const matchFilter = { user_id: userIdObj, created_at: { $gte: startDate, $lte: endDate }, product_id: { $ne: 'b' } };
+
+    const BULK_SUM = { $ifNull: ['$bulk_count', 1] };
+
+    const userInfo = await User.findById(userId).select('name team role').lean();
+
+    const [facetResult, rawEvents] = await Promise.all([
+      ExtensionEvent.aggregate([
+        { $match: matchFilter },
+        { $facet: {
+          eventsByType: [
+            { $group: { _id: '$event_type', count: { $sum: BULK_SUM } } }
+          ],
+          dailyBreakdown: [
+            {
+              $group: {
+                _id: { date: { $dateToString: { format: '%Y-%m-%d', date: '$created_at' } }, event_type: '$event_type' },
+                count: { $sum: BULK_SUM }
+              }
+            },
+            { $sort: { '_id.date': 1 } }
+          ],
+          hourlyActivity: [
+            { $group: { _id: { hour: { $hour: '$created_at' }, dow: { $dayOfWeek: '$created_at' } }, count: { $sum: BULK_SUM } } },
+            { $sort: { '_id.dow': 1, '_id.hour': 1 } }
+          ],
+          byProduct: [
+            { $match: { product_name: { $ne: null } } },
+            { $group: { _id: '$product_name', total: { $sum: BULK_SUM }, listings: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, 1, 0] } }, specs: { $sum: { $cond: [{ $eq: ['$event_type', 'spec_added'] }, 1, 0] } }, updates: { $sum: { $cond: [{ $eq: ['$event_type', 'product_updated'] }, 1, 0] } }, qc_approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, BULK_SUM, 0] } }, qc_rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, BULK_SUM, 0] } } } },
+            { $sort: { total: -1 } },
+            { $limit: 10 }
+          ],
+          rawTimeline: [
+            { $sort: { created_at: 1 } },
+            { $project: { event_type: 1, created_at: 1 } }
+          ]
+        } }
+      ]),
+      ExtensionEvent.find(matchFilter)
+        .select('product_name product_id created_at vendor_id qc_status event_type metadata')
+        .sort({ created_at: -1 })
+        .limit(50)
+        .lean()
+    ]);
+
+    const eventsByType = facetResult.eventsByType || [];
+    const dailyBreakdownRaw = facetResult.dailyBreakdown || [];
+    const timeline = facetResult.rawTimeline || [];
+
+    const summary = { listing_created: 0, product_created: 0, product_updated: 0, qc_approved: 0, qc_rejected: 0, spec_added: 0, session_ended: 0 };
+    for (const item of eventsByType) {
+      if (summary.hasOwnProperty(item._id)) summary[item._id] = item.count;
+    }
+    summary.total = Object.values(summary).reduce((a, b) => a + b, 0);
+
+    const dailyByDate = {};
+    for (const ev of dailyBreakdownRaw) {
+      if (!dailyByDate[ev._id.date]) dailyByDate[ev._id.date] = {};
+      dailyByDate[ev._id.date][ev._id.event_type] = ev.count;
+    }
+    const allDates = Object.keys(dailyByDate).sort();
+    const dailyBreakdown = allDates.map(date => ({
+      date,
+      listing_created: dailyByDate[date].listing_created || 0,
+      spec_added: dailyByDate[date].spec_added || 0,
+      product_updated: dailyByDate[date].product_updated || 0,
+      qc_approved: dailyByDate[date].qc_approved || 0,
+      qc_rejected: dailyByDate[date].qc_rejected || 0,
+    }));
+
+    const SESSION_GAP_MS = 60 * 60 * 1000;
+    const sessions = [];
+    let currentSession = null;
+    for (const ev of timeline) {
+      const t = new Date(ev.created_at).getTime();
+      if (!currentSession || (t - currentSession.end) > SESSION_GAP_MS) {
+        if (currentSession) sessions.push(currentSession);
+        currentSession = { start: t, end: t, event_count: 1, events: [ev] };
+      } else {
+        currentSession.end = t;
+        currentSession.event_count++;
+        currentSession.events.push(ev);
+      }
+    }
+    if (currentSession) sessions.push(currentSession);
+
+    const sessionsOutput = sessions.map((s, i) => ({
+      session_id: i + 1,
+      start: new Date(s.start).toISOString(),
+      end: new Date(s.end).toISOString(),
+      duration_min: Math.round((s.end - s.start) / 60000),
+      event_count: s.event_count,
+      events: s.events.map(e => ({ event_type: e.event_type, created_at: e.created_at }))
+    }));
+
+    const totalActiveMinutes = sessionsOutput.reduce((sum, s) => sum + s.duration_min, 0);
+    const totalSessions = sessionsOutput.length;
+
+    const metricKeys = ['listing_created', 'spec_added', 'product_updated', 'qc_approved', 'qc_rejected'];
+    const bestWorst = {};
+    for (const key of metricKeys) {
+      const validDays = dailyBreakdown.filter(d => d[key] > 0);
+      if (validDays.length > 0) {
+        const sorted = [...validDays].sort((a, b) => b[key] - a[key]);
+        const bestDate = sorted[0].date;
+        const worstDate = sorted[sorted.length - 1].date;
+
+        const bestSessions = sessionsOutput.filter(s => s.start.slice(0, 10) === bestDate);
+        const worstSessions = sessionsOutput.filter(s => s.start.slice(0, 10) === worstDate);
+
+        bestWorst[key] = {
+          best: { date: bestDate, count: sorted[0][key], sessions: bestSessions },
+          worst: { date: worstDate, count: sorted[sorted.length - 1][key], sessions: worstSessions }
+        };
+      } else {
+        bestWorst[key] = { best: null, worst: null };
+      }
+    }
+
+    const qcStats = {
+      approved: summary.qc_approved || 0,
+      rejected: summary.qc_rejected || 0,
+      total: (summary.qc_approved || 0) + (summary.qc_rejected || 0)
+    };
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        user: userInfo ? { name: userInfo.name, team: userInfo.team, role: userInfo.role } : { name: 'Unknown', team: '', role: '' },
+        summary,
+        dailyBreakdown,
+        sessions: sessionsOutput,
+        totalSessions,
+        totalActiveMinutes,
+        bestWorst,
+        qcStats,
+        topProducts: facetResult.byProduct || [],
+        hourlyActivity: facetResult.hourlyActivity || [],
+        recentEvents: rawEvents,
+      }
+    });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
   }

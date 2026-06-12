@@ -38,6 +38,10 @@ const nepalcanSyncLogSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  marketplaceProducts: {
+    type: Number,
+    default: 0
+  },
   totalProcessed: {
     type: Number,
     default: 0
