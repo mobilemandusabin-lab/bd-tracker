@@ -85,13 +85,12 @@ listingSnapshotSchema.statics.captureSnapshot = async function (type, marketplac
     endDate = lastOfMonth;
     endDate.setHours(23, 59, 59, 999);
   } else {
-    const daysSinceFriday = (now.getDay() + 2) % 7;
-    endDate = new Date(now);
-    endDate.setDate(endDate.getDate() - daysSinceFriday);
-    endDate.setHours(23, 59, 59, 999);
-    startDate = new Date(endDate);
-    startDate.setDate(startDate.getDate() - 5);
+    startDate = new Date(now);
+    startDate.setDate(startDate.getDate() - ((startDate.getDay() + 7 - 0) % 7));
     startDate.setHours(0, 0, 0, 0);
+    endDate = new Date(startDate);
+    endDate.setDate(endDate.getDate() + 5);
+    endDate.setHours(23, 59, 59, 999);
   }
 
   const [specEvents, listingEvents, verifiedProductsAgg] = await Promise.all([

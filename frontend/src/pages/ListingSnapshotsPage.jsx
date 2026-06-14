@@ -376,7 +376,7 @@ export default function ListingSnapshotsPage({ embedded }) {
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-5">
               {targetMetrics.map(({ key, label, icon: Icon, color }) => {
-                const current = latest?.[key];
+                const current = liveData?.[key] ?? 0;
                 const target = latest?.targets?.[key];
                 const bgMap = { orange: 'bg-orange-50 border-orange-100', amber: 'bg-amber-50 border-amber-100', emerald: 'bg-emerald-50 border-emerald-100' };
                 const textMap = { orange: 'text-orange-600', amber: 'text-amber-600', emerald: 'text-emerald-600' };
@@ -387,24 +387,27 @@ export default function ListingSnapshotsPage({ embedded }) {
                       <Icon size={14} className={textMap[color]} />
                       {label}
                     </label>
-                    {current != null && (
-                      <p className="text-[11px] text-slate-500 mb-2">
-                        Current: <span className="font-bold text-slate-700">{current}</span>
-                        {target && (
-                          <span className="ml-1.5">
-                            {current >= target
-                              ? <span className="text-emerald-600">✓ Met</span>
-                              : <span className="text-red-500">({current - target} behind)</span>
-                            }
-                          </span>
-                        )}
-                      </p>
-                    )}
+                    <p className="text-[11px] text-slate-500 mb-2">
+                      Current: <span className="font-bold text-slate-700">{current}</span>
+                      {target != null && target > 0 && (
+                        <span className="ml-1.5">
+                          <span className="text-slate-400">|</span>
+                          {' '}Target: <span className="font-bold text-slate-700">{target}</span>
+                          {' '}
+                          <span className="text-slate-400">|</span>
+                          {' '}
+                          {current >= target
+                            ? <span className="text-emerald-600 font-semibold">✓ Met</span>
+                            : <span className="text-red-500 font-semibold">({target - current} to go)</span>
+                          }
+                        </span>
+                      )}
+                    </p>
                     <input
                       type="number"
                       value={targetInputs[key]}
                       onChange={e => setTargetInputs(prev => ({ ...prev, [key]: e.target.value }))}
-                      placeholder={current?.toString() || '0'}
+                      placeholder="Set target"
                       className={`w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-900 placeholder:text-slate-300 focus:outline-none focus:ring-2 ${ringMap[color]} transition-all`}
                     />
                   </div>

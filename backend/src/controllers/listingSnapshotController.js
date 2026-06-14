@@ -8,13 +8,12 @@ exports.getLiveData = async (req, res) => {
     const ExtensionEvent = require('../models/ExtensionEvent');
 
     const now = new Date();
-    const daysSinceFriday = (now.getDay() + 2) % 7;
-    const weekEnd = new Date(now);
-    weekEnd.setDate(weekEnd.getDate() - daysSinceFriday);
-    weekEnd.setHours(23, 59, 59, 999);
-    const weekStart = new Date(weekEnd);
-    weekStart.setDate(weekStart.getDate() - 5);
+    const weekStart = new Date(now);
+    weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 7 - 0) % 7));
     weekStart.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 5);
+    weekEnd.setHours(23, 59, 59, 999);
 
     let totalMarketplaceProducts = 0;
     try {
