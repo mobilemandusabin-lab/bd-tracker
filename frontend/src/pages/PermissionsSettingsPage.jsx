@@ -88,23 +88,73 @@ const PERMISSION_GROUPS = [
     ]
   },
   {
-    label: 'Other',
+    label: 'Vendors',
     permissions: [
-      { key: 'pipeline.manage', label: 'Pipeline Settings' },
       { key: 'vendors.view', label: 'View Vendors' },
       { key: 'vendors.manage', label: 'Manage Vendors' },
       { key: 'vendors.snapshots', label: 'Vendor Snapshots' },
+    ]
+  },
+  {
+    label: 'Listing',
+    permissions: [
+      { key: 'listing.snapshots', label: 'Listing Snapshots' },
+    ]
+  },
+  {
+    label: 'Delivery Zones',
+    permissions: [
       { key: 'delivery-zones.view', label: 'View Delivery Zones' },
       { key: 'delivery-zones.manage', label: 'Manage Delivery Zones' },
+    ]
+  },
+  {
+    label: 'Departments',
+    permissions: [
       { key: 'departments.view', label: 'View Departments' },
       { key: 'departments.create', label: 'Create Departments' },
       { key: 'departments.update', label: 'Update Departments' },
       { key: 'departments.delete', label: 'Delete Departments' },
+    ]
+  },
+  {
+    label: 'Pipeline',
+    permissions: [
+      { key: 'pipeline.manage', label: 'Pipeline Settings' },
+    ]
+  },
+  {
+    label: 'Sync',
+    permissions: [
       { key: 'sync.manage', label: 'Manage Sync' },
+    ]
+  },
+  {
+    label: 'BD Tiers',
+    permissions: [
       { key: 'bd-tiers.view', label: 'View BD Tiers' },
+    ]
+  },
+  {
+    label: 'Notifications',
+    permissions: [
       { key: 'notifications.view', label: 'View Notifications' },
+    ]
+  },
+  {
+    label: 'Activities',
+    permissions: [
       { key: 'activities.view', label: 'View Activities' },
       { key: 'activities.create', label: 'Create Activities' },
+    ]
+  },
+  {
+    label: 'Finance',
+    permissions: [
+      { key: 'finance.view', label: 'View Finance' },
+      { key: 'finance.create', label: 'Create Finance' },
+      { key: 'finance.update', label: 'Update Finance' },
+      { key: 'finance.delete', label: 'Delete Finance' },
     ]
   }
 ];
