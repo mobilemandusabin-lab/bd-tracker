@@ -210,9 +210,9 @@ exports.getComparison = async (req, res) => {
         nepaliMonth: current.nepaliMonth,
         type: current.type,
         targets: {
-          totalListings: prevTargets.totalListings || null,
-          dailyAverageListings: prevTargets.dailyAverageListings || null,
-          totalSpecificationsAdded: prevTargets.totalSpecificationsAdded || null
+          totalListings: prevTargets.totalListings ?? null,
+          dailyAverageListings: prevTargets.dailyAverageListings ?? null,
+          totalSpecificationsAdded: prevTargets.totalSpecificationsAdded ?? null
         },
 
         totalMarketplaceProductsDelta: previous ? current.totalMarketplaceProducts - previous.totalMarketplaceProducts : 0,
@@ -276,9 +276,9 @@ exports.updateTargets = async (req, res) => {
     }
 
     snapshot.targets = {
-      totalListings: targets.totalListings ?? snapshot.targets?.totalListings ?? null,
-      dailyAverageListings: targets.dailyAverageListings ?? snapshot.targets?.dailyAverageListings ?? null,
-      totalSpecificationsAdded: targets.totalSpecificationsAdded ?? snapshot.targets?.totalSpecificationsAdded ?? null
+      totalListings: targets.totalListings ?? snapshot.targets?.totalListings ?? 0,
+      dailyAverageListings: targets.dailyAverageListings ?? snapshot.targets?.dailyAverageListings ?? 0,
+      totalSpecificationsAdded: targets.totalSpecificationsAdded ?? snapshot.targets?.totalSpecificationsAdded ?? 0
     };
     await snapshot.save();
 

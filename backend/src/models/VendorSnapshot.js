@@ -38,9 +38,9 @@ const vendorSnapshotSchema = new mongoose.Schema({
     required: true
   },
   targets: {
-    totalVendors: { type: Number, default: null },
-    verifiedVendors: { type: Number, default: null },
-    activeSellers: { type: Number, default: null }
+    totalVendors: { type: Number, default: 0 },
+    verifiedVendors: { type: Number, default: 0 },
+    activeSellers: { type: Number, default: 0 }
   }
 }, { timestamps: true });
 

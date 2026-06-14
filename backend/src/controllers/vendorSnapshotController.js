@@ -166,9 +166,9 @@ exports.getComparison = async (req, res) => {
         nepaliMonth: current.nepaliMonth,
         type: current.type,
         targets: {
-          totalVendors: targets.totalVendors || null,
-          verifiedVendors: targets.verifiedVendors || null,
-          activeSellers: targets.activeSellers || null
+          totalVendors: targets.totalVendors ?? null,
+          verifiedVendors: targets.verifiedVendors ?? null,
+          activeSellers: targets.activeSellers ?? null
         },
         currentTargets: current.targets || {},
         totalVendorsDelta: previous ? current.totalVendors - previous.totalVendors : 0,
@@ -230,9 +230,9 @@ exports.updateTargets = async (req, res) => {
     }
 
     snapshot.targets = {
-      totalVendors: targets.totalVendors ?? snapshot.targets?.totalVendors ?? null,
-      verifiedVendors: targets.verifiedVendors ?? snapshot.targets?.verifiedVendors ?? null,
-      activeSellers: targets.activeSellers ?? snapshot.targets?.activeSellers ?? null
+      totalVendors: targets.totalVendors ?? snapshot.targets?.totalVendors ?? 0,
+      verifiedVendors: targets.verifiedVendors ?? snapshot.targets?.verifiedVendors ?? 0,
+      activeSellers: targets.activeSellers ?? snapshot.targets?.activeSellers ?? 0
     };
     await snapshot.save();
 

@@ -57,9 +57,9 @@ const listingSnapshotSchema = new mongoose.Schema({
     required: true
   },
   targets: {
-    totalListings: { type: Number, default: null },
-    dailyAverageListings: { type: Number, default: null },
-    totalSpecificationsAdded: { type: Number, default: null }
+    totalListings: { type: Number, default: 0 },
+    dailyAverageListings: { type: Number, default: 0 },
+    totalSpecificationsAdded: { type: Number, default: 0 }
   }
 }, { timestamps: true });
 
