@@ -3,6 +3,7 @@ const Product = require('./Product');
 const Lead = require('./Lead');
 const ExtensionEvent = require('./ExtensionEvent');
 const User = require('./User');
+const NepaliDate = require('nepali-date-converter').default;
 const { toNepaliDateObject } = require('../utils/nepaliDate');
 
 const listingSnapshotSchema = new mongoose.Schema({
@@ -70,20 +71,35 @@ listingSnapshotSchema.index({ snapshotDate: 1, type: 1 }, { unique: true });
 listingSnapshotSchema.statics.captureSnapshot = async function (type, marketplaceTotal = null) {
   const now = new Date();
 
-  const sundayStart = new Date(now);
-  sundayStart.setDate(sundayStart.getDate() - ((sundayStart.getDay() + 7 - 0) % 7));
-  sundayStart.setHours(0, 0, 0, 0);
+  let startDate, endDate;
 
-  const fridayEnd = new Date(sundayStart);
-  fridayEnd.setDate(fridayEnd.getDate() + 5);
-  fridayEnd.setHours(23, 59, 59, 999);
+  if (type === 'monthly') {
+    const bsDate = new NepaliDate(now);
+    const firstOfMonth = new NepaliDate(bsDate.getYear(), bsDate.getMonth(), 1);
+    startDate = firstOfMonth.toJsDate();
+    startDate.setHours(0, 0, 0, 0);
+    let nextMonth = bsDate.getMonth() + 1;
+    let nextYear = bsDate.getYear();
+    if (nextMonth > 11) { nextMonth = 0; nextYear++; }
+    const lastOfMonth = new Date(new NepaliDate(nextYear, nextMonth, 1).toJsDate().getTime() - 86400000);
+    endDate = lastOfMonth;
+    endDate.setHours(23, 59, 59, 999);
+  } else {
+    const daysSinceFriday = (now.getDay() + 2) % 7;
+    endDate = new Date(now);
+    endDate.setDate(endDate.getDate() - daysSinceFriday);
+    endDate.setHours(23, 59, 59, 999);
+    startDate = new Date(endDate);
+    startDate.setDate(startDate.getDate() - 5);
+    startDate.setHours(0, 0, 0, 0);
+  }
 
   const [specEvents, listingEvents, verifiedProductsAgg] = await Promise.all([
     ExtensionEvent.aggregate([
       {
         $match: {
           event_type: 'spec_added',
-          created_at: { $gte: sundayStart, $lte: fridayEnd }
+          created_at: { $gte: startDate, $lte: endDate }
         }
       },
       { $group: { _id: null, total: { $sum: { $ifNull: ['$bulk_count', 1] } } } }
@@ -93,7 +109,7 @@ listingSnapshotSchema.statics.captureSnapshot = async function (type, marketplac
       {
         $match: {
           event_type: 'listing_created',
-          created_at: { $gte: sundayStart, $lte: fridayEnd }
+          created_at: { $gte: startDate, $lte: endDate }
         }
       },
       {
@@ -103,12 +119,10 @@ listingSnapshotSchema.statics.captureSnapshot = async function (type, marketplac
         }
       },
       {
-        $match: { listingCount: { $gt: 1 } }
-      },
-      {
         $group: {
           _id: null,
-          totalListings: { $sum: '$listingCount' }
+          totalListings: { $sum: '$listingCount' },
+          activeUsers: { $sum: 1 }
         }
       }
     ]),
@@ -149,7 +163,8 @@ listingSnapshotSchema.statics.captureSnapshot = async function (type, marketplac
   const totalSpecificationsAdded = specEvents.length > 0 ? specEvents[0].total : 0;
 
   const weeklyListings = listingEvents.length > 0 ? listingEvents[0].totalListings : 0;
-  const dailyAverageListings = Math.round(weeklyListings / 6);
+  const activeUsers = listingEvents.length > 0 ? listingEvents[0].activeUsers : 0;
+  const dailyAverageListings = activeUsers > 0 ? Math.round(weeklyListings / activeUsers) : 0;
 
   const snapshotDateStr = now.toISOString().split('T')[0];
   const snapshotDate = new Date(snapshotDateStr);

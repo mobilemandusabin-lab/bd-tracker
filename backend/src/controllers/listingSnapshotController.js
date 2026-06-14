@@ -8,12 +8,13 @@ exports.getLiveData = async (req, res) => {
     const ExtensionEvent = require('../models/ExtensionEvent');
 
     const now = new Date();
-    const weekStart = new Date(now);
-    weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 7 - 0) % 7));
-    weekStart.setHours(0, 0, 0, 0);
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekEnd.getDate() + 5);
+    const daysSinceFriday = (now.getDay() + 2) % 7;
+    const weekEnd = new Date(now);
+    weekEnd.setDate(weekEnd.getDate() - daysSinceFriday);
     weekEnd.setHours(23, 59, 59, 999);
+    const weekStart = new Date(weekEnd);
+    weekStart.setDate(weekStart.getDate() - 5);
+    weekStart.setHours(0, 0, 0, 0);
 
     let totalMarketplaceProducts = 0;
     try {
@@ -56,14 +57,14 @@ exports.getLiveData = async (req, res) => {
       ExtensionEvent.aggregate([
         { $match: { event_type: 'listing_created', created_at: { $gte: weekStart, $lte: weekEnd } } },
         { $group: { _id: '$user_id', listingCount: { $sum: { $ifNull: ['$bulk_count', 1] } } } },
-        { $match: { listingCount: { $gt: 1 } } },
-        { $group: { _id: null, totalListings: { $sum: '$listingCount' } } }
+        { $group: { _id: null, totalListings: { $sum: '$listingCount' }, activeUsers: { $sum: 1 } } }
       ])
     ]);
 
     const verifiedMarketplaceProducts = verifiedAgg.length > 0 ? verifiedAgg[0].total : 0;
     const totalSpecificationsAdded = specAgg.length > 0 ? specAgg[0].total : 0;
     const weeklyListings = listingAgg.length > 0 ? listingAgg[0].totalListings : 0;
+    const activeUsers = listingAgg.length > 0 ? listingAgg[0].activeUsers : 0;
 
     res.status(200).json({
       status: 'success',
@@ -71,7 +72,7 @@ exports.getLiveData = async (req, res) => {
         totalMarketplaceProducts,
         verifiedMarketplaceProducts,
         totalListings: weeklyListings,
-        dailyAverageListings: Math.round(weeklyListings / 6),
+        dailyAverageListings: activeUsers > 0 ? Math.round(weeklyListings / activeUsers) : 0,
         totalSpecificationsAdded
       }
     });
