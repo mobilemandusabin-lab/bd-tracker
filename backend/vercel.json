@@ -29,11 +29,5 @@
         { "key": "Access-Control-Allow-Credentials", "value": "true" }
       ]
     }
-  ],
-  "crons": [
-    {
-      "path": "/api/cron/sync",
-      "schedule": "0 0 * * *"
-    }
   ]
 }
