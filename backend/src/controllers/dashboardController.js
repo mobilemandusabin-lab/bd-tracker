@@ -1928,6 +1928,7 @@ exports.getSyncStatus = async (req, res) => {
       data: {
         syncing: !!running,
         runningSince: running?.createdAt || null,
+        triggeredBy: running?.triggeredBy || null,
         lastSync: last || null
       }
     });
@@ -1946,6 +1947,23 @@ exports.triggerFullSync = async (req, res) => {
     status: 'success',
     message: 'Sync started in background'
   });
+};
+
+// POST /dashboard/sync-stop — Stop a running sync (super admin)
+exports.stopSync = async (req, res) => {
+  try {
+    const running = await SystemSyncLog.findOne({ status: 'running' }).sort({ createdAt: -1 });
+    if (!running) {
+      return res.status(404).json({ status: 'fail', message: 'No running sync found' });
+    }
+    running.status = 'failed';
+    running.success = false;
+    running.errorMessage = `Manually stopped by ${req.user?.name || req.user?._id || 'unknown'}`;
+    await running.save();
+    res.status(200).json({ status: 'success', message: 'Sync stopped' });
+  } catch (err) {
+    res.status(500).json({ status: 'fail', message: err.message });
+  }
 };
 
 // GET /dashboard/sync-logs — Get recent sync logs

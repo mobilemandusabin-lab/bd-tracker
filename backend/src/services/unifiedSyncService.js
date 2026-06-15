@@ -106,6 +106,13 @@ const runFullSync = async (triggeredBy = 'cron', userId = null) => {
     const durationMs = Date.now() - startTime;
     const allSuccess = Object.values(tasks).every(t => t.success !== false);
 
+    // Don't overwrite if manually stopped via sync-stop button
+    const currentLog = await SystemSyncLog.findById(log._id);
+    if (currentLog?.status === 'failed' && currentLog?.errorMessage?.startsWith('Manually stopped')) {
+      console.log('[Full Sync] Skipping final save — sync was manually stopped');
+      return currentLog;
+    }
+
     log.status = allSuccess ? 'completed' : 'failed';
     log.success = allSuccess;
     log.durationMs = durationMs;

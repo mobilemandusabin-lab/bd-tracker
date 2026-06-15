@@ -91,6 +91,7 @@ const DashboardPage = () => {
   const [serverSyncing, setServerSyncing] = useState(false);
   const [syncElapsed, setSyncElapsed] = useState(0);
   const [syncResult, setSyncResult] = useState(null);
+  const [serverTriggeredBy, setServerTriggeredBy] = useState(null);
   const [showSyncLog, setShowSyncLog] = useState(false);
   const [syncLogs, setSyncLogs] = useState([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
@@ -107,6 +108,7 @@ const DashboardPage = () => {
       });
       const data = res.data.data;
       setServerSyncing(data.syncing);
+      setServerTriggeredBy(data.triggeredBy);
       if (data.syncing) {
         setSyncing(true);
         const started = new Date(data.runningSince).getTime();
@@ -171,6 +173,22 @@ const DashboardPage = () => {
     } catch (err) {
       setSyncResult({ success: false, errorMessage: err.response?.data?.message || err.message });
       setSyncing(false);
+    }
+  };
+
+  const handleStopSync = async () => {
+    if (!window.confirm('Stop the currently running sync?')) return;
+    try {
+      await axios.post(`${API_URL}/dashboard/sync-stop`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setSyncing(false);
+      setServerSyncing(false);
+      setServerTriggeredBy(null);
+      setSyncElapsed(0);
+      fetchSyncLogs();
+    } catch (err) {
+      console.error('Failed to stop sync:', err);
     }
   };
 
@@ -244,6 +262,14 @@ const DashboardPage = () => {
   {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
   {syncing ? `Syncing ${syncElapsed}s` : 'Sync All'}
 </button>
+{syncing && (
+  <button
+    onClick={handleStopSync}
+    className="flex items-center gap-2 px-4 py-2.5 bg-red-600 text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-red-700 transition-all shadow-lg"
+  >
+    <XCircle size={14} /> Stop Sync
+  </button>
+)}
                 <button
                   onClick={() => { setShowSyncLog(!showSyncLog); if (!showSyncLog) fetchSyncLogs(); }}
                   className="flex items-center gap-2 px-4 py-2.5 bg-white/10 backdrop-blur-sm text-white border border-white/20 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-white/20 transition-all"
@@ -269,6 +295,11 @@ const DashboardPage = () => {
                 {syncing ? `Sync in progress (${syncElapsed}s)` : syncResult?.success ? 'Sync completed' : 'Sync completed with errors'}
                 {!syncing && syncResult?.durationMs ? ` (${(syncResult.durationMs / 1000).toFixed(1)}s)` : ''}
               </p>
+              {syncing && serverTriggeredBy && (
+                <span className="text-[10px] text-white/50 font-medium ml-auto">
+                  Triggered by: {serverTriggeredBy === 'cron' ? 'Scheduled' : serverTriggeredBy === 'manual' ? 'Manual' : 'Startup'}
+                </span>
+              )}
             </div>
             {syncResult?.tasks && (
               <div className="flex flex-wrap gap-3 text-[10px] font-bold text-white/80">
