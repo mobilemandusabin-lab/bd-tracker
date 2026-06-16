@@ -131,8 +131,8 @@ const OperationsAnalyticsPage = () => {
   }, [startDate, endDate, period, token]);
 
   useEffect(() => {
-    if (selectedUserId && fetchUserDetail) fetchUserDetail(selectedUserId);
-  }, [period, startDate, endDate, selectedUserId, fetchUserDetail]);
+    if (selectedUserId) fetchUserDetail(selectedUserId);
+  }, [period, startDate, endDate]);
 
   const saveTarget = async (team) => {
     setSavingTarget(true);
@@ -852,8 +852,7 @@ const OperationsAnalyticsPage = () => {
                   return (
                     <div
                       key={user.id}
-                      onClick={() => fetchUserDetail(user.id)}
-                      className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 cursor-pointer hover:ring-2 hover:ring-red-300 hover:shadow-md transition-all"
+                      className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 hover:shadow-md transition-all"
                     >
                       <div className="flex items-center justify-between mb-4">
                         <div>
@@ -895,29 +894,37 @@ const OperationsAnalyticsPage = () => {
                           );
                         })}
                       </div>
-                      {/* Session Info */}
-                      {userSession && (
-                        <div className="flex items-center gap-4 pt-3 border-t border-slate-100">
-                          <div className="flex items-center gap-1.5">
-                            <Timer size={12} className="text-emerald-500" />
-                            <span className="text-[10px] font-bold text-slate-500">{userSession.sessions} session{userSession.sessions !== 1 ? 's' : ''}</span>
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <Activity size={12} className="text-blue-500" />
-                            <span className="text-[10px] font-bold text-slate-500">{userSession.active_hours}h active</span>
-                          </div>
-                          {userSession.session_details?.[0] && (
-                            <div className="flex items-center gap-1.5 ml-auto">
-                              <Clock size={12} className="text-slate-400" />
-                              <span className="text-[10px] text-slate-400">
-                                {new Date(userSession.session_details[0].start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-                                {' — '}
-                                {new Date(userSession.session_details[userSession.session_details.length - 1].end).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-                              </span>
+                      {/* Session Info + Details */}
+                      <div className="flex items-center gap-4 pt-3 border-t border-slate-100">
+                        <button
+                          onClick={() => fetchUserDetail(user.id)}
+                          className="text-[10px] font-bold text-red-600 hover:text-red-700 hover:underline shrink-0 min-w-[52px]"
+                        >
+                          Details →
+                        </button>
+                        {userSession && (
+                          <>
+                            <div className="flex items-center gap-1.5">
+                              <Timer size={12} className="text-emerald-500" />
+                              <span className="text-[10px] font-bold text-slate-500">{userSession.sessions} session{userSession.sessions !== 1 ? 's' : ''}</span>
                             </div>
-                          )}
-                        </div>
-                      )}
+                            <div className="flex items-center gap-1.5">
+                              <Activity size={12} className="text-blue-500" />
+                              <span className="text-[10px] font-bold text-slate-500">{userSession.active_hours}h active</span>
+                            </div>
+                            {userSession.session_details?.[0] && (
+                              <div className="flex items-center gap-1.5 ml-auto">
+                                <Clock size={12} className="text-slate-400" />
+                                <span className="text-[10px] text-slate-400">
+                                  {new Date(userSession.session_details[0].start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                                  {' — '}
+                                  {new Date(userSession.session_details[userSession.session_details.length - 1].end).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
@@ -946,16 +953,26 @@ const OperationsAnalyticsPage = () => {
                       {userRows.map((user) => {
                         const userSession = analytics?.userSessions?.find(s => s.user_id === user.id);
                         return (
-                          <tr key={user.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => fetchUserDetail(user.id)}>
+                          <tr key={user.id} className="hover:bg-slate-50">
                             <td className="px-4 py-2.5">
-                              <div className="font-bold text-slate-900">{user.name}</div>
-                              {user.team && <div className="text-[10px] text-slate-400 uppercase">{user.team}</div>}
+                              <div className="flex items-center gap-2">
+                                <div>
+                                  <div className="font-bold text-slate-900">{user.name}</div>
+                                  {user.team && <div className="text-[10px] text-slate-400 uppercase">{user.team}</div>}
+                                </div>
+                                <button
+                                  onClick={() => fetchUserDetail(user.id)}
+                                  className="text-[10px] font-bold text-red-600 hover:text-red-700 hover:underline ml-2 shrink-0"
+                                >
+                                  Details
+                                </button>
+                              </div>
                             </td>
                             {eventTypes.map(({ key, label, color, global }) => (
                               <td
                                 key={key}
                                 className={`px-4 py-2.5 text-center font-bold ${colorMap[color].text} cursor-pointer hover:underline`}
-                                onClick={() => !global && openEventDetails(key, `${user.name} — ${label}`, user.id)}
+                                onClick={(e) => { e.stopPropagation(); if (!global) openEventDetails(key, `${user.name} — ${label}`, user.id); }}
                               >
                                 {global ? (summary[key] ?? '—') : (user[key] || 0)}
                               </td>
@@ -1346,6 +1363,15 @@ const UserDetailView = ({ userId, userDetail, loading, onBack, period, startDate
     : period === '90d' ? 'Last 90 days'
     : 'Today';
 
+  const eventDates = userDetail?.recentEvents?.length
+    ? userDetail.recentEvents.reduce((acc, ev) => {
+        const d = new Date(ev.created_at);
+        if (!acc.min || d < acc.min) acc.min = d;
+        if (!acc.max || d > acc.max) acc.max = d;
+        return acc;
+      }, {})
+    : null;
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -1387,6 +1413,11 @@ const UserDetailView = ({ userId, userDetail, loading, onBack, period, startDate
             <div className="flex items-center gap-2 justify-end mt-0.5">
               {user.team && <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{user.team}</span>}
               <span className="text-[10px] font-bold text-red-500 bg-red-50 px-1.5 py-0.5 rounded">{periodLabel}</span>
+          {eventDates && (
+            <span className="text-[10px] text-slate-400 ml-1">
+              {eventDates.min.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – {eventDates.max.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+            </span>
+          )}
             </div>
           </div>
           <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center">
@@ -1456,6 +1487,7 @@ const UserDetailView = ({ userId, userDetail, loading, onBack, period, startDate
                 <Legend wrapperStyle={{ fontSize: 10, fontWeight: 600 }} iconType="circle" iconSize={8} />
                 <Bar dataKey="listing_created" name="Listings" fill="#3b82f6" radius={[3, 3, 0, 0]} />
                 <Bar dataKey="spec_added" name="Specs" fill="#8b5cf6" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="product_updated" name="Updates" fill="#64748b" radius={[3, 3, 0, 0]} />
                 <Bar dataKey="qc_approved" name="QC Approved" fill="#10b981" radius={[3, 3, 0, 0]} />
                 <Bar dataKey="qc_rejected" name="QC Rejected" fill="#ef4444" radius={[3, 3, 0, 0]} />
               </BarChart>
@@ -1507,7 +1539,7 @@ const UserDetailView = ({ userId, userDetail, loading, onBack, period, startDate
       )}
 
       {/* Best & Worst Dates */}
-      {bestWorst && (
+      {bestWorst && Object.values(bestWorst).some(bw => bw?.best) && (
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
           <h3 className="text-sm font-bold text-slate-700 mb-4">Best & Lowest Days</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">

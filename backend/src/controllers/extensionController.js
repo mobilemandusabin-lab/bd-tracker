@@ -1305,7 +1305,7 @@ exports.getUserDetail = async (req, res) => {
     const { userId } = req.params;
     const { start_date, end_date, period = '30d' } = req.query;
 
-    const isAdmin = req.userPermissions?.includes('extension.admin');
+    const isAdmin = req.userPermissions?.includes('extension.admin') || req.user.role === 'super_admin';
     if (!isAdmin && req.user._id.toString() !== userId) {
       return res.status(403).json({ status: 'fail', message: 'Not authorized' });
     }
@@ -1368,13 +1368,13 @@ exports.getUserDetail = async (req, res) => {
       ExtensionEvent.find(matchFilter)
         .select('product_name product_id created_at vendor_id qc_status event_type metadata')
         .sort({ created_at: -1 })
-        .limit(50)
         .lean()
     ]);
 
-    const eventsByType = facetResult.eventsByType || [];
-    const dailyBreakdownRaw = facetResult.dailyBreakdown || [];
-    const timeline = facetResult.rawTimeline || [];
+    const facetData = Array.isArray(facetResult) ? facetResult[0] || {} : facetResult;
+    const eventsByType = facetData.eventsByType || [];
+    const dailyBreakdownRaw = facetData.dailyBreakdown || [];
+    const timeline = facetData.rawTimeline || [];
 
     const summary = { listing_created: 0, product_created: 0, product_updated: 0, qc_approved: 0, qc_rejected: 0, spec_added: 0, session_ended: 0 };
     for (const item of eventsByType) {
@@ -1463,8 +1463,8 @@ exports.getUserDetail = async (req, res) => {
         totalActiveMinutes,
         bestWorst,
         qcStats,
-        topProducts: facetResult.byProduct || [],
-        hourlyActivity: facetResult.hourlyActivity || [],
+        topProducts: facetData.byProduct || [],
+        hourlyActivity: facetData.hourlyActivity || [],
         recentEvents: rawEvents,
       }
     });

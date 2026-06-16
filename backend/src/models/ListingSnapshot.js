@@ -113,15 +113,8 @@ listingSnapshotSchema.statics.captureSnapshot = async function (type, marketplac
       },
       {
         $group: {
-          _id: '$user_id',
-          listingCount: { $sum: { $ifNull: ['$bulk_count', 1] } }
-        }
-      },
-      {
-        $group: {
           _id: null,
-          totalListings: { $sum: '$listingCount' },
-          activeUsers: { $sum: 1 }
+          totalListings: { $sum: { $ifNull: ['$bulk_count', 1] } }
         }
       }
     ]),
@@ -162,8 +155,7 @@ listingSnapshotSchema.statics.captureSnapshot = async function (type, marketplac
   const totalSpecificationsAdded = specEvents.length > 0 ? specEvents[0].total : 0;
 
   const weeklyListings = listingEvents.length > 0 ? listingEvents[0].totalListings : 0;
-  const activeUsers = listingEvents.length > 0 ? listingEvents[0].activeUsers : 0;
-  const dailyAverageListings = activeUsers > 0 ? Math.round(weeklyListings / activeUsers) : 0;
+  const dailyAverageListings = Math.round(weeklyListings / 6);
 
   const snapshotDateStr = now.toISOString().split('T')[0];
   const snapshotDate = new Date(snapshotDateStr);

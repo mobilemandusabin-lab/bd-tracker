@@ -277,25 +277,14 @@ exports.syncServiceBranches = async (req, res) => {
   }
 };
 
-// Get total marketplace products — returns latest snapshot value if available,
-// otherwise fetches live from Nepalcan API
+// Get total marketplace products — always live from Nepalcan API
 exports.getTotalMarketplaceProducts = async (req, res) => {
   try {
-    // Try latest snapshot first
-    const latest = await ListingSnapshot.findOne().sort({ snapshotDate: -1 });
-    if (latest && latest.totalMarketplaceProducts) {
-      return res.status(200).json({
-        status: 'success',
-        data: { totalMarketplaceProducts: latest.totalMarketplaceProducts, source: 'snapshot' }
-      });
-    }
-
-    // Fallback to live Nepalcan API
     const { fetchTotalMarketplaceProducts } = require('../services/nepalcanSyncService');
     const total = await fetchTotalMarketplaceProducts();
     res.status(200).json({
       status: 'success',
-      data: { totalMarketplaceProducts: total, source: 'live' }
+      data: { totalMarketplaceProducts: total || 0, source: 'live' }
     });
   } catch (err) {
     res.status(500).json({

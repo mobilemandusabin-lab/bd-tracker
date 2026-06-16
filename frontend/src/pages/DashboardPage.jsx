@@ -371,6 +371,11 @@ const DashboardPage = () => {
                           Snapshots: {log.tasks.vendorSnapshots.snapshotsTaken}
                         </span>
                       )}
+                      {log.tasks.marketplaceProducts?.ran && (
+                        <span className="text-[9px] text-white/40">
+                          Marketplace: {log.tasks.marketplaceProducts.total?.toLocaleString() ?? '-'}
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>

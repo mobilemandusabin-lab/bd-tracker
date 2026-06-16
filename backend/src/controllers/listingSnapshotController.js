@@ -6,14 +6,42 @@ exports.getLiveData = async (req, res) => {
   try {
     const Lead = require('../models/Lead');
     const ExtensionEvent = require('../models/ExtensionEvent');
+    const { period, start_date, end_date } = req.query;
 
     const now = new Date();
-    const weekStart = new Date(now);
-    weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 7 - 0) % 7));
-    weekStart.setHours(0, 0, 0, 0);
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekEnd.getDate() + 5);
-    weekEnd.setHours(23, 59, 59, 999);
+    const DAY_MS = 24 * 60 * 60 * 1000;
+
+    const lastWeekly = await ListingSnapshot.findOne({ type: 'weekly' }).sort({ snapshotDate: -1 });
+
+    let periodStart, periodEnd, daysElapsed;
+
+    if (start_date) {
+      periodStart = new Date(start_date + 'T00:00:00.000Z');
+      periodEnd = end_date
+        ? new Date(end_date + 'T23:59:59.999Z')
+        : now;
+      daysElapsed = Math.max(1, Math.ceil((periodEnd.getTime() - periodStart.getTime()) / DAY_MS));
+    } else if (period) {
+      periodEnd = now;
+      switch (period) {
+        case 'today': periodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()); break;
+        case '7d': periodStart = new Date(Date.now() - 7 * DAY_MS); break;
+        case '30d': periodStart = new Date(Date.now() - 30 * DAY_MS); break;
+        case '90d': periodStart = new Date(Date.now() - 90 * DAY_MS); break;
+        default: periodStart = new Date(Date.now() - 7 * DAY_MS);
+      }
+      daysElapsed = Math.max(1, Math.ceil((periodEnd.getTime() - periodStart.getTime()) / DAY_MS));
+    } else {
+      // Fallback: first listing_created event after last weekly snapshot
+      const afterDate = lastWeekly ? new Date(lastWeekly.snapshotDate) : new Date(Date.now() - 7 * DAY_MS);
+      const firstEvent = await ExtensionEvent.findOne(
+        { event_type: 'listing_created', created_at: { $gte: afterDate } },
+        { created_at: 1 }
+      ).sort({ created_at: 1 });
+      periodStart = firstEvent ? new Date(firstEvent.created_at) : afterDate;
+      periodEnd = now;
+      daysElapsed = Math.max(1, Math.ceil((now.getTime() - periodStart.getTime()) / DAY_MS));
+    }
 
     let totalMarketplaceProducts = 0;
     try {
@@ -23,11 +51,8 @@ exports.getLiveData = async (req, res) => {
       const Product = require('../models/Product');
       totalMarketplaceProducts = await Product.countDocuments({ isActive: true });
     }
-    if (!totalMarketplaceProducts) {
-      const latest = await ListingSnapshot.findOne().sort({ snapshotDate: -1 });
-      if (latest?.totalMarketplaceProducts) {
-        totalMarketplaceProducts = latest.totalMarketplaceProducts;
-      }
+    if (!totalMarketplaceProducts && lastWeekly?.totalMarketplaceProducts) {
+      totalMarketplaceProducts = lastWeekly.totalMarketplaceProducts;
     }
 
     const [verifiedAgg, specAgg, listingAgg] = await Promise.all([
@@ -50,20 +75,18 @@ exports.getLiveData = async (req, res) => {
         }
       ]),
       ExtensionEvent.aggregate([
-        { $match: { event_type: 'spec_added', created_at: { $gte: weekStart, $lte: weekEnd } } },
+        { $match: { event_type: 'spec_added', created_at: { $gte: periodStart, $lte: periodEnd } } },
         { $group: { _id: null, total: { $sum: { $ifNull: ['$bulk_count', 1] } } } }
       ]),
       ExtensionEvent.aggregate([
-        { $match: { event_type: 'listing_created', created_at: { $gte: weekStart, $lte: weekEnd } } },
-        { $group: { _id: '$user_id', listingCount: { $sum: { $ifNull: ['$bulk_count', 1] } } } },
-        { $group: { _id: null, totalListings: { $sum: '$listingCount' }, activeUsers: { $sum: 1 } } }
+        { $match: { event_type: 'listing_created', created_at: { $gte: periodStart, $lte: periodEnd } } },
+        { $group: { _id: null, totalListings: { $sum: { $ifNull: ['$bulk_count', 1] } } } }
       ])
     ]);
 
     const verifiedMarketplaceProducts = verifiedAgg.length > 0 ? verifiedAgg[0].total : 0;
     const totalSpecificationsAdded = specAgg.length > 0 ? specAgg[0].total : 0;
     const weeklyListings = listingAgg.length > 0 ? listingAgg[0].totalListings : 0;
-    const activeUsers = listingAgg.length > 0 ? listingAgg[0].activeUsers : 0;
 
     res.status(200).json({
       status: 'success',
@@ -71,7 +94,7 @@ exports.getLiveData = async (req, res) => {
         totalMarketplaceProducts,
         verifiedMarketplaceProducts,
         totalListings: weeklyListings,
-        dailyAverageListings: activeUsers > 0 ? Math.round(weeklyListings / activeUsers) : 0,
+        dailyAverageListings: Math.round(weeklyListings / daysElapsed),
         totalSpecificationsAdded
       }
     });

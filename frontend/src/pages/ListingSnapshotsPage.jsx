@@ -88,6 +88,10 @@ export default function ListingSnapshotsPage({ embedded }) {
     totalSpecificationsAdded: ''
   });
 
+  const [period, setPeriod] = useState('7d');
+  const [periodStartDate, setPeriodStartDate] = useState('');
+  const [periodEndDate, setPeriodEndDate] = useState('');
+
   const token = localStorage.getItem('token');
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
@@ -112,12 +116,19 @@ export default function ListingSnapshotsPage({ embedded }) {
     }
 
     try {
-      const liveRes = await axios.get(`${API_URL}/listing-snapshots/live`, { headers });
+      let liveUrl = `${API_URL}/listing-snapshots/live`;
+      const params = new URLSearchParams();
+      if (period) params.set('period', period);
+      if (periodStartDate) params.set('start_date', periodStartDate);
+      if (periodEndDate) params.set('end_date', periodEndDate);
+      const qs = params.toString();
+      if (qs) liveUrl += '?' + qs;
+      const liveRes = await axios.get(liveUrl, { headers });
       setLiveData(liveRes.data.data);
     } catch {
       console.warn('[ListingSnapshots] Failed to fetch live data, falling back to snapshot');
     }
-  }, [snapshotType]);
+  }, [snapshotType, period, periodStartDate, periodEndDate]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -284,7 +295,7 @@ export default function ListingSnapshotsPage({ embedded }) {
         <div className="space-y-5">
           <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
             {metricConfig.map(({ key, label, icon: Icon, color }) => {
-              const value = liveData?.[key] ?? latest?.[key];
+              const snap = latest?.[key];
               const bgMap = { red: 'bg-red-50', amber: 'bg-amber-50', emerald: 'bg-emerald-50', orange: 'bg-orange-50', purple: 'bg-purple-50' };
               const textMap = { red: 'text-red-600', amber: 'text-amber-600', emerald: 'text-emerald-600', orange: 'text-orange-600', purple: 'text-purple-600' };
               return (
@@ -295,7 +306,7 @@ export default function ListingSnapshotsPage({ embedded }) {
                     </div>
                     <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{label}</span>
                   </div>
-                  <p className="text-2xl font-extrabold text-slate-900">{value ?? '-'}</p>
+                  <p className="text-2xl font-extrabold text-slate-900">{snap ?? '-'}</p>
                 </div>
               );
             })}
