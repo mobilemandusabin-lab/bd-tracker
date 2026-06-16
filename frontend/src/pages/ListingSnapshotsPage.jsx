@@ -88,10 +88,6 @@ export default function ListingSnapshotsPage({ embedded }) {
     totalSpecificationsAdded: ''
   });
 
-  const [period, setPeriod] = useState('7d');
-  const [periodStartDate, setPeriodStartDate] = useState('');
-  const [periodEndDate, setPeriodEndDate] = useState('');
-
   const token = localStorage.getItem('token');
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
@@ -116,19 +112,18 @@ export default function ListingSnapshotsPage({ embedded }) {
     }
 
     try {
+      const d = new Date();
+      d.setDate(d.getDate() - ((d.getDay() + 7 - 0) % 7));
+      d.setHours(0, 0, 0, 0);
+      const startDate = d.toISOString().split('T')[0];
       let liveUrl = `${API_URL}/listing-snapshots/live`;
-      const params = new URLSearchParams();
-      if (period) params.set('period', period);
-      if (periodStartDate) params.set('start_date', periodStartDate);
-      if (periodEndDate) params.set('end_date', periodEndDate);
-      const qs = params.toString();
-      if (qs) liveUrl += '?' + qs;
+      if (startDate) liveUrl += `?start_date=${startDate}`;
       const liveRes = await axios.get(liveUrl, { headers });
       setLiveData(liveRes.data.data);
     } catch {
       console.warn('[ListingSnapshots] Failed to fetch live data, falling back to snapshot');
     }
-  }, [snapshotType, period, periodStartDate, periodEndDate]);
+  }, [snapshotType]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
