@@ -25,17 +25,29 @@ async function checkAndTakeSnapshots() {
   const isLastDayOfMonth = bsTomorrow.getMonth() !== bsToday.getMonth()
     || bsTomorrow.getYear() !== bsToday.getYear();
 
-  if (isFriday || isLastDayOfMonth) {
+  if (isFriday) {
     const marketplaceTotal = await getMarketplaceTotal();
-    const type = isFriday ? 'weekly' : 'monthly';
     try {
-      const snapshot = await ListingSnapshot.captureSnapshot(type, marketplaceTotal);
-      results.snapshots.push({ type, nepaliDate: snapshot.nepaliDate });
-      console.log(`[ListingSnapshot] ${type} snapshot captured: ${snapshot.nepaliDate}`);
+      const snapshot = await ListingSnapshot.captureSnapshot('weekly', marketplaceTotal);
+      results.snapshots.push({ type: 'weekly', nepaliDate: snapshot.nepaliDate });
+      console.log(`[ListingSnapshot] Weekly snapshot captured: ${snapshot.nepaliDate}`);
     } catch (err) {
-      console.error(`[ListingSnapshot] ${type} snapshot error:`, err.message);
+      console.error('[ListingSnapshot] Weekly snapshot error:', err.message);
       results.errors = results.errors || [];
-      results.errors.push({ type, error: err.message });
+      results.errors.push({ type: 'weekly', error: err.message });
+    }
+  }
+
+  if (isLastDayOfMonth) {
+    const marketplaceTotal = await getMarketplaceTotal();
+    try {
+      const snapshot = await ListingSnapshot.captureSnapshot('monthly', marketplaceTotal);
+      results.snapshots.push({ type: 'monthly', nepaliDate: snapshot.nepaliDate });
+      console.log(`[ListingSnapshot] Monthly snapshot captured: ${snapshot.nepaliDate}`);
+    } catch (err) {
+      console.error('[ListingSnapshot] Monthly snapshot error:', err.message);
+      results.errors = results.errors || [];
+      results.errors.push({ type: 'monthly', error: err.message });
     }
   }
 

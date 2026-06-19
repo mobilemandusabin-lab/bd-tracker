@@ -50,17 +50,18 @@ const runFullSync = async (triggeredBy = 'cron', userId = null) => {
     }
 
     const nepalcanStart = Date.now();
+    let syncResult;
     try {
       tasks.nepalcanOrders = { ran: true };
       tasks.vendorSync = { ran: true };
-      const result = await syncAllNepalcanData(userId);
-      tasks.nepalcanOrders.success = result.orders?.synced >= 0;
-      tasks.nepalcanOrders.ordersSynced = result.orders?.synced || 0;
+      syncResult = await syncAllNepalcanData(userId);
+      tasks.nepalcanOrders.success = syncResult.orders?.synced >= 0;
+      tasks.nepalcanOrders.ordersSynced = syncResult.orders?.synced || 0;
       tasks.nepalcanOrders.durationMs = Date.now() - nepalcanStart;
       tasks.vendorSync.success = true;
-      tasks.vendorSync.vendorsSynced = result.vendors?.synced || 0;
-      tasks.vendorSync.vendorsCreated = result.vendors?.created || 0;
-      tasks.vendorSync.vendorsUpdated = result.vendors?.updated || 0;
+      tasks.vendorSync.vendorsSynced = syncResult.vendors?.synced || 0;
+      tasks.vendorSync.vendorsCreated = syncResult.vendors?.created || 0;
+      tasks.vendorSync.vendorsUpdated = syncResult.vendors?.updated || 0;
       tasks.vendorSync.durationMs = Date.now() - nepalcanStart;
     } catch (err) {
       tasks.nepalcanOrders = { ran: true, success: false, error: err.message, durationMs: Date.now() - nepalcanStart };
@@ -71,7 +72,7 @@ const runFullSync = async (triggeredBy = 'cron', userId = null) => {
     const marketplaceStart = Date.now();
     try {
       tasks.marketplaceProducts = { ran: true };
-      tasks.marketplaceProducts.total = result?.marketplaceProducts ?? 0;
+      tasks.marketplaceProducts.total = syncResult?.marketplaceProducts ?? 0;
       tasks.marketplaceProducts.success = true;
       tasks.marketplaceProducts.durationMs = Date.now() - marketplaceStart;
     } catch (err) {

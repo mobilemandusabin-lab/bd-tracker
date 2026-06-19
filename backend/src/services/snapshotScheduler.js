@@ -29,7 +29,7 @@ function scheduleNext(type) {
   const now = new Date();
   const bsNow = new NepaliDate(now);
   let targetDate = getTargetDate(type, bsNow);
-  targetDate.setHours(23, 59, 59, 999);
+  targetDate.setHours(19, 0, 0, 0);
   let delay = targetDate.getTime() - now.getTime();
 
   if (delay < 0) {
@@ -86,7 +86,7 @@ function getNextPeriodTarget(type, currentTarget) {
   if (type === 'weekly') {
     const next = new Date(currentTarget);
     next.setDate(next.getDate() + 7);
-    next.setHours(23, 59, 59, 999);
+    next.setHours(19, 0, 0, 0);
     return next;
   }
   const bsTarget = new NepaliDate(currentTarget);
@@ -96,7 +96,7 @@ function getNextPeriodTarget(type, currentTarget) {
   const firstOfNext = new NepaliDate(nextYear, nextMonth, 1);
   const firstOfNextAD = firstOfNext.toJsDate();
   const next = new Date(firstOfNextAD.getTime() - 86400000);
-  next.setHours(23, 59, 59, 999);
+  next.setHours(19, 0, 0, 0);
   return next;
 }
 

@@ -163,7 +163,7 @@ function computeNextTargetDate(type) {
     targetDate = new Date(firstOfNext.toJsDate().getTime() - 86400000);
   }
 
-  targetDate.setHours(23, 59, 59, 999);
+  targetDate.setHours(19, 0, 0, 0);
   if (targetDate.getTime() <= now.getTime()) {
     if (type === 'weekly') {
       targetDate.setDate(targetDate.getDate() + 7);
@@ -173,7 +173,7 @@ function computeNextTargetDate(type) {
       if (nextMonth > 11) { nextMonth -= 12; nextYear++; }
       const firstOfNextNext = new NepaliDate(nextYear, nextMonth, 1);
       targetDate = new Date(firstOfNextNext.toJsDate().getTime() - 86400000);
-      targetDate.setHours(23, 59, 59, 999);
+      targetDate.setHours(19, 0, 0, 0);
     }
   }
 
