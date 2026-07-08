@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head><title>Chart Variant Comparison</title>
+<style>
+  body { font-family: 'Quattrocento Sans', sans-serif; background: #f5f5f5; padding: 40px; }
+  h1 { text-align: center; color: #8B0000; margin-bottom: 40px; }
+  .row { display: flex; gap: 30px; justify-content: center; flex-wrap: wrap; }
+  .card { background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); text-align: center; }
+  .card h2 { color: #333; margin-top: 0; }
+  .card p { color: #666; font-size: 14px; margin-bottom: 15px; }
+  .card img { border: 1px solid #e5e7eb; border-radius: 4px; max-width: 100%; }
+  .tag { display: inline-block; background: #DC143C; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; margin-bottom: 10px; }
+  .features { text-align: left; font-size: 13px; color: #555; line-height: 1.6; margin-top: 10px; }
+  .features li { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<h1>Chart Style Variants</h1>
+<div class="row">
+  <div class="card">
+    <div class="tag">Variant A — Minimal</div>
+    <img src="chart_variant_a_minimal.png" width="600" height="375">
+    <ul class="features">
+      <li>No title in chart</li>
+      <li>Solid crimson bars #DC143C</li>
+      <li>Light dashed grid lines</li>
+      <li>Value labels above bars</li>
+      <li>Category labels below</li>
+      <li>Clean baseline axis</li>
+    </ul>
+  </div>
+  <div class="card">
+    <div class="tag">Variant B — Polished</div>
+    <img src="chart_variant_b_polished.png" width="600" height="375">
+    <ul class="features">
+      <li>No title in chart</li>
+      <li>Gradient crimson bars (#E8494D → #B31531)</li>
+      <li>Subtle shadow behind bars</li>
+      <li>Thicker baseline axis</li>
+      <li>Refined spacing</li>
+    </ul>
+  </div>
+  <div class="card">
+    <div class="tag">Variant C — Dashboard</div>
+    <img src="chart_variant_c_dashboard.png" width="600" height="375">
+    <ul class="features">
+      <li>No title in chart</li>
+      <li>Gradient bars, value INSIDE bar for tall bars</li>
+      <li><strong>Trend indicator ▼▲</strong> bottom-right</li>
+      <li>Earliest grid lines (very subtle)</li>
+      <li>Modern compact bar width</li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>

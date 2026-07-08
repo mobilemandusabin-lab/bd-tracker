@@ -152,6 +152,7 @@ exports.getComparison = async (req, res) => {
 
       comparison.push({
         _id: current._id,
+        createdAt: current.createdAt,
         totalVendors: current.totalVendors,
         verifiedVendors: current.verifiedVendors,
         activeSellers: current.activeSellers,

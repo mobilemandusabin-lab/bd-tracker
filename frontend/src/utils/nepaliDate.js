@@ -38,4 +38,11 @@ export function getNepaliMonthName(month) {
   return NEPAL_MONTH_NAMES[month] || '';
 }
 
+export function formatTime(date) {
+  return new Date(date).toLocaleTimeString('en-US', {
+    hour: '2-digit', minute: '2-digit',
+    timeZone: 'Asia/Kathmandu', hour12: true
+  }) + ' NPT';
+}
+
 export { NEPAL_MONTH_NAMES };

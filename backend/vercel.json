@@ -5,7 +5,7 @@
       "src": "src/server.js",
       "use": "@vercel/node",
       "config": {
-        "includeFiles": ["public/extension/**"]
+        "includeFiles": ["public/extension/**", "./NEPALCAN.COM-2026-WK-20 (1).pptx", "fonts/**"]
       }
     }
   ],

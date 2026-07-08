@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import axios from 'axios';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { Store, ShieldCheck, Package, Calendar, TrendingUp, ArrowUpRight, ArrowDownRight, RefreshCw, Loader2, AlertCircle, Camera, Clock, Target, Save, CheckCircle2 } from 'lucide-react';
-import { formatNepaliDate } from '../utils/nepaliDate';
+import { formatNepaliDate, formatTime } from '../utils/nepaliDate';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
@@ -201,7 +201,7 @@ export default function VendorSnapshotsPage({ embedded }) {
                 </div>
                 {latest && (
                   <p className="text-red-100 text-[11px] font-semibold mt-1.5">
-                    Latest: {latest.nepaliDate} ({snapshotType})
+                    Latest: {latest.nepaliDate} · {formatTime(latest.createdAt)} ({snapshotType})
                   </p>
                 )}
               </div>
@@ -322,6 +322,11 @@ export default function VendorSnapshotsPage({ embedded }) {
               {latest && (
                 <p className="text-[10px] text-slate-400 mt-1">
                   {new Date(latest.snapshotDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                </p>
+              )}
+              {latest && latest.createdAt && (
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  {formatTime(latest.createdAt)}
                 </p>
               )}
             </div>
@@ -519,6 +524,7 @@ export default function VendorSnapshotsPage({ embedded }) {
                       <div className="flex flex-col">
                         <span className="text-sm font-bold text-slate-900">{snap.nepaliDate}</span>
                         <span className="text-[10px] text-slate-400">{new Date(snap.snapshotDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</span>
+                        {snap.createdAt && <span className="text-[9px] text-slate-400">{formatTime(snap.createdAt)}</span>}
                         {snap.prevNepaliDate && (
                           <span className="text-[10px] text-slate-400 mt-1">vs {snap.prevNepaliDate} ({new Date(snap.prevSnapshotDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})</span>
                         )}
@@ -612,6 +618,7 @@ export default function VendorSnapshotsPage({ embedded }) {
                   <div>
                     <span className="text-sm font-bold text-slate-900">{snap.nepaliDate}</span>
                     <span className="text-[10px] text-slate-400 ml-2">{new Date(snap.snapshotDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                    {snap.createdAt && <span className="text-[9px] text-slate-400 ml-2">{formatTime(snap.createdAt)}</span>}
                   </div>
                   {snap.prevNepaliDate && (
                     <span className="text-[10px] text-slate-400">vs {snap.prevNepaliDate}</span>

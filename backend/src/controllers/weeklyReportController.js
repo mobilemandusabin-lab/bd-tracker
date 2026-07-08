@@ -1,12 +1,13 @@
-const fs = require('fs');
-const path = require('path');
-const { spawn } = require('child_process');
 const WeeklyReport = require('../models/WeeklyReport');
 const VendorSnapshot = require('../models/VendorSnapshot');
 const ListingSnapshot = require('../models/ListingSnapshot');
 const ReportHeading = require('../models/ReportHeading');
 const Department = require('../models/Department');
+const path = require('path');
 const { toNepaliDateObject } = require('../utils/nepaliDate');
+const { generatePptx, generatePdf } = require('../services/reportGenerationService');
+
+const TEMPLATE_PPTX = path.join(__dirname, '../../..', 'NEPALCAN.COM-2026-WK-20 (1).pptx');
 
 exports.getReports = async (req, res) => {
   try {
@@ -229,28 +230,6 @@ exports.deleteReport = async (req, res) => {
   }
 };
 
-const TEMPLATE_PPTX = path.join(__dirname, '../../..', 'NEPALCAN.COM-2026-WK-20 (1).pptx');
-const TEMPLATE_12SLIDE = '/tmp/opencode/template_12slide.pptx';
-const PYTHON_SCRIPT = path.join(__dirname, '../../..', 'scripts', 'generate_pptx_report.py');
-
-function ensure12SlideTemplate() {
-  if (!fs.existsSync(TEMPLATE_12SLIDE)) {
-    const dir = path.dirname(TEMPLATE_12SLIDE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const result = require('child_process').spawnSync('python3', [
-      '-c', `
-import sys; sys.path.insert(0, '${path.dirname(PYTHON_SCRIPT)}')
-from generate_pptx_report import build_12slide_template
-build_12slide_template('${TEMPLATE_PPTX}', '${TEMPLATE_12SLIDE}')
-      `
-    ], { stdio: 'pipe' });
-    if (result.status !== 0) {
-      console.error('Failed to build 12-slide template:', result.stderr?.toString() || result.error?.message || 'Unknown error');
-      throw new Error('12-slide template build failed');
-    }
-  }
-}
-
 const REQUIRED_SECTIONS = {
   'Business Development': ['totalVendors', 'verifiedVendors'],
   'Listing': ['totalMarketplaceProducts', 'dailyAverageListings', 'backlogProducts', 'totalSpecificationsAdded', 'specificationCompletionPercent'],
@@ -307,52 +286,12 @@ exports.generatePptx = async (req, res) => {
       });
     }
 
-    ensure12SlideTemplate();
+    const buffer = await generatePptx(report.toObject(), TEMPLATE_PPTX);
 
-    const [vendorSnapshots, listingSnapshots] = await Promise.all([
-      VendorSnapshot.find({ type: 'weekly' }).sort({ snapshotDate: -1 }).limit(12).lean(),
-      ListingSnapshot.find({ type: 'weekly' }).sort({ snapshotDate: -1 }).limit(12).lean()
-    ]);
-
-    const data = {
-      template_path: TEMPLATE_12SLIDE,
-      report: report.toObject(),
-      vendorSnapshots: vendorSnapshots.reverse(),
-      listingSnapshots: listingSnapshots.reverse(),
-      use_12slide: true,
-    };
-
-    const tmpDir = '/tmp/opencode';
-    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-    const jsonPath = path.join(tmpDir, `pptx_data_${req.params.id}.json`);
-    const outputPath = path.join(tmpDir, `report_${req.params.id}.pptx`);
-    fs.writeFileSync(jsonPath, JSON.stringify(data));
-
-    await new Promise((resolve, reject) => {
-      const proc = spawn('python3', [PYTHON_SCRIPT, '--data', jsonPath, '--output', outputPath], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      let stderr = '';
-      proc.stdout.on('data', () => {});
-      proc.stderr.on('data', chunk => { stderr += chunk; });
-      proc.on('close', code => {
-        if (code !== 0) {
-          reject(new Error(`Python script exited with code ${code}: ${stderr}`));
-        } else {
-          resolve();
-        }
-      });
-      proc.on('error', reject);
-    });
-
-    if (!fs.existsSync(outputPath)) {
-      throw new Error('Output PPTX was not created by the Python script');
-    }
-
-    res.download(outputPath, `${report.title.replace(/\s+/g, '_')}.pptx`, () => {
-      fs.unlink(jsonPath, () => {});
-      fs.unlink(outputPath, () => {});
-    });
+    const filename = `${report.title.replace(/\s+/g, '_')}.pptx`;
+    res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+    res.set('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
   }
@@ -374,41 +313,12 @@ exports.generatePdf = async (req, res) => {
       });
     }
 
-    const data = {
-      report: report.toObject(),
-    };
+    const buffer = await generatePdf(report.toObject());
 
-    const tmpDir = '/tmp/opencode';
-    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-    const jsonPath = path.join(tmpDir, `pdf_data_${req.params.id}.json`);
-    const pdfPath = path.join(tmpDir, `report_${req.params.id}.pdf`);
-    fs.writeFileSync(jsonPath, JSON.stringify(data));
-
-    await new Promise((resolve, reject) => {
-      const proc = spawn('python3', [PYTHON_SCRIPT, '--data', jsonPath, '--pdf', pdfPath], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      let stderr = '';
-      proc.stdout.on('data', () => {});
-      proc.stderr.on('data', chunk => { stderr += chunk; });
-      proc.on('close', code => {
-        if (code !== 0) {
-          reject(new Error(`Python script exited with code ${code}: ${stderr}`));
-        } else {
-          resolve();
-        }
-      });
-      proc.on('error', reject);
-    });
-
-    if (!fs.existsSync(pdfPath)) {
-      throw new Error('Output PDF was not created by the Python script');
-    }
-
-    res.download(pdfPath, `${report.title.replace(/\s+/g, '_')}.pdf`, () => {
-      fs.unlink(jsonPath, () => {});
-      fs.unlink(pdfPath, () => {});
-    });
+    const filename = `${report.title.replace(/\s+/g, '_')}.pdf`;
+    res.set('Content-Type', 'application/pdf');
+    res.set('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
   }
