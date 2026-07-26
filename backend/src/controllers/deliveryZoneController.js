@@ -1,6 +1,6 @@
 const axios = require('axios');
 const DeliveryZoneGroup = require('../models/DeliveryZoneGroup');
-const { loginToNepalcan } = require('../services/nepalcanSyncService');
+const { loginToNepalcan } = require('../services/nepalcanAuthService');
 
 const NEPA_CAN_API = 'https://commerce.thecanbrand.com/api';
 const NEPA_CAN_HEADERS = {

@@ -15,183 +15,17 @@ function computeProcessingDuration(statusHistory) {
   return Math.round(diffMs / (1000 * 60 * 60));
 }
 
-// Sync orders from Nepalcan API to database
+// Sync Nepalcan orders only — standalone, no vendor sync
 exports.syncNepalcanOrders = async (req, res) => {
   try {
-    const { orders, token } = req.body;
-    
-    if (!orders || !Array.isArray(orders)) {
-      return res.status(400).json({ message: 'Invalid orders data' });
-    }
-
-    const results = {
-      created: 0,
-      updated: 0,
-      errors: []
-    };
-
-    for (const orderData of orders) {
-      try {
-        const orderId = orderData.orderId || orderData._id;
-        
-        if (!orderId) {
-          results.errors.push(`Skipping order without ID: ${JSON.stringify(orderData).substring(0, 100)}`);
-          continue;
-        }
-
-        // Check if order already exists
-        let existingOrder = await NepalcanOrder.findOne({ orderId });
-
-        // Check marketplaceProcesses for "returned" status — overrides main orderStatus
-        let effectiveStatus = orderData.orderStatus || 'Pending';
-        if (orderData.marketplaceProcesses && Array.isArray(orderData.marketplaceProcesses)) {
-          const hasReturned = orderData.marketplaceProcesses.some(
-            p => p.process && p.process.toLowerCase() === 'returned'
-          );
-          if (hasReturned) {
-            effectiveStatus = 'Returned';
-          }
-        }
-
-        // Build complete status history from API data
-        const statusHistoryEntry = {
-          status: effectiveStatus,
-          timestamp: orderData.updatedAt ? new Date(orderData.updatedAt) : new Date()
-        };
-
-        // Build historical status changes
-        const historicalStatuses = [];
-        
-        // If order has status history from API, use it
-        if (orderData.statusHistory && Array.isArray(orderData.statusHistory)) {
-          historicalStatuses.push(...orderData.statusHistory.map(h => ({
-            status: h.status,
-            timestamp: h.timestamp ? new Date(h.timestamp) : new Date()
-          })));
-        } else if (orderData.createdAt && orderData.updatedAt) {
-          // Infer intermediate statuses for complete tracking
-          const createdAt = new Date(orderData.createdAt);
-          const updatedAt = new Date(orderData.updatedAt);
-          
-          const currentStatus = effectiveStatus;
-          
-          // Always record Pending as starting point
-          historicalStatuses.push({
-            status: 'Pending',
-            timestamp: createdAt
-          });
-          
-          // If delivered, infer Processing at midpoint
-          if (currentStatus === 'Delivered') {
-            const midpoint = new Date((createdAt.getTime() + updatedAt.getTime()) / 2);
-            historicalStatuses.push({
-              status: 'Processing',
-              timestamp: midpoint
-            });
-            historicalStatuses.push({
-              status: 'Delivered',
-              timestamp: updatedAt
-            });
-          }
-          // If shipped, infer Processing at 2/3 point
-          else if (currentStatus === 'Shipped') {
-            const twoThirds = new Date(createdAt.getTime() + (updatedAt.getTime() - createdAt.getTime()) * 2 / 3);
-            historicalStatuses.push({
-              status: 'Processing',
-              timestamp: twoThirds
-            });
-            historicalStatuses.push({
-              status: 'Shipped',
-              timestamp: updatedAt
-            });
-          }
-          // If processing, infer started at 1/3 point
-          else if (currentStatus === 'Processing') {
-            const oneThird = new Date(createdAt.getTime() + (updatedAt.getTime() - createdAt.getTime()) * 1 / 3);
-            historicalStatuses.push({
-              status: 'Processing',
-              timestamp: oneThird
-            });
-          }
-        }
-
-if (!existingOrder) {
-           // Create new order
-           // Build final history - include current entry only if not already covered by historical
-           let finalHistory = [];
-           if (historicalStatuses.length > 0) {
-             // Check if current status is already in historicalStatuses
-             const hasCurrent = historicalStatuses.some(h => h.status === effectiveStatus);
-             finalHistory = hasCurrent ? historicalStatuses : [...historicalStatuses, statusHistoryEntry];
-           } else {
-             finalHistory = [statusHistoryEntry];
-           }
-           
-           const newOrder = new NepalcanOrder({
-             orderId,
-             nepalcanId: orderData._id,
-             customer: orderData.customer || 'Unknown',
-             vendor: orderData.vendor,
-             source: orderData.source,
-             orderStatus: effectiveStatus,
-             paymentStatus: orderData.paymentStatus,
-             paymentMethod: orderData.paymentMethod,
-             totalAmount: orderData.totalAmount || 0,
-             shippingAmount: orderData.shippingAmount || 0,
-             createdAt: orderData.createdAt ? new Date(orderData.createdAt) : new Date(),
-             updatedAt: orderData.updatedAt ? new Date(orderData.updatedAt) : new Date(),
-             statusHistory: finalHistory,
-             rawData: orderData,
-             lastSyncedAt: new Date(),
-             processingDurationHours: computeProcessingDuration(finalHistory)
-           });
-
-           await newOrder.save();
-           results.created++;
-         } else {
-           // Check if status changed
-           const oldStatus = existingOrder.orderStatus;
-           const newStatus = effectiveStatus;
-
-           // Build final history - check if current status is already covered
-           let finalHistory;
-           if (historicalStatuses.length > 0) {
-             const hasCurrent = historicalStatuses.some(h => h.status === newStatus);
-             finalHistory = hasCurrent ? historicalStatuses : [...historicalStatuses, statusHistoryEntry];
-           } else {
-             finalHistory = [...existingOrder.statusHistory, statusHistoryEntry];
-           }
-           
-           // Remove duplicates and sort by timestamp
-           existingOrder.statusHistory = finalHistory
-             .filter((v, i, a) => a.findIndex(t => t.timestamp.getTime() === v.timestamp.getTime()) === i)
-             .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-
-          // Update order
-          existingOrder.orderStatus = newStatus;
-          existingOrder.paymentStatus = orderData.paymentStatus || existingOrder.paymentStatus;
-          existingOrder.totalAmount = orderData.totalAmount || existingOrder.totalAmount;
-          existingOrder.updatedAt = orderData.updatedAt ? new Date(orderData.updatedAt) : new Date();
-          existingOrder.rawData = orderData;
-          existingOrder.lastSyncedAt = new Date();
-          existingOrder.processingDurationHours = computeProcessingDuration(existingOrder.statusHistory);
-
-          await existingOrder.save();
-          results.updated++;
-        }
-      } catch (err) {
-        results.errors.push(`Error processing order ${orderData.orderId}: ${err.message}`);
-      }
-    }
-
-    res.json({
-      message: 'Sync completed',
-      results
-    });
-
-  } catch (error) {
-    console.error('Sync error:', error);
-    res.status(500).json({ message: 'Server error during sync', error: error.message });
+    const { syncNepalcanOrders } = require('../services/nepalcanOrderSyncService');
+    console.log('[Order Sync] Starting...');
+    const result = await syncNepalcanOrders();
+    console.log('[Order Sync] Complete:', result.message);
+    res.status(200).json({ status: 'success', message: result.message, synced: result.synced });
+  } catch (err) {
+    console.error('[Order Sync] Error:', err);
+    res.status(500).json({ status: 'fail', message: err.message });
   }
 };
 
@@ -469,20 +303,7 @@ exports.getSyncLogs = async (req, res) => {
   }
 };
 
-// Manually check delivered orders for returns via logistics API
-exports.checkReturnedOrders = async (req, res) => {
-  try {
-    const { checkAndUpdateReturnedOrders } = require('../services/nepalcanSyncService');
-    const updated = await checkAndUpdateReturnedOrders();
-    res.json({
-      message: updated > 0 ? `Updated ${updated} returned orders` : 'No new returned orders found',
-      updated
-    });
-  } catch (error) {
-    console.error('Check returned orders error:', error);
-    res.status(500).json({ message: 'Failed to check returned orders', error: error.message });
-  }
-};
+// checkReturnedOrders removed — enrichOrdersWithTracking (called during sync) covers this.
 
 // Get order tracking details from external logistics API
 exports.getOrderTracking = async (req, res) => {

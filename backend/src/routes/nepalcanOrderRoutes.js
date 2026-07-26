@@ -1,6 +1,5 @@
 const express = require('express');
 const {
-  syncNepalcanOrders,
   getNepalcanOrders,
   getNepalcanStats,
   fetchFromNepalcan,
@@ -10,7 +9,7 @@ const {
   getOrderTracking,
   getNepalcanAnalytics,
   getMonthlyData,
-  checkReturnedOrders
+  syncNepalcanOrders
 } = require('../controllers/nepalcanOrderController');
 const { protect } = require('../middlewares/authMiddleware');
 const { requirePermission } = require('../middlewares/permissionMiddleware');
@@ -21,7 +20,9 @@ const router = express.Router();
 router.use(protect);
 router.use(requirePermission('nepalcan.manage'));
 
-// Sync orders from Nepalcan to database
+// Sync is handled by POST /api/v1/nepalcan/sync-all or cron /api/cron/sync
+
+// Sync Nepalcan orders only
 router.post('/sync', syncNepalcanOrders);
 
 // Get orders with filtering
@@ -51,7 +52,6 @@ router.get('/sync-logs', getSyncLogs);
 // Get order tracking details from external logistics API
 router.get('/tracking/:orderId', getOrderTracking);
 
-// Manually check delivered orders for returns
-router.post('/check-returns', checkReturnedOrders);
+// check-returns removed — enrichOrdersWithTracking runs during sync
 
 module.exports = router;

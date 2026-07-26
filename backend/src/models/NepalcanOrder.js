@@ -68,7 +68,8 @@ const nepalcanOrderSchema = new mongoose.Schema({
   createdAt: {
     type: Date
   },
-  updatedAt: {
+  // Nepalcan API's last-modified timestamp — used for delta sync
+  apiUpdatedAt: {
     type: Date
   },
   // Track status changes with timestamps
@@ -86,6 +87,12 @@ const nepalcanOrderSchema = new mongoose.Schema({
   processingDurationHours: {
     type: Number,
     default: null
+  },
+  // Source of the current orderStatus value
+  statusSource: {
+    type: String,
+    enum: ['commerce_api', 'logistics_api', 'manual'],
+    default: 'commerce_api'
   }
 }, {
   timestamps: true

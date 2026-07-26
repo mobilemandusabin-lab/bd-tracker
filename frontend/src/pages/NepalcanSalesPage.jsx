@@ -38,6 +38,19 @@ const NepalcanSalesPage = () => {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [orderSearch, setOrderSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
+  const [syncing, setSyncing] = useState(false);
+
+  const triggerSync = async () => {
+    setSyncing(true);
+    try {
+      const backendToken = localStorage.getItem('token');
+      const headers = backendToken ? { 'Authorization': `Bearer ${backendToken}` } : {};
+      await axios.post(`${API_URL}/nepalcan-orders/sync`, {}, { headers });
+      await Promise.all([fetchOrders(), fetchStats(), fetchSyncLog()]);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Sync failed');
+    } finally { setSyncing(false); }
+  };
 
   const fetchSyncHistory = async () => {
     try {
@@ -191,6 +204,10 @@ const NepalcanSalesPage = () => {
           <h1 className="text-2xl lg:text-3xl font-extrabold text-slate-900 tracking-tight">Active Sellers Sales</h1>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={triggerSync} disabled={syncing}
+            className="flex items-center gap-2 px-4 py-2.5 bg-red-600 border border-red-600 rounded-xl text-xs font-bold text-white hover:bg-red-700 transition-all disabled:opacity-50">
+            <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} /> {syncing ? 'Syncing...' : 'Sync Now'}
+          </button>
           <button onClick={() => { fetchOrders(); fetchStats(); fetchSyncLog(); }} disabled={loading}
             className="flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 transition-all">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh

@@ -14,6 +14,22 @@ const nepalcanSyncLogSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  newOrders: {
+    type: Number,
+    default: 0
+  },
+  updatedOrders: {
+    type: Number,
+    default: 0
+  },
+  skippedOrders: {
+    type: Number,
+    default: 0
+  },
+  deletedOrders: {
+    type: Number,
+    default: 0
+  },
   vendorsSynced: {
     type: Number,
     default: 0

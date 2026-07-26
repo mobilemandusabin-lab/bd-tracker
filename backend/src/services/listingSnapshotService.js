@@ -2,7 +2,7 @@ const ListingSnapshot = require('../models/ListingSnapshot');
 
 async function getMarketplaceTotal() {
   try {
-    const { fetchTotalMarketplaceProducts } = require('./nepalcanSyncService');
+    const { fetchTotalMarketplaceProducts } = require('./nepalcanMarketplaceService');
     const total = await fetchTotalMarketplaceProducts();
     return total;
   } catch (err) {

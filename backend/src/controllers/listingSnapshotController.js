@@ -45,7 +45,7 @@ exports.getLiveData = async (req, res) => {
 
     let totalMarketplaceProducts = 0;
     try {
-      const { fetchTotalMarketplaceProducts } = require('../services/nepalcanSyncService');
+      const { fetchTotalMarketplaceProducts } = require('../services/nepalcanMarketplaceService');
       totalMarketplaceProducts = await fetchTotalMarketplaceProducts();
     } catch {
       const Product = require('../models/Product');

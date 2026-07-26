@@ -133,10 +133,10 @@ exports.getNepalcanSales = async (req, res) => {
 // Fetch and sync vendors from Nepalcan
 exports.syncVendorsFromNepalcan = async (req, res) => {
   try {
-     const { syncNepalcanVendors } = require('../services/nepalcanSyncService');
-     
-     console.log('[Sync Vendors] Starting sync...');
-     const result = await syncNepalcanVendors(null, req.user?._id);
+const { syncNepalcanVendors } = require('../services/nepalcanVendorSyncService');
+      
+      console.log('[Sync Vendors] Starting sync...');
+      const result = await syncNepalcanVendors(null, req.user?._id);
      console.log('[Sync Vendors] Result:', result);
      
      res.status(200).json({
@@ -184,7 +184,7 @@ exports.getVendorSyncLogs = async (req, res) => {
 // Sync vendors manually with progress tracking
 exports.syncVendorsManual = async (req, res) => {
   try {
-    const { syncNepalcanVendors } = require('../services/nepalcanSyncService');
+    const { syncNepalcanVendors } = require('../services/nepalcanVendorSyncService');
 
     console.log('[Manual Sync] Starting vendor sync...');
     const result = await syncNepalcanVendors(null, req.user?._id);
@@ -262,7 +262,7 @@ exports.fetchVendorsFromNepalcan = async (req, res) => {
 // Sync service branches for all vendors
 exports.syncServiceBranches = async (req, res) => {
   try {
-    const { syncServiceBranches } = require('../services/nepalcanSyncService');
+    const { syncServiceBranches } = require('../services/nepalcanVendorSyncService');
     const result = await syncServiceBranches();
     res.status(200).json({
       status: 'success',
@@ -280,7 +280,7 @@ exports.syncServiceBranches = async (req, res) => {
 // Get total marketplace products — always live from Nepalcan API
 exports.getTotalMarketplaceProducts = async (req, res) => {
   try {
-    const { fetchTotalMarketplaceProducts } = require('../services/nepalcanSyncService');
+    const { fetchTotalMarketplaceProducts } = require('../services/nepalcanMarketplaceService');
     const total = await fetchTotalMarketplaceProducts();
     res.status(200).json({
       status: 'success',
