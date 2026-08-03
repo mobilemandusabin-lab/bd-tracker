@@ -1,5 +1,6 @@
 const NepalcanOrder = require('../models/NepalcanOrder');
 const NepalcanSyncLog = require('../models/NepalcanSyncLog');
+const Lead = require('../models/Lead');
 const axios = require('axios');
 
 const API_BASE = 'https://commerce.thecanbrand.com/api';
@@ -915,9 +916,87 @@ exports.updateNepalcanOrder = async (req, res) => {
     );
 
     const updated = await NepalcanOrder.findByIdAndUpdate(id, { $set: setFields }, { new: true, runValidators: true });
+
+    // Auto-recalculate Lead revenue when order becomes Delivered or amount changes on Delivered order
+    if (updated.vendor_lead_id && (
+        (body.orderStatus === 'Delivered' && order.orderStatus !== 'Delivered') ||  // status changed TO Delivered
+        (order.orderStatus === 'Delivered' && (body.totalAmount !== undefined || body.shippingAmount !== undefined)) // amount changed on Delivered
+      )) {
+      try {
+        const agg = await NepalcanOrder.aggregate([
+          { $match: { orderStatus: 'Delivered', vendor_lead_id: updated.vendor_lead_id } },
+          { $group: { _id: null, total: { $sum: '$totalAmount' }, count: { $sum: 1 }, lastOrder: { $max: '$updatedAt' } } }
+        ]);
+        const data = agg[0] || { total: 0, count: 0, lastOrder: null };
+        const lead = await Lead.findById(updated.vendor_lead_id);
+        if (lead) {
+          lead.total_revenue = data.total;
+          lead.delivered_order_count = data.count;
+          lead.last_order_date = data.lastOrder;
+          lead.active_seller = data.count > 0;
+          lead.lead_status = 'Active Seller';
+          lead.last_nepalcan_status = 'Active Seller';
+          if (!lead.converted_at) lead.converted_at = new Date();
+          await lead.save();
+          console.log(`[Order Update] Auto-recalculated revenue for lead ${updated.vendor_lead_id}: ${data.total}`);
+        }
+      } catch (err) {
+        console.error('[Order Update] Revenue recalc failed:', err.message);
+      }
+    }
+
     res.json({ status: 'success', data: updated });
   } catch (error) {
     console.error('Update Nepalcan order error:', error);
     res.status(500).json({ message: 'Failed to update order', error: error.message });
+  }
+};
+
+// POST /nepalcan/recalculate-revenue — bulk recalculate all vendor revenues from Delivered orders
+exports.recalculateRevenue = async (req, res) => {
+  try {
+    const deliveredOrdersAgg = await NepalcanOrder.aggregate([
+      { $match: { orderStatus: 'Delivered', vendor_lead_id: { $ne: null } } },
+      { $group: {
+        _id: '$vendor_lead_id',
+        deliveredCount: { $sum: 1 },
+        totalAmount: { $sum: '$totalAmount' },
+        lastOrderDate: { $max: '$updatedAt' }
+      }}
+    ]);
+
+    if (deliveredOrdersAgg.length === 0) {
+      return res.json({ status: 'success', message: 'No delivered orders with vendor_lead_id', updated: 0 });
+    }
+
+    const ops = deliveredOrdersAgg.map(v => ({
+      updateOne: {
+        filter: { _id: v._id },
+        update: {
+          $set: {
+            total_revenue: v.totalAmount,
+            delivered_order_count: v.deliveredCount,
+            last_order_date: v.lastOrderDate,
+            active_seller: v.deliveredCount > 0,
+            lead_status: 'Active Seller',
+            last_nepalcan_status: 'Active Seller'
+          },
+          $setOnInsert: { converted_at: new Date() }
+        }
+      }
+    }));
+
+    const result = await Lead.bulkWrite(ops, { ordered: false });
+    const updatedIds = deliveredOrdersAgg.map(v => v._id);
+
+    res.json({
+      status: 'success',
+      message: `Recalculated revenue for ${result.modifiedCount} vendors`,
+      updated: result.modifiedCount,
+      vendors: updatedIds
+    });
+  } catch (err) {
+    console.error('[Recalc Revenue] Error:', err);
+    res.status(500).json({ status: 'fail', message: err.message });
   }
 };

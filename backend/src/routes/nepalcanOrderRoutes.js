@@ -10,7 +10,8 @@ const {
   getOrderTracking,
   getNepalcanAnalytics,
   getMonthlyData,
-  syncNepalcanOrders
+  syncNepalcanOrders,
+  recalculateRevenue
 } = require('../controllers/nepalcanOrderController');
 const { runAudit, getAuditResults, dismissAuditOrder, undismissAuditOrder, getDismissedOrders } = require('../controllers/nepalcanAuditController');
 const { protect } = require('../middlewares/authMiddleware');
@@ -44,6 +45,9 @@ router.get('/order/:id', getNepalcanOrderById);
 
 // Update a Nepalcan order manually (orderId locked, statusHistory preserved)
 router.put('/order/:id', requirePermission('nepalcan.orders-edit'), updateNepalcanOrder);
+
+// Recalculate all vendor revenues from Delivered orders
+router.post('/recalculate-revenue', requirePermission('nepalcan.orders-edit'), recalculateRevenue);
 
 // Fetch orders directly from Nepalcan API
 router.post('/fetch', fetchFromNepalcan);
