@@ -309,35 +309,39 @@ exports.getSyncLogs = async (req, res) => {
 exports.getOrderTracking = async (req, res) => {
   try {
     const { orderId } = req.params;
-    const response = await axios.get(
-      `https://can-logistic-prod-84pie.ondigitalocean.app/api/public/marketplace-tracker/${orderId}`,
-      { timeout: 10000 }
-    );
-    const trackingData = response.data;
+    const order = await NepalcanOrder.findOne({ orderId });
 
-    // Check marketplaceProcesses for "returned" status and update order if found
-    if (trackingData?.marketplaceProcesses && Array.isArray(trackingData.marketplaceProcesses)) {
-      const hasReturned = trackingData.marketplaceProcesses.some(
-        p => p.process && p.process.toLowerCase() === 'returned'
-      );
-      if (hasReturned) {
-        const order = await NepalcanOrder.findOne({ orderId });
-        if (order && order.orderStatus !== 'Returned') {
-          order.orderStatus = 'Returned';
-          order.statusHistory.push({ status: 'Returned', timestamp: new Date() });
-          await order.save();
-        }
-      }
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
     }
 
-    res.json(trackingData);
+    const base = order.trackingData || {};
+    const response = {
+      ...base,
+      orderId: order.orderId,
+      orderStatus: order.orderStatus,
+      paymentStatus: order.paymentStatus,
+      paymentMethod: order.paymentMethod,
+      source: order.source,
+      totalAmount: order.totalAmount,
+      shippingAmount: order.shippingAmount,
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
+      priceHistory: order.priceHistory || []
+    };
+
+    // Keep trackingData's vendor/customerProfile objects; fall back to DB strings only when missing
+    if (!response.vendor && order.vendor) {
+      response.vendor = { name: order.vendor };
+    }
+    if (!response.customerProfile && order.customer) {
+      response.customerProfile = { name: order.customer };
+    }
+
+    res.json(response);
   } catch (error) {
     console.error('Get order tracking error:', error);
-    const status = error.response?.status || 500;
-    res.status(status).json({
-      message: 'Failed to fetch order tracking data',
-      error: error.response?.data?.message || error.message
-    });
+    res.status(500).json({ message: 'Failed to fetch order tracking data', error: error.message });
   }
 };
 
@@ -851,5 +855,69 @@ exports.getMonthlyData = async (req, res) => {
   } catch (error) {
     console.error('Get monthly data error:', error);
     res.status(500).json({ message: 'Failed to fetch monthly data', error: error.message });
+  }
+};
+
+const ORDER_STATUSES = ['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled', 'Returned'];
+
+// Update a Nepalcan order manually. orderId is locked; statusHistory is preserved,
+// a status change appends a new entry instead.
+exports.updateNepalcanOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const body = req.body;
+
+    const order = await NepalcanOrder.findById(id);
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    const setFields = {};
+    const allowed = ['orderStatus', 'paymentStatus', 'paymentMethod', 'customer', 'vendor', 'source', 'totalAmount', 'shippingAmount', 'createdAt'];
+
+    for (const field of allowed) {
+      if (body[field] !== undefined) {
+        if (field === 'orderStatus' && !ORDER_STATUSES.includes(body[field])) {
+          return res.status(400).json({ message: `Invalid orderStatus: ${body[field]}` });
+        }
+        if ((field === 'totalAmount' || field === 'shippingAmount') && (isNaN(body[field]) || Number(body[field]) < 0)) {
+          return res.status(400).json({ message: `Invalid ${field}` });
+        }
+        setFields[field] = field === 'totalAmount' || field === 'shippingAmount' ? Number(body[field]) : body[field];
+      }
+    }
+
+    if (body.orderStatus && body.orderStatus !== order.orderStatus) {
+      setFields.statusHistory = [
+        ...(order.statusHistory || []),
+        { status: body.orderStatus, timestamp: new Date() }
+      ];
+    }
+
+    const now = new Date();
+    const priceChanges = [];
+    if (body.totalAmount !== undefined && Number(body.totalAmount) !== Number(order.totalAmount)) {
+      priceChanges.push({ field: 'totalAmount', oldValue: order.totalAmount, newValue: Number(body.totalAmount), source: 'manual', timestamp: now });
+    }
+    if (body.shippingAmount !== undefined && Number(body.shippingAmount) !== Number(order.shippingAmount)) {
+      priceChanges.push({ field: 'shippingAmount', oldValue: order.shippingAmount, newValue: Number(body.shippingAmount), source: 'manual', timestamp: now });
+    }
+    if (priceChanges.length > 0) {
+      setFields.priceHistory = [...(order.priceHistory || []), ...priceChanges];
+    }
+
+    if (Object.keys(setFields).length === 0) {
+      return res.status(400).json({ message: 'No editable fields provided' });
+    }
+
+    setFields.processingDurationHours = computeProcessingDuration(
+      setFields.statusHistory || order.statusHistory || []
+    );
+
+    const updated = await NepalcanOrder.findByIdAndUpdate(id, { $set: setFields }, { new: true, runValidators: true });
+    res.json({ status: 'success', data: updated });
+  } catch (error) {
+    console.error('Update Nepalcan order error:', error);
+    res.status(500).json({ message: 'Failed to update order', error: error.message });
   }
 };

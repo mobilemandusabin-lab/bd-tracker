@@ -113,6 +113,7 @@ app.use('/api/v1/settings/pipeline', pipelineStageRoutes);
 app.use('/api/v1/vendor-snapshots', vendorSnapshotRoutes);
 app.use('/api/v1/listing-snapshots', listingSnapshotRoutes);
 app.use('/api/v1/delivery-zones', deliveryZoneRoutes);
+app.use('/api/v1/provider-pricing', require('./routes/providerPricingRoutes'));
 app.use('/api/v1/extension', extensionRoutes);
 app.use('/api/v1/roles', roleRoutes);
 app.use('/api/v1/team-targets', teamTargetRoutes);

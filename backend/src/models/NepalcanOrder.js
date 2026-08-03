@@ -78,6 +78,19 @@ const nepalcanOrderSchema = new mongoose.Schema({
   rawData: {
     type: mongoose.Schema.Types.Mixed
   },
+  // Full tracking snapshot from logistics API, captured during sync
+  trackingData: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
+  },
+  // Order-level amount change history
+  priceHistory: [{
+    field: { type: String },
+    oldValue: { type: Number },
+    newValue: { type: Number },
+    source: { type: String, enum: ['sync', 'manual'], default: 'sync' },
+    timestamp: { type: Date, default: Date.now }
+  }],
   // Last synced with Nepalcan
   lastSyncedAt: {
     type: Date,

@@ -35,17 +35,17 @@ const SLIDE9_ROWS = [
 ];
 
 const CHART_POSITIONS = {
-  2: [  // BD Charts
-    { x: 411480, y: 1824770, dept: 'Business Development', key: 'totalVendors', title: 'Total Vendors' },
-    { x: 6420700, y: 1866850, dept: 'Business Development', key: 'verifiedVendors', title: 'Total Verified Vendors' },
+  2: [  // BD Charts - moved down to avoid label overlap
+    { x: 411480, y: 2190750, dept: 'Business Development', key: 'totalVendors', title: 'Total Vendors' },
+    { x: 6420700, y: 2190750, dept: 'Business Development', key: 'verifiedVendors', title: 'Total Verified Vendors' },
   ],
-  5: [  // Listing Charts
-    { x: 713232, y: 1600200, dept: 'Listing', key: 'totalMarketplaceProducts', title: 'Marketplace Products' },
-    { x: 6812280, y: 1600200, dept: 'Listing', key: 'totalSpecificationsAdded', title: 'Specifications Added' },
+  5: [  // Listing Charts - moved down to avoid label overlap
+    { x: 713232, y: 2190750, dept: 'Listing', key: 'totalMarketplaceProducts', title: 'Marketplace Products' },
+    { x: 6812280, y: 2190750, dept: 'Listing', key: 'dailyAverageListings', title: 'Daily Average Listings' },
   ],
-  8: [  // QC Charts
-    { x: 411480, y: 1824770, dept: 'Quality Control', key: 'productsApproved', title: 'QC – Products Approved' },
-    { x: 6420700, y: 1866850, dept: 'Quality Control', key: 'productsRejected', title: 'QC – Products Rejected' },
+  8: [  // QC Charts - moved down to avoid label overlap
+    { x: 411480, y: 2190750, dept: 'Quality Control', key: 'productsApproved', title: 'QC – Products Approved' },
+    { x: 6420700, y: 2190750, dept: 'Quality Control', key: 'productsRejected', title: 'QC – Products Rejected' },
   ],
 };
 
@@ -139,12 +139,27 @@ async function ensure12SlideTemplate(srcPath, cachePath) {
       );
   }
 
+  // Fix slide3 (BD Charts): move charts down to avoid label overlap
+  if (slideData[bdIdx]) {
+    slideData[bdIdx].xml = slideData[bdIdx].xml
+      .replace(/y="1824770"/g, 'y="2190750"')  // left chart y
+      .replace(/y="1866850"/g, 'y="2190750"');  // right chart y
+    zip.file('ppt/' + rels[bdIdx], slideData[bdIdx].xml);
+  }
+
   // Fix slide6 (Listing Charts): remove duplicate PIC at (6812280, 1600200) with rId6
   const liIdx = sldIds[5];
   if (slideData[liIdx]) {
-    slideData[liIdx].xml = slideData[liIdx].xml.replace(/<p:pic>[\s\S]*?<\/p:pic>/g, pic =>
-      pic.includes('r:embed="rId6"') ? '' : pic
-    );
+    slideData[liIdx].xml = slideData[liIdx].xml
+      .replace(/<p:pic>[\s\S]*?<\/p:pic>/g, pic =>
+        pic.includes('r:embed="rId6"') ? '' : pic
+      )
+      // Move charts down to avoid label overlap
+      .replace(/y="1600200"/g, 'y="2190750"')
+      // Replace 2nd chart text label
+      .replace(/Total Specifications Added Trend/g, 'Daily Average Listings Trend')
+      // Update narrative text below charts
+      .replace(/Total Specifications Added/g, 'Daily Average Listings');
     if (slideData[liIdx].rels) {
       slideData[liIdx].rels = slideData[liIdx].rels.replace(
         /<Relationship\s+Id="rId6"[^>]*\/>/, ''
@@ -275,90 +290,90 @@ async function ensure12SlideTemplate(srcPath, cachePath) {
 
 // ── SVG Chart Generation ─────────────────────────────────────────
 
-function createBarChartSvg(values, labels, title, wPx = 600, hPx = 375) {
-  const maxVal = Math.max(...values, 1);
+function createBarChartSvg(values, labels, title, wPx = 500, hPx = 340) {
   const n = values.length;
   const f = 'Arial, sans-serif';
-  const margin = { l: 72, r: 30, t: 18, b: 52 };
+  const barColor = '#dc1e3e';
+  const labelColor = '#666666';
+
+  // Compute nice Y-axis range
+  const dataMin = Math.min(...values);
+  const dataMax = Math.max(...values);
+  const rawRange = dataMax - dataMin;
+  const pad = Math.max(rawRange === 0 ? 5 : Math.round(rawRange * 0.2), 2);
+  const rawMin = dataMin - pad;
+  const rawMax = dataMax + pad;
+  const idealStep = (rawMax - rawMin) / 5;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(idealStep)));
+  const residual = idealStep / magnitude;
+  let niceStep;
+  if (residual <= 1.5) niceStep = 1 * magnitude;
+  else if (residual <= 3.5) niceStep = 2 * magnitude;
+  else if (residual <= 7) niceStep = 5 * magnitude;
+  else niceStep = 10 * magnitude;
+  const yMin = Math.floor(rawMin / niceStep) * niceStep;
+  const yMax = Math.ceil(rawMax / niceStep) * niceStep;
+  const ySteps = Math.round((yMax - yMin) / niceStep);
+
+  // Plot area at 80% of original, centered
+  const margin = { l: 78, r: 100, t: 75, b: 76 };
   const plotL = margin.l, plotR = wPx - margin.r;
   const plotT = margin.t, plotB = hPx - margin.b;
   const plotW = plotR - plotL, plotH = plotB - plotT;
-  const barW = Math.min(plotW / n * 0.48, 68);
-  const step = plotW / n;
-
-  const b = '#000000';
-  const a = b;
+  const barW = 56;
+  const gap = (plotW - barW * n) / (n + 1);
 
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${wPx}" height="${hPx}" viewBox="0 0 ${wPx} ${hPx}">
-    <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#E8494D"/><stop offset="100%" stop-color="#B31531"/></linearGradient></defs>`;
+    <rect width="${wPx}" height="${hPx}" fill="#ffffff"/>`;
 
-  // Notebook ruled background
-  for (let i = 0; i < hPx; i += 24) {
-    svg += `<line x1="0" y1="${i}" x2="${wPx}" y2="${i}" stroke="#F0F0F1" stroke-width="0.5"/>`;
-    if ((i / 24) % 4 === 0) {
-      svg += `<line x1="0" y1="${i}" x2="${wPx}" y2="${i}" stroke="#E5E5E7" stroke-width="0.75"/>`;
-    }
-  }
-  // Left margin line (notebook red margin)
-  svg += `<line x1="${margin.l - 16}" y1="0" x2="${margin.l - 16}" y2="${hPx}" stroke="#FFD6D6" stroke-width="1"/>`;
-
-  // Horizontal grid lines (dashed, black)
-  for (let i = 0; i <= 4; i++) {
-    const gy = plotB - (plotH / 4) * i;
-    const val = (maxVal / 4) * i;
-    svg += `<line x1="${plotL}" y1="${gy}" x2="${plotR}" y2="${gy}" stroke="${b}" stroke-width="0.5" stroke-dasharray="3,3" opacity="0.3"/>`;
-    svg += `<text x="${plotL - 10}" y="${gy + 4}" text-anchor="end" font-family="${f}" font-size="11" fill="${a}">${fmt(Math.round(val))}</text>`;
+  // Notebook ruled lines at uniform Y-axis subdivisions
+  const subStep = niceStep / 4;
+  for (let v = yMin; v <= yMax; v += subStep) {
+    const y = plotB - ((v - yMin) / (yMax - yMin)) * plotH;
+    svg += `<line x1="${plotL}" y1="${y}" x2="${plotR}" y2="${y}" stroke="#e0e0e0" stroke-width="1"/>`;
   }
 
-  // Y-axis and X-axis (black)
-  svg += `<line x1="${plotL}" y1="${plotT}" x2="${plotL}" y2="${plotB}" stroke="${b}" stroke-width="0.75"/>`;
-  svg += `<line x1="${plotL}" y1="${plotB}" x2="${plotR}" y2="${plotB}" stroke="${b}" stroke-width="0.75"/>`;
+  // Horizontal grid lines at Y-axis label positions
+  for (let i = 0; i <= ySteps; i++) {
+    const gy = plotB - (plotH / ySteps) * i;
+    const val = yMin + niceStep * i;
+    svg += `<line x1="${plotL}" y1="${gy}" x2="${plotR}" y2="${gy}" stroke="#d4d4d4" stroke-width="1"/>`;
+    svg += `<text x="${plotL - 10}" y="${gy + 4}" text-anchor="end" font-family="${f}" font-size="10" fill="${labelColor}">${fmt(val)}</text>`;
+  }
 
+  // Axes
+  svg += `<line x1="${plotL}" y1="${plotT}" x2="${plotL}" y2="${plotB}" stroke="#222222" stroke-width="1.5"/>`;
+  svg += `<line x1="${plotL}" y1="${plotB}" x2="${plotR}" y2="${plotB}" stroke="#222222" stroke-width="1.5"/>`;
+
+  // Bars
   for (let i = 0; i < n; i++) {
-    const barH = Math.max((values[i] / maxVal) * plotH, 2);
-    const cx = plotL + step * i + step / 2;
+    const barH = Math.max(((values[i] - yMin) / (yMax - yMin)) * plotH, 2);
+    const cx = plotL + gap + (barW + gap) * i + barW / 2;
     const by = plotB - barH;
 
-    svg += `<rect x="${cx - barW/2 + 2}" y="${by + 2}" width="${barW}" height="${barH}" fill="rgba(0,0,0,0.1)" rx="3"/>`;
-    svg += `<rect x="${cx - barW/2}" y="${by}" width="${barW}" height="${barH}" fill="url(#g)" rx="3"/>`;
-    svg += `<text x="${cx}" y="${by - 8}" text-anchor="middle" font-family="${f}" font-size="13" font-weight="bold" fill="${a}">${fmt(values[i])}</text>`;
-    svg += `<text x="${cx}" y="${plotB + 16}" text-anchor="middle" font-family="${f}" font-size="11" fill="${a}">${labels[i].replace('\\n', ' ')}</text>`;
+    // Shadow
+    svg += `<rect x="${cx - barW/2 + 2}" y="${by + 2}" width="${barW}" height="${barH}" fill="#000000" opacity="0.08" rx="2"/>`;
+    // Bar
+    svg += `<rect x="${cx - barW/2}" y="${by}" width="${barW}" height="${barH}" fill="${barColor}" rx="2"/>`;
+    // Value above bar
+    svg += `<text x="${cx}" y="${by - 10}" text-anchor="middle" font-family="${f}" font-size="12" font-weight="bold" fill="#333333">${fmt(values[i])}</text>`;
+    // Category label below bar
+    svg += `<text x="${cx}" y="${plotB + 18}" text-anchor="middle" font-family="${f}" font-size="10" fill="${labelColor}">${labels[i].replace('\\n', ' ')}</text>`;
+    // Value below category label
+    svg += `<text x="${cx}" y="${plotB + 34}" text-anchor="middle" font-family="${f}" font-size="11" font-weight="bold" fill="#333333">${fmt(values[i])}</text>`;
   }
+
+  // Legend
+  const legendX = wPx / 2;
+  const legendY = plotB + 50;
+  svg += `<rect x="${legendX - 28}" y="${legendY - 8}" width="10" height="10" fill="${barColor}" rx="1"/>`;
+  svg += `<text x="${legendX - 14}" y="${legendY + 1}" text-anchor="start" font-family="${f}" font-size="11" fill="${labelColor}">Total</text>`;
+
+  // Footer axis title
+  svg += `<text x="${legendX}" y="${legendY + 22}" text-anchor="middle" font-family="${f}" font-size="11" font-weight="bold" fill="${labelColor}">${title.replace('Total ', '')}</text>`;
 
   svg += '</svg>';
   return svg;
-}
-
-function createTrendChartSvg(values, labels, title, wPx = 800, hPx = 500) {
-  const y = values.map(v => v ?? 0);
-  const maxVal = Math.max(...y, 1);
-  const n = y.length;
-  const chartL = 60, chartR = 20, chartT = 80, chartB = 60;
-  const chartW = wPx - chartL - chartR;
-  const chartH = hPx - chartT - chartB;
-
-  let points = '';
-  let labelsHtml = '';
-  let dataLabels = '';
-
-  for (let i = 0; i < n; i++) {
-    const px = chartL + (chartW / (n - 1 || 1)) * i;
-    const py = chartT + chartH - (y[i] / maxVal) * chartH;
-    points += `${i > 0 ? ' ' : ''}${px},${py}`;
-    labelsHtml += `<text x="${px}" y="${chartT + chartH + 22}" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#000000">${labels[i]}</text>`;
-    dataLabels += `<circle cx="${px}" cy="${py}" r="${i === n - 1 ? 8 : 5}" fill="${i === n - 1 ? '#B41531' : 'white'}" stroke="#B41531" stroke-width="2"/>`;
-    dataLabels += `<text x="${px}" y="${py - 12}" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="bold" fill="#000000">${fmt(y[i])}</text>`;
-  }
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${wPx}" height="${hPx}" viewBox="0 0 ${wPx} ${hPx}">
-    <rect width="${wPx}" height="${hPx}" fill="white"/>
-    <text x="${chartL}" y="40" font-family="sans-serif" font-size="18" font-weight="bold" fill="#000000">${title}</text>
-    <polyline points="${points}" fill="none" stroke="#B41531" stroke-width="3"/>
-    <polygon points="${points} ${chartL + chartW},${chartT + chartH} ${chartL},${chartT + chartH}" fill="rgba(180,21,49,0.08)"/>
-    ${labelsHtml}
-    ${dataLabels}
-    <line x1="${chartL}" y1="${chartT + chartH}" x2="${chartL + chartW}" y2="${chartT + chartH}" stroke="#E2E8F0" stroke-width="1"/>
-  </svg>`;
 }
 
 const FONT_DIR = path.join(__dirname, '..', '..', 'fonts');
@@ -368,7 +383,7 @@ const FONT_FILES = ['QuattrocentoSans-Regular.ttf', 'QuattrocentoSans-Bold.ttf']
 
 function svgToPng(svg) {
   const resvg = new Resvg(svg, {
-    fitTo: { mode: 'width', value: 600 },
+    fitTo: { mode: 'width', value: 500 },
     font: { fontFiles: FONT_FILES, defaultFontFamily: 'Quattrocento Sans' },
   });
   const pngData = resvg.render();

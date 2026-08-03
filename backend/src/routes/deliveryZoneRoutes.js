@@ -5,10 +5,7 @@ const deliveryZoneController = require('../controllers/deliveryZoneController');
 
 const router = express.Router();
 
-router.use(protect);
-router.use(requirePermission('delivery-zones.manage'));
-
-router.get('/', deliveryZoneController.getZoneGroups);
-router.post('/sync', deliveryZoneController.syncZoneGroups);
+router.get('/', protect, requirePermission('delivery-zones.view'), deliveryZoneController.getZoneGroups);
+router.post('/sync', protect, requirePermission('delivery-zones.manage'), deliveryZoneController.syncZoneGroups);
 
 module.exports = router;

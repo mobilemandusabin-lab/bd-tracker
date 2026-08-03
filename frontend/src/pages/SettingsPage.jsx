@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useSelector } from 'react-redux';
-import { Cog, ShieldCheck } from 'lucide-react';
+import { Cog, ShieldCheck, DollarSign } from 'lucide-react';
 import { cn } from '../utils/cn';
 import PipelineSettingsPage from './PipelineSettingsPage';
 import PermissionsSettingsPage from './PermissionsSettingsPage';
+import PricingSettingsPage from './PricingSettingsPage';
 
 const SettingsPage = () => {
   const { user } = useSelector((state) => state.auth);
@@ -12,6 +13,7 @@ const SettingsPage = () => {
   const tabs = [
     { key: 'pipeline', label: 'Pipeline', icon: Cog },
     ...(user?.role === 'super_admin' ? [{ key: 'permissions', label: 'Permissions', icon: ShieldCheck }] : []),
+    { key: 'pricing', label: 'Pricing', icon: DollarSign },
   ];
 
   return (
@@ -51,6 +53,7 @@ const SettingsPage = () => {
       {/* Tab Content */}
       {activeTab === 'pipeline' && <PipelineSettingsPage />}
       {activeTab === 'permissions' && <PermissionsSettingsPage />}
+      {activeTab === 'pricing' && <PricingSettingsPage />}
     </div>
   );
 };

@@ -204,6 +204,20 @@ const buildOrderUpdate = (orderData, trackingData, existingOrder) => {
     if (hasTracking && trackingData) {
       if (!existingOrder.rawData) existingOrder.rawData = {};
       setFields['rawData.trackingProcesses'] = trackingData.marketplaceProcesses;
+      setFields.trackingData = trackingData;
+    }
+
+    const priceChanges = [];
+    const newTotal = orderData.totalAmount || 0;
+    if (existingOrder.totalAmount !== undefined && Number(existingOrder.totalAmount) !== Number(newTotal)) {
+      priceChanges.push({ field: 'totalAmount', oldValue: existingOrder.totalAmount, newValue: newTotal, source: 'sync', timestamp: now });
+    }
+    const newShipping = orderData.shippingAmount || 0;
+    if (existingOrder.shippingAmount !== undefined && Number(existingOrder.shippingAmount) !== Number(newShipping)) {
+      priceChanges.push({ field: 'shippingAmount', oldValue: existingOrder.shippingAmount, newValue: newShipping, source: 'sync', timestamp: now });
+    }
+    if (priceChanges.length > 0) {
+      setFields.priceHistory = [...(existingOrder.priceHistory || []), ...priceChanges];
     }
 
     return { filter: { _id: existingOrder._id }, update: { $set: setFields }, isNew: false };
@@ -228,10 +242,12 @@ const buildOrderUpdate = (orderData, trackingData, existingOrder) => {
     apiUpdatedAt,
     statusHistory: timeline,
     rawData: orderData,
+    priceHistory: [],
     lastSyncedAt: now
   };
   if (hasTracking && trackingData) {
     doc.rawData = { ...orderData, trackingProcesses: trackingData.marketplaceProcesses };
+    doc.trackingData = trackingData;
   }
 
   return { filter: { orderId }, update: { $setOnInsert: doc }, isNew: true };
@@ -275,7 +291,7 @@ const syncNepalcanOrders = async (token = null) => {
 
     // Load existing DB orders into map for O(1) delta comparison
     const existingOrders = await NepalcanOrder.find({})
-      .select('orderId apiUpdatedAt orderStatus customer vendor totalAmount paymentStatus')
+      .select('orderId apiUpdatedAt orderStatus customer vendor totalAmount shippingAmount paymentStatus priceHistory')
       .lean();
     const existingMap = new Map(existingOrders.map(o => [o.orderId, o]));
 
@@ -531,21 +547,33 @@ const enrichOrdersWithTracking = async () => {
       if (!trackingData?.marketplaceProcesses) continue;
       const newStatus = deriveStatusFromTracking(trackingData.marketplaceProcesses);
       const resolved = resolveStatus(order.orderStatus, newStatus, 'logistics_api');
-      if (resolved.status === order.orderStatus) continue;
       const timeline = extractStatusTimeline(trackingData.marketplaceProcesses);
       if (!order.rawData) order.rawData = {};
       order.rawData.trackingProcesses = trackingData.marketplaceProcesses;
+      const now = new Date();
+      const priceChanges = [];
+      if (trackingData.totalAmount !== undefined && order.totalAmount !== undefined && Number(order.totalAmount) !== Number(trackingData.totalAmount)) {
+        priceChanges.push({ field: 'totalAmount', oldValue: order.totalAmount, newValue: trackingData.totalAmount, source: 'sync', timestamp: now });
+      }
+      if (trackingData.shippingAmount !== undefined && order.shippingAmount !== undefined && Number(order.shippingAmount) !== Number(trackingData.shippingAmount)) {
+        priceChanges.push({ field: 'shippingAmount', oldValue: order.shippingAmount, newValue: trackingData.shippingAmount, source: 'sync', timestamp: now });
+      }
+      const setFields = {
+        rawData: order.rawData,
+        trackingData,
+        lastSyncedAt: now
+      };
+      if (resolved.status !== order.orderStatus) {
+        setFields.orderStatus = resolved.status;
+        setFields.statusSource = resolved.source;
+        setFields.statusHistory = timeline.length > 0 ? timeline : order.statusHistory;
+      }
       bulkOps.push({
         updateOne: {
           filter: { _id: order._id },
           update: {
-            $set: {
-              orderStatus: resolved.status,
-              statusSource: resolved.source,
-              statusHistory: timeline.length > 0 ? timeline : order.statusHistory,
-              rawData: order.rawData,
-              lastSyncedAt: new Date()
-            }
+            $set: setFields,
+            ...(priceChanges.length > 0 ? { $push: { priceHistory: { $each: priceChanges } } } : {})
           }
         }
       });

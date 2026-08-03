@@ -1,6 +1,6 @@
 const NepalcanSyncLog = require('../models/NepalcanSyncLog');
 const { loginToNepalcan } = require('./nepalcanAuthService');
-const { syncNepalcanOrders } = require('./nepalcanOrderSyncService');
+const { syncNepalcanOrders, enrichOrdersWithTracking } = require('./nepalcanOrderSyncService');
 const { syncNepalcanVendors, syncServiceBranches } = require('./nepalcanVendorSyncService');
 const { fetchTotalMarketplaceProducts } = require('./nepalcanMarketplaceService');
 
@@ -20,6 +20,10 @@ const syncAllNepalcanData = async (userId = null) => {
     console.log('[Full Sync] Starting orders sync...');
     ordersResult = await syncNepalcanOrders(loginToken);
     console.log(`[Full Sync] Orders sync complete: ${ordersResult.synced} orders`);
+
+    console.log('[Full Sync] Enriching active orders with tracking data...');
+    const enriched = await enrichOrdersWithTracking();
+    console.log(`[Full Sync] Tracking enrichment complete: ${enriched} orders updated`);
 
     console.log('[Full Sync] Starting vendors sync...');
     vendorsResult = await syncNepalcanVendors(loginToken, userId);

@@ -85,6 +85,7 @@ const PERMISSION_GROUPS = [
     permissions: [
       { key: 'nepalcan.view', label: 'View Nepalcan' },
       { key: 'nepalcan.manage', label: 'Manage Nepalcan' },
+      { key: 'nepalcan.orders-edit', label: 'Edit Orders' },
     ]
   },
   {

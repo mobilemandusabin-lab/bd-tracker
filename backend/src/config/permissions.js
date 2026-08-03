@@ -60,6 +60,7 @@ const PERMISSIONS = {
   // ── Nepalcan ───────────────────────────────────────────────────
   NEPALCAN_VIEW: 'nepalcan.view',
   NEPALCAN_MANAGE: 'nepalcan.manage',
+  NEPALCAN_ORDERS_EDIT: 'nepalcan.orders-edit',
 
   // ── Pipeline ───────────────────────────────────────────────────
   PIPELINE_VIEW: 'pipeline.view',
@@ -96,6 +97,10 @@ const PERMISSIONS = {
   // ── Activities ─────────────────────────────────────────────────
   ACTIVITIES_VIEW: 'activities.view',
   ACTIVITIES_CREATE: 'activities.create',
+
+  // ── Provider Pricing ─────────────────────────────────────────
+  PROVIDER_PRICING_VIEW: 'provider-pricing.view',
+  PROVIDER_PRICING_MANAGE: 'provider-pricing.manage',
 
   // ── Finance ───────────────────────────────────────────────────
   FINANCE_VIEW: 'finance.view',
@@ -145,12 +150,15 @@ const DEFAULT_ROLE_PERMISSIONS = {
     PERMISSIONS.EXTENSION_ADMIN,
     PERMISSIONS.NEPALCAN_VIEW,
     PERMISSIONS.NEPALCAN_MANAGE,
+    PERMISSIONS.NEPALCAN_ORDERS_EDIT,
     PERMISSIONS.VENDORS_VIEW,
     PERMISSIONS.VENDORS_MANAGE,
     PERMISSIONS.VENDORS_SNAPSHOTS,
     PERMISSIONS.LISTING_SNAPSHOTS,
     PERMISSIONS.DELIVERY_ZONES_VIEW,
     PERMISSIONS.DELIVERY_ZONES_MANAGE,
+    PERMISSIONS.PROVIDER_PRICING_VIEW,
+    PERMISSIONS.PROVIDER_PRICING_MANAGE,
     PERMISSIONS.BD_TIERS_VIEW,
     PERMISSIONS.NOTIFICATIONS_VIEW,
     PERMISSIONS.REPORTS_MANAGE,

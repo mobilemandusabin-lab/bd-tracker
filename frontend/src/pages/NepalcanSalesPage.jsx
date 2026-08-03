@@ -1,12 +1,15 @@
 import { useState, useMemo, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useSelector } from 'react-redux';
 import axios from 'axios';
 import {
   Loader2, AlertCircle, RefreshCw, ShoppingBag,
   TrendingUp, Package, Truck, CheckCircle, Users,
-  BarChart3, Calendar, X, Clock, DollarSign, History, ExternalLink, Search
+  BarChart3, Calendar, X, Clock, DollarSign, History, ExternalLink, Search, Pencil, Save
 } from 'lucide-react';
 import { formatDuration } from '../utils/formatDuration';
+import { cn } from '../utils/cn';
+import NepalcanOrderAudit from '../components/NepalcanOrderAudit';
+import NepalcanOrderDetails from '../components/NepalcanOrderDetails';
 import {
   AreaChart, Area, PieChart, Pie, Cell,
   ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip
@@ -24,7 +27,8 @@ const STATUS_COLORS = {
 };
 
 const NepalcanSalesPage = () => {
-  const navigate = useNavigate();
+  const { user } = useSelector((state) => state.auth);
+  const canEditOrders = user?.role === 'super_admin' || (user?.permissions || []).includes('nepalcan.orders-edit');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [orders, setOrders] = useState([]);
@@ -39,6 +43,12 @@ const NepalcanSalesPage = () => {
   const [orderSearch, setOrderSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [syncing, setSyncing] = useState(false);
+  const [editingOrder, setEditingOrder] = useState(null);
+  const [viewOrder, setViewOrder] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState(null);
+  const [activeTab, setActiveTab] = useState('overview');
 
   const triggerSync = async () => {
     setSyncing(true);
@@ -105,6 +115,38 @@ const NepalcanSalesPage = () => {
       setOrderHistory(res.data);
     } catch (err) { setError('Failed to fetch order history'); }
     finally { setHistoryLoading(false); }
+  };
+
+  const openEditModal = (order) => {
+    setEditingOrder(order);
+    setEditForm({
+      orderStatus: order.orderStatus || '',
+      paymentStatus: order.paymentStatus || '',
+      paymentMethod: order.paymentMethod || '',
+      customer: order.customer || '',
+      vendor: order.vendor || '',
+      source: order.source || '',
+      totalAmount: order.totalAmount || '',
+      shippingAmount: order.shippingAmount || '',
+      createdAt: order.createdAt ? new Date(order.createdAt).toISOString().slice(0, 16) : '',
+    });
+    setEditError(null);
+  };
+
+  const saveEdit = async () => {
+    setSavingEdit(true);
+    setEditError(null);
+    try {
+      const backendToken = localStorage.getItem('token');
+      const headers = backendToken ? { 'Authorization': `Bearer ${backendToken}` } : {};
+      const payload = {};
+      Object.keys(editForm).forEach(k => { if (editForm[k] !== '' && editForm[k] !== null) payload[k] = editForm[k]; });
+      await axios.put(`${API_URL}/nepalcan-orders/order/${editingOrder._id}`, payload, { headers });
+      setEditingOrder(null);
+      await Promise.all([fetchOrders(), fetchStats()]);
+    } catch (err) {
+      setEditError(err.response?.data?.message || 'Failed to save changes');
+    } finally { setSavingEdit(false); }
   };
 
   const dashboardMetrics = useMemo(() => {
@@ -235,7 +277,28 @@ const NepalcanSalesPage = () => {
         </div>
       )}
 
-      {dashboardMetrics && (
+      {/* Tabs */}
+      <div className="flex border-b border-slate-200">
+        {['overview', 'audit'].map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={cn(
+              "flex items-center gap-2 px-5 py-3 text-sm font-bold uppercase tracking-wider border-b-2 transition-all",
+              activeTab === tab
+                ? "border-red-600 text-red-600"
+                : "border-transparent text-slate-400 hover:text-slate-600"
+            )}
+          >
+            {tab === 'overview' ? <BarChart3 size={14} /> : <AlertCircle size={14} />}
+            {tab === 'overview' ? 'Overview' : 'Delivery Audit'}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'audit' && <NepalcanOrderAudit />}
+
+      {activeTab === 'overview' && dashboardMetrics && (
         <div className="space-y-6">
           {/* Stat Cards */}
           <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
@@ -400,11 +463,18 @@ const NepalcanSalesPage = () => {
                   ) : statusFilteredOrders.map(order => (
                     <tr key={order._id || order.orderId} className="hover:bg-red-50/50 transition-colors">
                       <td className="px-4 py-3">
-                        <button onClick={() => fetchOrderHistory(order.orderId || order._id)} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors" title="View Status History">
-                          <History size={14} className="text-slate-400 hover:text-red-600" />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => fetchOrderHistory(order.orderId || order._id)} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors" title="View Status History">
+                            <History size={14} className="text-slate-400 hover:text-red-600" />
+                          </button>
+                          {canEditOrders && (
+                            <button onClick={() => openEditModal(order)} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors" title="Edit Order">
+                              <Pencil size={14} className="text-slate-400 hover:text-red-600" />
+                            </button>
+                          )}
+                        </div>
                       </td>
-                      <td className="px-4 py-3 text-sm font-bold text-red-600 cursor-pointer hover:underline" onClick={() => navigate(`/nepalcan-sales/${order.orderId}`)}>{order.orderId || 'N/A'}</td>
+                      <td className="px-4 py-3 text-sm font-bold text-red-600 cursor-pointer hover:underline" onClick={() => setViewOrder(order)}>{order.orderId || 'N/A'}</td>
                       <td className="px-4 py-3 text-sm text-slate-600">{order.customer || 'N/A'}</td>
                       <td className="px-4 py-3 text-sm text-slate-600">{order.vendor || 'N/A'}</td>
                       <td className="px-4 py-3">
@@ -430,7 +500,7 @@ const NepalcanSalesPage = () => {
         </div>
       )}
 
-      {!loading && !dashboardMetrics && (
+      {activeTab === 'overview' && !loading && !dashboardMetrics && (
         <div className="bg-white rounded-2xl border border-slate-100 p-12 text-center">
           <ShoppingBag size={40} className="text-slate-200 mx-auto mb-3" />
           <p className="text-sm font-bold text-slate-400">No sales data available. Click "Refresh" to fetch.</p>
@@ -514,6 +584,88 @@ const NepalcanSalesPage = () => {
                   {log.errorMessage && <p className="text-[10px] text-red-600 mt-1">{log.errorMessage}</p>}
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* View Order Modal */}
+      {viewOrder && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-end lg:items-center justify-center p-0 lg:p-4" onClick={() => setViewOrder(null)}>
+          <div className="bg-white rounded-t-2xl lg:rounded-2xl max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-red-600 to-red-700 text-white rounded-t-2xl shrink-0">
+              <div>
+                <h3 className="font-extrabold">Order Details</h3>
+                <p className="text-xs text-red-200">{viewOrder.orderId}</p>
+              </div>
+              <button onClick={() => setViewOrder(null)} className="p-2 hover:bg-white/10 rounded-lg"><X size={18} /></button>
+            </div>
+            <div className="p-5 overflow-y-auto max-h-[80vh]">
+              <NepalcanOrderDetails orderId={viewOrder.orderId} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Order Modal */}
+      {editingOrder && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-end lg:items-center justify-center p-0 lg:p-4" onClick={() => setEditingOrder(null)}>
+          <div className="bg-white rounded-t-2xl lg:rounded-2xl max-w-2xl w-full max-h-[85vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-red-600 to-red-700 text-white rounded-t-2xl">
+              <div>
+                <h3 className="font-extrabold">Edit Order</h3>
+                <p className="text-xs text-red-200">{editingOrder.orderId}</p>
+              </div>
+              <button onClick={() => setEditingOrder(null)} className="p-2 hover:bg-white/10 rounded-lg"><X size={18} /></button>
+            </div>
+            <div className="p-5 overflow-y-auto max-h-[65vh]">
+              {editError && (
+                <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-xl text-xs font-bold border border-red-100 flex items-center gap-2">
+                  <AlertCircle size={14} /> {editError}
+                </div>
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Order Status</label>
+                  <select
+                    value={editForm.orderStatus}
+                    onChange={e => setEditForm({ ...editForm, orderStatus: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 focus:ring-2 focus:ring-red-100 focus:border-red-300 outline-none"
+                  >
+                    {Object.keys(STATUS_COLORS).map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                {[
+                  { key: 'customer', label: 'Customer' },
+                  { key: 'vendor', label: 'Vendor' },
+                  { key: 'paymentStatus', label: 'Payment Status' },
+                  { key: 'paymentMethod', label: 'Payment Method' },
+                  { key: 'source', label: 'Source' },
+                  { key: 'totalAmount', label: 'Total Amount (NPR)', type: 'number' },
+                  { key: 'shippingAmount', label: 'Shipping Amount (NPR)', type: 'number' },
+                  { key: 'createdAt', label: 'Created At', type: 'datetime-local' },
+                ].map(f => (
+                  <div key={f.key}>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">{f.label}</label>
+                    <input
+                      type={f.type || 'text'}
+                      value={editForm[f.key]}
+                      onChange={e => setEditForm({ ...editForm, [f.key]: e.target.value })}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 focus:ring-2 focus:ring-red-100 focus:border-red-300 outline-none"
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center gap-2 mt-5">
+                <button onClick={saveEdit} disabled={savingEdit}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-red-600 border border-red-600 rounded-xl text-xs font-bold text-white hover:bg-red-700 transition-all disabled:opacity-50">
+                  <Save size={14} /> {savingEdit ? 'Saving...' : 'Save Changes'}
+                </button>
+                <button onClick={() => setEditingOrder(null)}
+                  className="px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 transition-all">
+                  Cancel
+                </button>
+              </div>
             </div>
           </div>
         </div>
