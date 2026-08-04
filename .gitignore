@@ -11,3 +11,6 @@ backend/Nepal\ Can\ Commerce\ Master\ File\ For\ Transaction\ Record.xlsx
 # public/bd-tracker-extension.zip are leftovers that go stale.
 backend/public/extension.zip
 backend/public/bd-tracker-extension.zip
+
+# Playwright MCP artifacts
+.playwright-mcp/

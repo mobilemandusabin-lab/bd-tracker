@@ -55,7 +55,7 @@ exports.getLiveData = async (req, res) => {
       totalMarketplaceProducts = lastWeekly.totalMarketplaceProducts;
     }
 
-    const [verifiedAgg, specAgg, listingAgg] = await Promise.all([
+    const [verifiedAgg, specAgg, listingAgg, qcAgg] = await Promise.all([
       Lead.aggregate([
         {
           $match: { type: 'vendor', $or: [{ is_verified: true }, { verification_status: 'verified' }] }
@@ -81,12 +81,24 @@ exports.getLiveData = async (req, res) => {
       ExtensionEvent.aggregate([
         { $match: { event_type: 'listing_created', created_at: { $gte: periodStart, $lte: periodEnd } } },
         { $group: { _id: null, totalListings: { $sum: { $ifNull: ['$bulk_count', 1] } } } }
+      ]),
+      ExtensionEvent.aggregate([
+        {
+          $match: {
+            event_type: { $in: ['qc_approved', 'qc_rejected'] },
+            product_id: { $ne: 'b' },
+            created_at: { $gte: periodStart, $lte: periodEnd }
+          }
+        },
+        { $group: { _id: '$event_type', count: { $sum: { $ifNull: ['$bulk_count', 1] } } } }
       ])
     ]);
 
     const verifiedMarketplaceProducts = verifiedAgg.length > 0 ? verifiedAgg[0].total : 0;
     const totalSpecificationsAdded = specAgg.length > 0 ? specAgg[0].total : 0;
     const weeklyListings = listingAgg.length > 0 ? listingAgg[0].totalListings : 0;
+    const qcMap = {};
+    for (const item of qcAgg) qcMap[item._id] = item.count;
 
     res.status(200).json({
       status: 'success',
@@ -95,7 +107,9 @@ exports.getLiveData = async (req, res) => {
         verifiedMarketplaceProducts,
         totalListings: weeklyListings,
         dailyAverageListings: Math.round(weeklyListings / daysElapsed),
-        totalSpecificationsAdded
+        totalSpecificationsAdded,
+        qcApproved: qcMap.qc_approved || 0,
+        qcRejected: qcMap.qc_rejected || 0
       }
     });
   } catch (err) {
@@ -301,7 +315,9 @@ exports.updateTargets = async (req, res) => {
     snapshot.targets = {
       totalListings: targets.totalListings ?? snapshot.targets?.totalListings ?? 0,
       dailyAverageListings: targets.dailyAverageListings ?? snapshot.targets?.dailyAverageListings ?? 0,
-      totalSpecificationsAdded: targets.totalSpecificationsAdded ?? snapshot.targets?.totalSpecificationsAdded ?? 0
+      totalSpecificationsAdded: targets.totalSpecificationsAdded ?? snapshot.targets?.totalSpecificationsAdded ?? 0,
+      qcApproved: targets.qcApproved ?? snapshot.targets?.qcApproved ?? 0,
+      qcRejected: targets.qcRejected ?? snapshot.targets?.qcRejected ?? 0
     };
     await snapshot.save();
 

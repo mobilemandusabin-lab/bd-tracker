@@ -35,6 +35,10 @@ const listingSnapshotSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  previousWeek: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
+  },
   snapshotDate: {
     type: Date,
     required: true
@@ -59,7 +63,9 @@ const listingSnapshotSchema = new mongoose.Schema({
   targets: {
     totalListings: { type: Number, default: 0 },
     dailyAverageListings: { type: Number, default: 0 },
-    totalSpecificationsAdded: { type: Number, default: 0 }
+    totalSpecificationsAdded: { type: Number, default: 0 },
+    qcApproved: { type: Number, default: 0 },
+    qcRejected: { type: Number, default: 0 }
   }
 }, { timestamps: true });
 
@@ -67,6 +73,24 @@ listingSnapshotSchema.index({ snapshotDate: -1 });
 listingSnapshotSchema.index({ type: 1, snapshotDate: -1 });
 listingSnapshotSchema.index({ nepaliYear: 1, nepaliMonth: 1 });
 listingSnapshotSchema.index({ snapshotDate: 1, type: 1 }, { unique: true });
+
+listingSnapshotSchema.statics.computeQcPrevWeek = async function (snapshotDate) {
+  const prevEnd = new Date(snapshotDate);
+  const prevStart = new Date(prevEnd.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const qcCounts = await ExtensionEvent.aggregate([
+    {
+      $match: {
+        created_at: { $gte: prevStart, $lte: prevEnd },
+        event_type: { $in: ['qc_approved', 'qc_rejected'] },
+        product_id: { $ne: 'b' }
+      }
+    },
+    { $group: { _id: '$event_type', count: { $sum: { $ifNull: ['$bulk_count', 1] } } } }
+  ]);
+  const qcMap = {};
+  for (const item of qcCounts) qcMap[item._id] = item.count;
+  return { qcApproved: qcMap.qc_approved || 0, qcRejected: qcMap.qc_rejected || 0 };
+};
 
 listingSnapshotSchema.statics.captureSnapshot = async function (type, marketplaceTotal = null) {
   const now = new Date();
@@ -170,6 +194,7 @@ listingSnapshotSchema.statics.captureSnapshot = async function (type, marketplac
     totalListings: weeklyListings,
     dailyAverageListings,
     totalSpecificationsAdded,
+    previousWeek: await this.computeQcPrevWeek(snapshotDate),
     snapshotDate,
     nepaliDate: bsDate.formatted,
     nepaliYear: bsDate.year,

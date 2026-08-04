@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import axios from 'axios';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { Package, ListChecks, FileText, Calendar, TrendingUp, ArrowUpRight, ArrowDownRight, RefreshCw, Loader2, AlertCircle, Camera, Clock, Target, Save, CheckCircle2 } from 'lucide-react';
+import { Package, ListChecks, FileText, Calendar, TrendingUp, ArrowUpRight, ArrowDownRight, RefreshCw, Loader2, AlertCircle, Camera, Clock, Target, Save, CheckCircle2, ShieldCheck, ShieldX } from 'lucide-react';
 import { formatNepaliDate, formatTime } from '../utils/nepaliDate';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
@@ -85,7 +85,9 @@ export default function ListingSnapshotsPage({ embedded }) {
   const [targetInputs, setTargetInputs] = useState({
     totalListings: '',
     dailyAverageListings: '',
-    totalSpecificationsAdded: ''
+    totalSpecificationsAdded: '',
+    qcApproved: '',
+    qcRejected: ''
   });
 
   const token = localStorage.getItem('token');
@@ -133,7 +135,9 @@ export default function ListingSnapshotsPage({ embedded }) {
       setTargetInputs({
         totalListings: latest.targets.totalListings?.toString() || '',
         dailyAverageListings: latest.targets.dailyAverageListings?.toString() || '',
-        totalSpecificationsAdded: latest.targets.totalSpecificationsAdded?.toString() || ''
+        totalSpecificationsAdded: latest.targets.totalSpecificationsAdded?.toString() || '',
+        qcApproved: latest.targets.qcApproved?.toString() || '',
+        qcRejected: latest.targets.qcRejected?.toString() || ''
       });
     }
   }, [latestSnapshots, snapshotType]);
@@ -145,7 +149,9 @@ export default function ListingSnapshotsPage({ embedded }) {
       const targets = {
         totalListings: parseInt(targetInputs.totalListings) || null,
         dailyAverageListings: parseInt(targetInputs.dailyAverageListings) || null,
-        totalSpecificationsAdded: parseInt(targetInputs.totalSpecificationsAdded) || null
+        totalSpecificationsAdded: parseInt(targetInputs.totalSpecificationsAdded) || null,
+        qcApproved: parseInt(targetInputs.qcApproved) || null,
+        qcRejected: parseInt(targetInputs.qcRejected) || null
       };
       await axios.patch(`${API_URL}/listing-snapshots/targets`, { type: snapshotType, targets }, { headers });
       setSaveSuccess(true);
@@ -182,7 +188,9 @@ export default function ListingSnapshotsPage({ embedded }) {
   const targetMetrics = [
     { key: 'totalListings', label: 'Total Listings', icon: Package, color: 'orange' },
     { key: 'dailyAverageListings', label: 'Daily Avg Listings', icon: ListChecks, color: 'amber' },
-    { key: 'totalSpecificationsAdded', label: 'Specs Added', icon: FileText, color: 'emerald' }
+    { key: 'totalSpecificationsAdded', label: 'Specs Added', icon: FileText, color: 'emerald' },
+    { key: 'qcApproved', label: 'QC Approved', icon: ShieldCheck, color: 'emerald' },
+    { key: 'qcRejected', label: 'QC Rejected', icon: ShieldX, color: 'red' }
   ];
 
   if (loading) {
@@ -288,7 +296,7 @@ export default function ListingSnapshotsPage({ embedded }) {
 
       {activeTab === 'overview' && (
         <div className="space-y-5">
-          <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {metricConfig.map(({ key, label, icon: Icon, color }) => {
               const snap = latest?.[key];
               const bgMap = { red: 'bg-red-50', amber: 'bg-amber-50', emerald: 'bg-emerald-50', orange: 'bg-orange-50', purple: 'bg-purple-50' };
@@ -302,6 +310,25 @@ export default function ListingSnapshotsPage({ embedded }) {
                     <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{label}</span>
                   </div>
                   <p className="text-2xl font-extrabold text-slate-900">{snap ?? '-'}</p>
+                </div>
+              );
+            })}
+            {[
+              { key: 'qcApproved', label: 'QC Approved (Prev Week)', icon: ShieldCheck, color: 'emerald' },
+              { key: 'qcRejected', label: 'QC Rejected (Prev Week)', icon: ShieldX, color: 'red' }
+            ].map(({ key, label, icon: Icon, color }) => {
+              const val = latest?.previousWeek?.[key];
+              const bgMap = { emerald: 'bg-emerald-50', red: 'bg-red-50' };
+              const textMap = { emerald: 'text-emerald-600', red: 'text-red-600' };
+              return (
+                <div key={key} className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm hover:shadow-md transition-shadow">
+                  <div className="flex items-center gap-2.5 mb-2.5">
+                    <div className={`${bgMap[color]} p-2 rounded-xl`}>
+                      <Icon size={16} className={textMap[color]} />
+                    </div>
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{label}</span>
+                  </div>
+                  <p className="text-2xl font-extrabold text-slate-900">{val ?? '-'}</p>
                 </div>
               );
             })}
@@ -385,13 +412,13 @@ export default function ListingSnapshotsPage({ embedded }) {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-5">
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mt-5">
               {targetMetrics.map(({ key, label, icon: Icon, color }) => {
                 const current = liveData?.[key] ?? 0;
                 const target = latest?.targets?.[key];
-                const bgMap = { orange: 'bg-orange-50 border-orange-100', amber: 'bg-amber-50 border-amber-100', emerald: 'bg-emerald-50 border-emerald-100' };
-                const textMap = { orange: 'text-orange-600', amber: 'text-amber-600', emerald: 'text-emerald-600' };
-                const ringMap = { orange: 'focus:ring-orange-200 focus:border-orange-300', amber: 'focus:ring-amber-200 focus:border-amber-300', emerald: 'focus:ring-emerald-200 focus:border-emerald-300' };
+                const bgMap = { orange: 'bg-orange-50 border-orange-100', amber: 'bg-amber-50 border-amber-100', emerald: 'bg-emerald-50 border-emerald-100', red: 'bg-red-50 border-red-100' };
+                const textMap = { orange: 'text-orange-600', amber: 'text-amber-600', emerald: 'text-emerald-600', red: 'text-red-600' };
+                const ringMap = { orange: 'focus:ring-orange-200 focus:border-orange-300', amber: 'focus:ring-amber-200 focus:border-amber-300', emerald: 'focus:ring-emerald-200 focus:border-emerald-300', red: 'focus:ring-red-200 focus:border-red-300' };
                 return (
                   <div key={key} className={`rounded-xl border p-4 ${bgMap[color]}`}>
                     <label className="flex items-center gap-2 text-xs font-bold text-slate-700 mb-2">
@@ -447,6 +474,18 @@ export default function ListingSnapshotsPage({ embedded }) {
                   <><Save size={15} /> Save Targets</>
                 )}
               </button>
+            </div>
+          </div>
+
+          <div className="bg-white border border-slate-100 rounded-2xl p-5 lg:p-6 shadow-sm">
+            <div className="flex items-center gap-2.5 mb-1">
+              <div className="bg-slate-50 p-2 rounded-xl">
+                <Target size={16} className="text-red-600" />
+              </div>
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900">Targets</h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">Set goals for the weekly report's Target column</p>
+              </div>
             </div>
           </div>
         </div>

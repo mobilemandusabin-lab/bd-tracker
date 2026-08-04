@@ -1,6 +1,7 @@
 const WeeklyReport = require('../models/WeeklyReport');
 const VendorSnapshot = require('../models/VendorSnapshot');
 const ListingSnapshot = require('../models/ListingSnapshot');
+const ExtensionEvent = require('../models/ExtensionEvent');
 const ReportHeading = require('../models/ReportHeading');
 const Department = require('../models/Department');
 const path = require('path');
@@ -71,13 +72,54 @@ exports.getAutoFill = async (req, res) => {
       ? { weekStart: new Date(weekStart), weekEnd: new Date(weekEnd) }
       : getWeekRange();
 
-    const [vendorSnap, listingSnap, lastReport, departments, headings] = await Promise.all([
+    const [vendorSnap, listingSnap, lastReport, departments, headings, qcCounts, qcLatestPending, qcCountsPrev] = await Promise.all([
       VendorSnapshot.findOne({ type: 'weekly' }).sort({ snapshotDate: -1 }),
       ListingSnapshot.findOne({ type: 'weekly' }).sort({ snapshotDate: -1 }),
       WeeklyReport.findOne({ status: 'published' }).sort({ weekStart: -1 }),
       Department.find().sort({ name: 1 }),
-      ReportHeading.find().sort({ departmentId: 1, order: 1 })
+      ReportHeading.find().sort({ departmentId: 1, order: 1 }),
+      ExtensionEvent.aggregate([
+        {
+          $match: {
+            created_at: { $gte: range.weekStart, $lte: range.weekEnd },
+            event_type: { $in: ['qc_approved', 'qc_rejected'] },
+            product_id: { $ne: 'b' }
+          }
+        },
+        { $group: { _id: '$event_type', count: { $sum: { $ifNull: ['$bulk_count', 1] } } } }
+      ]),
+      ExtensionEvent.findOne({
+        event_type: 'qc_pending',
+        created_at: { $gte: range.weekStart, $lte: range.weekEnd }
+      }).sort({ created_at: -1 }).select('pending_count').lean(),
+      ExtensionEvent.aggregate([
+        {
+          $match: {
+            created_at: {
+              $gte: new Date(range.weekStart.getTime() - 7 * 86400000),
+              $lte: new Date(range.weekEnd.getTime() - 7 * 86400000)
+            },
+            event_type: { $in: ['qc_approved', 'qc_rejected'] },
+            product_id: { $ne: 'b' }
+          }
+        },
+        { $group: { _id: '$event_type', count: { $sum: { $ifNull: ['$bulk_count', 1] } } } }
+      ])
     ]);
+
+    const qcMap = {};
+    for (const item of qcCounts) qcMap[item._id] = item.count;
+    const qcValues = {
+      productsApproved: qcMap.qc_approved || 0,
+      productsRejected: qcMap.qc_rejected || 0,
+      productsPending: qcLatestPending?.pending_count ?? 0
+    };
+    const qcMapPrev = {};
+    for (const item of qcCountsPrev) qcMapPrev[item._id] = item.count;
+    const qcValuesPrev = {
+      productsApproved: qcMapPrev.qc_approved || 0,
+      productsRejected: qcMapPrev.qc_rejected || 0
+    };
 
     const bsDate = toNepaliDateObject(range.weekStart);
     const bsEnd = toNepaliDateObject(range.weekEnd);
@@ -105,14 +147,25 @@ exports.getAutoFill = async (req, res) => {
           currValue = listingSnap[h.key];
         }
 
-        if (currValue === null && prevValue !== null) {
+        if (h.key in qcValues) {
+          currValue = qcValues[h.key];
+        }
+        if (h.key in qcValuesPrev) {
+          prevValue = qcValuesPrev[h.key] ?? lastValues[h.key] ?? null;
+        } else if (currValue === null && prevValue !== null) {
           currValue = prevValue;
         }
 
         const targetValue =
-          vendorSnap?.targets?.[h.key] ??
-          listingSnap?.targets?.[h.key] ??
-          null;
+          h.key === 'productsApproved'
+            ? listingSnap?.targets?.qcApproved ?? null
+            : h.key === 'productsRejected'
+              ? listingSnap?.targets?.qcRejected ?? null
+              : h.key === 'productsPending'
+                ? listingSnap?.targets?.totalListings ?? null
+                : vendorSnap?.targets?.[h.key] ??
+                  listingSnap?.targets?.[h.key] ??
+                  null;
 
         return {
           headingId: h._id,
