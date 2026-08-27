@@ -28,6 +28,7 @@ const teamTargetRoutes = require('./routes/teamTargetRoutes');
 const financeRoutes = require('./routes/financeRoutes');
 const weeklyReportRoutes = require('./routes/weeklyReportRoutes');
 const reportHeadingRoutes = require('./routes/reportHeadingRoutes');
+const syncRoutes = require('./routes/syncRoutes');
 let aiRoutes;
 if (process.env.GROQ_API_KEY) {
   aiRoutes = require('./routes/aiRoutes');
@@ -121,6 +122,9 @@ app.use('/api/v1/finance', financeRoutes);
 app.use('/api/v1/reports', weeklyReportRoutes);
 app.use('/api/v1/report-headings', reportHeadingRoutes);
 if (aiRoutes) app.use('/api/v1/ai', aiRoutes);
+
+// Sync API — long-running product synchronization with batch processing
+app.use('/api/sync', syncRoutes);
 
 // Vercel cron endpoint — no auth (fire-and-forget)
 app.get('/api/cron/sync', async (req, res) => {

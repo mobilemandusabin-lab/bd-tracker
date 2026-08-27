@@ -13,6 +13,12 @@ const productSchema = new mongoose.Schema({
     sparse: true,
     trim: true
   },
+  externalProductId: {
+    type: String,
+    unique: true,
+    sparse: true,
+    index: true
+  },
   description: {
     type: String,
     trim: true
