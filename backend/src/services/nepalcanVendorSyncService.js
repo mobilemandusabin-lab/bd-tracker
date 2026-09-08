@@ -56,6 +56,93 @@ const getTotalCount = (response) => {
   return 0;
 };
 
+// ponytail: exact-after-normalize match, convert all matches per user choice
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const normEmail = (email) => {
+  if (!email) return null;
+  const e = String(email).trim().toLowerCase();
+  if (!e || e === 'tbd' || !e.includes('@')) return null;
+  return e;
+};
+
+const normPhone = (phone) => {
+  if (!phone) return null;
+  let d = String(phone).replace(/\D/g, '');
+  if (d.length > 10 && d.startsWith('977')) d = d.slice(3);
+  if (d.length === 11 && d.startsWith('0')) d = d.slice(1);
+  if (d.length !== 10) return null;
+  if (/^0+$/.test(d)) return null;
+  return d;
+};
+
+const normName = (name) => {
+  if (!name) return null;
+  const n = String(name).trim().replace(/\s+/g, ' ').toLowerCase();
+  return n || null;
+};
+
+// Build $or conditions for fuzzy lead->vendor match. Phone uses trailing-9-digit
+// regex so +977 / 0-prefix / dash variants still hit.
+const buildMatchConditions = ({ name, email, phone }) => {
+  const ors = [];
+  const nn = normName(name);
+  if (nn) ors.push({ business_name: { $regex: `^${escapeRegex(String(name).trim().replace(/\s+/g, ' '))}$`, $options: 'i' } });
+  const ne = normEmail(email);
+  if (ne) ors.push({ email: ne });
+  const np = normPhone(phone);
+  if (np) {
+    ors.push({ phone: { $regex: np.slice(-9) } });
+    ors.push({ phone: np });
+  }
+  return ors;
+};
+
+const applyVendorDataToLead = async (doc, leadData, newNepalcanStatus) => {
+  const previousNepalcanStatus = doc.last_nepalcan_status;
+  // ponytail: preserve Active Seller status, refresh basics only
+  if (doc.lead_status === 'Active Seller' && newNepalcanStatus === 'Activated') {
+    doc.business_name = leadData.business_name;
+    doc.contact_person = leadData.contact_person;
+    doc.email = leadData.email;
+    doc.phone = leadData.phone;
+    doc.location = leadData.location;
+    doc.expected_product_count = leadData.expected_product_count;
+    doc.is_verified = leadData.is_verified;
+    doc.verification_status = leadData.verification_status;
+    doc.onboarding_stage = leadData.onboarding_stage;
+    doc.activation_status = leadData.activation_status;
+    doc.nepalcanId = leadData.nepalcanId;
+    doc.type = 'vendor';
+    doc.last_nepalcan_status = newNepalcanStatus;
+    await doc.save();
+    return { previousNepalcanStatus };
+  }
+  // ponytail: Object.assign only touches leadData keys; assigned_user,
+  // assignment_status, creator_id, notes + Activity history (by _id) survive
+  Object.assign(doc, leadData);
+  doc.last_nepalcan_status = newNepalcanStatus;
+  if (previousNepalcanStatus && newNepalcanStatus === 'Activated' && previousNepalcanStatus !== 'Activated') {
+    if (!doc.converted_at) doc.converted_at = new Date();
+  }
+  await doc.save();
+  return { previousNepalcanStatus };
+};
+
+const logStatusChange = async (leadDoc, previousNepalcanStatus, newNepalcanStatus, userId) => {
+  if (!previousNepalcanStatus || previousNepalcanStatus === newNepalcanStatus) return;
+  const Activity = require('../models/Activity');
+  const syncUserId = userId || (await getDefaultSyncUser())?._id;
+  if (!syncUserId) return;
+  await Activity.create({
+    lead_id: leadDoc._id,
+    user_id: syncUserId,
+    activity_type: 'status_change',
+    description: `Pipeline changed (sync): ${previousNepalcanStatus} → ${newNepalcanStatus}`,
+    status: 'completed'
+  });
+};
+
 const syncServiceBranches = async (token = null) => {
   const DeliveryZoneGroup = require('../models/DeliveryZoneGroup');
   const startTime = Date.now();
@@ -119,6 +206,7 @@ const syncNepalcanVendors = async (token = null, userId = null) => {
   let synced = 0;
   let updated = 0;
   let created = 0;
+  let matchedConverted = 0;
   let errorMessage = null;
 
   let authToken = token;
@@ -276,6 +364,50 @@ const syncNepalcanVendors = async (token = null, userId = null) => {
           synced++;
           console.log(`[Sync Vendor] Updated lead ${name}`);
         } else {
+          // ponytail: no nepalcanId hit — fuzzy match type=lead by name/email/phone, convert all
+          const matchOrs = buildMatchConditions({ name, email, phone });
+          let candidates = [];
+          if (matchOrs.length > 0) {
+            candidates = await Lead.find({
+              $and: [
+                { $or: [{ nepalcanId: { $exists: false } }, { nepalcanId: null }] },
+                { $or: [{ type: 'lead' }, { type: { $exists: false } }] },
+                { $or: matchOrs }
+              ]
+            });
+            // ponytail: phone regex is loose (trailing 9 digits) — verify normalized equality in JS
+            const np = normPhone(phone);
+            const ne = normEmail(email);
+            const nn = normName(name);
+            if (np || ne || nn) {
+              candidates = candidates.filter((c) => {
+                if (ne && normEmail(c.email) === ne) return true;
+                if (nn && normName(c.business_name) === nn) return true;
+                if (np && normPhone(c.phone) === np) return true;
+                return false;
+              });
+            }
+          }
+          if (candidates.length > 0) {
+            for (const candidate of candidates) {
+              try {
+                const newNepalcanStatus = leadData.lead_status;
+                const { previousNepalcanStatus } = await applyVendorDataToLead(candidate, leadData, newNepalcanStatus);
+                await logStatusChange(candidate, previousNepalcanStatus, newNepalcanStatus, userId);
+                matchedConverted++;
+                updated++;
+                synced++;
+                console.log(`[Sync Vendor] Converted lead ${candidate.business_name} → vendor via match (api: ${name})`);
+              } catch (convErr) {
+                if (convErr.code === 11000) {
+                  console.warn(`[Sync Vendor] Convert skipped (duplicate nepalcanId) for ${candidate.business_name}`);
+                  continue;
+                }
+                throw convErr;
+              }
+            }
+            continue;
+          }
           const creatorId = userId || (await getDefaultSyncUser())?._id;
           const upsertData = {
             ...leadData,
@@ -397,7 +529,9 @@ const syncNepalcanVendors = async (token = null, userId = null) => {
       durationMs
     });
 
-    return { synced, updated, created, message: errorMessage || 'Success' };
+    console.log(`[Nepalcan Vendor Sync] COMPLETE - Total: ${synced}, Updated: ${updated}, Created: ${created}, Lead→Vendor matched: ${matchedConverted}`);
+
+    return { synced, updated, created, matchedConverted, message: errorMessage || 'Success' };
   } catch (error) {
     errorMessage = error.response?.data?.message || error.message || 'Unknown error';
     console.error('[Nepalcan Vendor Sync] Error:', errorMessage);
@@ -413,7 +547,7 @@ const syncNepalcanVendors = async (token = null, userId = null) => {
       durationMs
     });
 
-    return { synced, updated, created, message: errorMessage };
+    return { synced, updated, created, matchedConverted, message: errorMessage };
   }
 };
 
@@ -422,5 +556,10 @@ module.exports = {
   syncServiceBranches,
   fetchVendorServiceBranches,
   extractVendors,
-  getTotalCount
+  getTotalCount,
+  // ponytail: exported for self-check without booting server
+  normEmail,
+  normPhone,
+  normName,
+  buildMatchConditions
 };
