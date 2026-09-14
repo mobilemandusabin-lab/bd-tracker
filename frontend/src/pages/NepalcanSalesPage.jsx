@@ -49,6 +49,7 @@ const NepalcanSalesPage = () => {
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
+  const [ordersTotal, setOrdersTotal] = useState(null);
 
   const [syncMsg, setSyncMsg] = useState(null);
   // ponytail: one click = a few resumable batches (each <10s), then refresh from DB
@@ -103,8 +104,10 @@ const NepalcanSalesPage = () => {
     try {
       const backendToken = localStorage.getItem('token');
       const headers = backendToken ? { 'Authorization': `Bearer ${backendToken}` } : {};
-      const res = await axios.get(`${API_URL}/nepalcan-orders/orders?page=1&limit=500`, { headers });
+      // ponytail: 1000 covers current catalog; paginate properly when near cap
+      const res = await axios.get(`${API_URL}/nepalcan-orders/orders?page=1&limit=1000`, { headers });
       setOrders(res.data.orders || []);
+      setOrdersTotal(res.data.pagination?.total ?? (res.data.orders || []).length);
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to fetch sales data');
     } finally { setLoading(false); }
@@ -436,6 +439,11 @@ const NepalcanSalesPage = () => {
               <div className="flex items-center gap-2">
                 <ShoppingBag size={16} className="text-red-600" />
                 <h3 className="text-sm font-extrabold text-slate-900">Recent Orders</h3>
+                {ordersTotal != null && (
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    Showing {filteredOrders.length} of {ordersTotal}
+                  </span>
+                )}
               </div>
               <div className="relative">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10 pointer-events-none" />
