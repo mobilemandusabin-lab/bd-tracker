@@ -1918,18 +1918,26 @@ exports.getWeekCompare = async (req, res) => {
   }
 };
 
-// GET /dashboard/sync-status — Check if sync is currently running
+// GET /dashboard/sync-status — legacy SystemSyncLog flag + active SyncJob progress
 exports.getSyncStatus = async (req, res) => {
   try {
     const running = await SystemSyncLog.findOne({ status: 'running' }).sort({ createdAt: -1 }).lean();
     const last = await SystemSyncLog.findOne({ status: { $ne: 'running' } }).sort({ createdAt: -1 }).lean();
+    const SyncJob = require('../models/SyncJob');
+    const job = await SyncJob.findOne({ status: { $in: ['pending', 'running', 'paused'] } }).sort({ updatedAt: -1 }).lean();
     res.status(200).json({
       status: 'success',
       data: {
-        syncing: !!running,
-        runningSince: running?.createdAt || null,
-        triggeredBy: running?.triggeredBy || null,
-        lastSync: last || null
+        syncing: !!running || !!job,
+        runningSince: running?.createdAt || job?.started_at || null,
+        triggeredBy: running?.triggeredBy || (job ? 'sync-job' : null),
+        lastSync: last || null,
+        job: job ? {
+          jobId: job._id, status: job.status, sync_type: job.sync_type, phase: job.payload?.phase,
+          total: Math.max(job.total || 0, job.processed || 0), processed: job.processed, successful: job.successful, failed: job.failed,
+          progress: Math.max(job.total || 0, job.processed || 0) > 0 ? Math.min(100, Math.round(((job.processed || 0) / Math.max(job.total || 0, job.processed || 0)) * 100)) : 0,
+          lastHeartbeat: job.last_heartbeat_at, current_page: job.current_page, totals: job.payload?.totals || {}
+        } : null
       }
     });
   } catch (err) {
@@ -1937,29 +1945,68 @@ exports.getSyncStatus = async (req, res) => {
   }
 };
 
-// POST /dashboard/sync-all — Manual full sync (fire-and-forget)
+// POST /dashboard/sync-all — create/claim SyncJob, return immediately. No sync execution here.
 exports.triggerFullSync = async (req, res) => {
-  const { runFullSync } = require('../services/unifiedSyncService');
-  runFullSync('manual', req.user?._id).catch(err =>
-    console.error('[Sync] Background sync failed:', err)
-  );
-  res.status(200).json({
-    status: 'success',
-    message: 'Sync started in background'
-  });
+  try {
+    const syncType = req.body?.sync_type || 'full';
+    const allowed = ['full', 'nepalcan_orders', 'tracking', 'nepalcan_vendors', 'branches'];
+    if (!allowed.includes(syncType)) return res.status(400).json({ status: 'fail', message: `Invalid sync_type. Use: ${allowed.join(', ')}` });
+    const now = new Date();
+    const phase = { full: 'orders', nepalcan_orders: 'orders', tracking: 'tracking', nepalcan_vendors: 'vendors', branches: 'branches' }[syncType];
+    const SyncJob = require('../models/SyncJob');
+    const existing = await SyncJob.findOne({ sync_type: syncType, status: { $in: ['pending', 'running', 'paused'] } }).lean();
+    if (existing) {
+      return res.status(200).json({ status: 'success', message: 'Sync already active', data: { jobId: existing._id, status: existing.status } });
+    }
+    try {
+      const job = await SyncJob.create({
+        sync_type: syncType, status: 'pending', total: 0, processed: 0, successful: 0, failed: 0,
+        batchSize: parseInt(process.env.SYNC_BATCH_SIZE) || 50,
+        current_page: 1, last_processed_id: null, cursor: null,
+        payload: { phase, pages: {}, totals: {}, totalApi: null },
+        started_at: now, startedAt: now, last_heartbeat_at: now, lastProcessedAt: now,
+        created_by: req.user?._id || null, retry_count: 0
+      });
+      console.log(`[SYNC] Job ${job._id} created type=${syncType} by ${req.user?.email || 'admin'}`);
+      return res.status(201).json({ status: 'success', message: 'Sync job created', data: { jobId: job._id, status: 'pending' } });
+    } catch (e) {
+      if (e.code === 11000) { // lost race with another click — return the winner
+        const winner = await SyncJob.findOne({ sync_type: syncType, status: { $in: ['pending', 'running', 'paused'] } }).lean();
+        return res.status(200).json({ status: 'success', message: 'Sync already active', data: { jobId: winner?._id, status: winner?.status } });
+      }
+      throw e;
+    }
+  } catch (err) {
+    res.status(500).json({ status: 'fail', message: err.message });
+  }
 };
 
-// POST /dashboard/sync-stop — Stop a running sync (super admin)
+// POST /dashboard/sync-stop — Stop a running sync (super admin). Cancels SyncJob too.
 exports.stopSync = async (req, res) => {
   try {
+    const SyncJob = require('../models/SyncJob');
+    const stoppedBy = `Manually stopped by ${req.user?.name || req.user?._id || 'unknown'}`;
     const running = await SystemSyncLog.findOne({ status: 'running' }).sort({ createdAt: -1 });
-    if (!running) {
+    if (running) {
+      running.status = 'failed';
+      running.success = false;
+      running.errorMessage = stoppedBy;
+      await running.save();
+    }
+    // ponytail: SyncJob is the real worker state — cancel it or Stop button is dead
+    const jobId = req.body?.jobId || req.query.jobId;
+    const job = jobId ? await SyncJob.findById(jobId)
+      : await SyncJob.findOne({ status: { $in: ['pending', 'running', 'paused'] } }).sort({ updatedAt: -1 });
+    if (job) {
+      job.status = 'cancelled';
+      job.error_message = stoppedBy;
+      job.error = stoppedBy;
+      job.lease_until = null; job.worker_id = null;
+      await job.save();
+    }
+    if (!running && !job) {
       return res.status(404).json({ status: 'fail', message: 'No running sync found' });
     }
-    running.status = 'failed';
-    running.success = false;
-    running.errorMessage = `Manually stopped by ${req.user?.name || req.user?._id || 'unknown'}`;
-    await running.save();
     res.status(200).json({ status: 'success', message: 'Sync stopped' });
   } catch (err) {
     res.status(500).json({ status: 'fail', message: err.message });

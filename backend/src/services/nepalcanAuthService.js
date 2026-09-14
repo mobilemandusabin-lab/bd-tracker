@@ -6,6 +6,9 @@ const NEPA_CAN_EMAIL = process.env.NEPA_CAN_EMAIL || 'sabin.awal@buy.nepalcan.co
 const NEPA_CAN_PASSWORD = process.env.NEPA_CAN_PASSWORD || '1';
 
 let defaultSyncUser = null;
+let cachedToken = null;
+let cachedTokenAt = 0;
+const TOKEN_TTL_MS = 10 * 60 * 1000; // ponytail: reuse login, skip per-batch auth cost
 
 const getDefaultSyncUser = async () => {
   if (defaultSyncUser) return defaultSyncUser;
@@ -18,7 +21,8 @@ const getDefaultSyncUser = async () => {
   }
 };
 
-const loginToNepalcan = async () => {
+const loginToNepalcan = async (force = false) => {
+  if (!force && cachedToken && Date.now() - cachedTokenAt < TOKEN_TTL_MS) return cachedToken;
   try {
     console.log('[Nepalcan Login] Attempting login with email:', NEPA_CAN_EMAIL);
     const response = await axios.post(
@@ -37,7 +41,9 @@ const loginToNepalcan = async () => {
     console.log('[Nepalcan Login] Response status:', response.status);
     if (response.data?.token) {
       console.log('[Nepalcan Login] Success - token received');
-      return response.data.token;
+      cachedToken = response.data.token;
+      cachedTokenAt = Date.now();
+      return cachedToken;
     }
     throw new Error('No token received from Nepalcan login');
   } catch (error) {

@@ -123,17 +123,9 @@ app.use('/api/v1/reports', weeklyReportRoutes);
 app.use('/api/v1/report-headings', reportHeadingRoutes);
 if (aiRoutes) app.use('/api/v1/ai', aiRoutes);
 
-// Sync API — long-running product synchronization with batch processing
+// Sync API — resumable batches. Worker auth = SYNC_WORKER_KEY query param (external cron).
+// Start endpoint (POST /api/v1/dashboard/sync-all) keeps dashboard JWT auth.
 app.use('/api/sync', syncRoutes);
-
-// Vercel cron endpoint — no auth (fire-and-forget)
-app.get('/api/cron/sync', async (req, res) => {
-  const { runFullSync } = require('./services/unifiedSyncService');
-  runFullSync('cron').catch(err =>
-    console.error('[Cron] Background sync failed:', err)
-  );
-  res.status(200).json({ status: 'success', message: 'Sync started' });
-});
 
 // Serve Static Frontend in Production
 if (process.env.NODE_ENV === 'production') {

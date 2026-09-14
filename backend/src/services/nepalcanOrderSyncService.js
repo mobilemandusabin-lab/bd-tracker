@@ -65,7 +65,7 @@ const batchFetchTracking = async (orderIds, batchSize = 10) => {
     const batch = orderIds.slice(i, i + batchSize);
     const settled = await Promise.allSettled(
       batch.map(async (orderId) => {
-        const res = await axios.get(`${LOGISTICS_API_BASE}/${orderId}`, { timeout: 10000 });
+        const res = await axios.get(`${LOGISTICS_API_BASE}/${orderId}`, { timeout: 5000 });
         return { orderId, data: res.data };
       })
     );
@@ -86,10 +86,14 @@ const retryWithBackoff = async (fn, attempts = 3) => {
     try { return await fn(); }
     catch (err) {
       if (i === attempts - 1) throw err;
-      const isTransient = err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT' || err.response?.status >= 500;
+      const status = err.response?.status;
+      const isTransient = err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT' ||
+        status >= 500 || status === 429;
       if (!isTransient) throw err;
-      const delay = Math.pow(3, i) * 1000;
-      console.log(`[Retry] Attempt ${i + 1} failed, retrying in ${delay}ms: ${err.message}`);
+      // ponytail: 429 honors Retry-After header, else exponential backoff
+      const retryAfter = parseInt(err.response?.headers?.['retry-after'], 10);
+      const delay = Number.isFinite(retryAfter) ? retryAfter * 1000 : Math.pow(3, i) * 1000;
+      console.log(`[Retry] Attempt ${i + 1} failed (${status || err.code}), retrying in ${delay}ms: ${err.message}`);
       await new Promise(r => setTimeout(r, delay));
     }
   }
@@ -599,6 +603,7 @@ const getRecentSyncLogs = async (limit = 10) => {
 };
 
 module.exports = {
+  buildOrderUpdate,
   syncNepalcanOrders,
   enrichOrdersWithTracking,
   getLastSyncLog,
@@ -606,5 +611,6 @@ module.exports = {
   deriveStatusFromTracking,
   extractStatusTimeline,
   resolveStatus,
-  batchFetchTracking
+  batchFetchTracking,
+  retryWithBackoff
 };

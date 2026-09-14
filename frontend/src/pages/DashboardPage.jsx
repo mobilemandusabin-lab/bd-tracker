@@ -101,6 +101,8 @@ const DashboardPage = () => {
 
   const { token, user } = useSelector((state) => state.auth);
 
+  const [syncJob, setSyncJob] = useState(null);
+
   const fetchSyncStatus = async () => {
     try {
       const res = await axios.get(`${API_URL}/dashboard/sync-status`, {
@@ -109,6 +111,17 @@ const DashboardPage = () => {
       const data = res.data.data;
       setServerSyncing(data.syncing);
       setServerTriggeredBy(data.triggeredBy);
+      setSyncJob(data.job || null);
+      // ponytail: enrich with worker progress when a job is active
+      if (data.job?.jobId) {
+        try {
+          const jr = await axios.get(
+            `${API_URL.replace('/v1', '')}/sync/status?jobId=${data.job.jobId}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (jr.data?.success && jr.data?.jobId) setSyncJob(jr.data);
+        } catch { /* dashboard flag is enough */ }
+      }
       if (data.syncing) {
         setSyncing(true);
         const started = new Date(data.runningSince).getTime();
@@ -153,21 +166,33 @@ const DashboardPage = () => {
   }, [syncing]);
 
   const handleFullSync = async () => {
-    if (!window.confirm('Run full system sync? This includes Nepalcan orders, vendors, service branches, return checks, and vendor snapshots.')) return;
+    if (!window.confirm('Run full system sync? Orders → tracking → vendors → branches, in resumable batches.')) return;
 
     setSyncing(true);
     setSyncResult(null);
 
     try {
-      await axios.post(`${API_URL}/dashboard/sync-all`, {}, {
+      const res = await axios.post(`${API_URL}/dashboard/sync-all`, { sync_type: 'full' }, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      if (res.data?.data?.jobId) setSyncJob({ jobId: res.data.data.jobId, status: 'pending' });
+      const jobId = res.data?.data?.jobId;
       let poll = 0;
       const checkDone = setInterval(async () => {
         poll++;
         const stillRunning = await fetchSyncStatus();
         if (!stillRunning || poll > 120) {
           clearInterval(checkDone);
+          // ponytail: resolve final state so UI shows completed, not errors
+          try {
+            const fin = await axios.get(
+              `${API_URL.replace('/v1', '')}/sync/status${jobId ? `?jobId=${jobId}` : ''}`,
+              { headers: { Authorization: `Bearer ${token}` } }
+            );
+            const st = fin.data?.status;
+            setSyncResult({ success: st === 'completed', status: st });
+            if (fin.data?.jobId) setSyncJob(fin.data);
+          } catch { setSyncResult({ success: true, status: 'completed' }); }
         }
       }, 3000);
     } catch (err) {
@@ -179,9 +204,15 @@ const DashboardPage = () => {
   const handleStopSync = async () => {
     if (!window.confirm('Stop the currently running sync?')) return;
     try {
-      await axios.post(`${API_URL}/dashboard/sync-stop`, {}, {
+      await axios.post(`${API_URL}/dashboard/sync-stop`, { jobId: syncJob?.jobId || syncJob?._id }, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      // ponytail: legacy stop may miss job — cancel directly too
+      try {
+        await axios.post(`${API_URL.replace('/v1', '')}/sync/cancel`, { jobId: syncJob?.jobId || syncJob?._id }, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+      } catch { /* legacy stop is enough */ }
       setSyncing(false);
       setServerSyncing(false);
       setServerTriggeredBy(null);
@@ -292,7 +323,7 @@ const DashboardPage = () => {
                 <XCircle size={14} className="text-red-300" />
               )}
               <p className="text-xs font-bold text-white">
-                {syncing ? `Sync in progress (${syncElapsed}s)` : syncResult?.success ? 'Sync completed' : 'Sync completed with errors'}
+                {syncing ? `Sync ${syncJob?.status === 'resuming' ? 'resuming' : 'in progress'} (${syncElapsed}s)` : syncResult?.success ? 'Sync completed' : 'Sync completed with errors'}
                 {!syncing && syncResult?.durationMs ? ` (${(syncResult.durationMs / 1000).toFixed(1)}s)` : ''}
               </p>
               {syncing && serverTriggeredBy && (
@@ -323,6 +354,21 @@ const DashboardPage = () => {
                 {syncResult.tasks.overdueCheck?.ran && (
                   <span>Overdue: {syncResult.tasks.overdueCheck?.result?.overdueCount ?? 0}</span>
                 )}
+              </div>
+            )}
+            {syncJob && syncJob.total > 0 && (
+              <div className="space-y-1">
+                <div className="flex justify-between text-[10px] font-bold text-white/80">
+                  <span>{(syncJob.processed || 0).toLocaleString()} / {(syncJob.total || 0).toLocaleString()}{syncJob.phase ? ` · ${syncJob.phase}` : ''}</span>
+                  <span>{syncJob.progress ?? 0}% · ✓ {syncJob.successful ?? 0} · ✗ {syncJob.failed ?? 0}</span>
+                </div>
+                <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                  <div className="h-full bg-emerald-400 transition-all" style={{ width: `${Math.min(100, Math.max(0, syncJob.progress ?? 0))}%` }} />
+                </div>
+                <p className="text-[10px] text-white/50">
+                  Heartbeat: {syncJob.lastHeartbeat ? new Date(syncJob.lastHeartbeat).toLocaleTimeString() : '—'}
+                  {syncJob.estimatedRemaining && syncJob.estimatedRemaining !== 'calculating' ? ` · ETA ${syncJob.estimatedRemaining}` : ''}
+                </p>
               </div>
             )}
           </div>

@@ -20,31 +20,19 @@ const server = app.listen(port, '0.0.0.0', async () => {
   await seedExtensionVersion();
   startSnapshotScheduler();
 
-  // Reset any stale running syncs on startup
+  // Release stale worker leases on startup so cron can reclaim them —
+  // never run sync work from startup itself. SyncJob in MongoDB is source of truth.
   try {
-    const SystemSyncLog = require('./models/SystemSyncLog');
-    const stale = await SystemSyncLog.findOne({ status: 'running' });
-    if (stale) {
-      stale.status = 'failed';
-      stale.success = false;
-      stale.errorMessage = 'Auto-reset on server restart';
-      await stale.save();
-      console.log('[Startup] Reset stale running sync from', stale.createdAt);
-    }
+    const SyncJob = require('./models/SyncJob');
+    const staleAt = new Date(Date.now() - (parseInt(process.env.SYNC_STALE_AFTER) || 300) * 1000);
+    const r = await SyncJob.updateMany(
+      { status: 'running', $or: [{ lease_until: { $lt: new Date() } }, { last_heartbeat_at: { $lt: staleAt } }] },
+      { $set: { lease_until: null, worker_id: null, last_heartbeat_at: new Date() } }
+    );
+    if (r.modifiedCount) console.log(`[Startup] Released ${r.modifiedCount} stale sync lease(s)`);
   } catch (err) {
-    console.error('[Startup] Failed to reset stale syncs:', err.message);
+    console.error('[Startup] Failed to release stale sync leases:', err.message);
   }
-
-  // Run full sync on startup (after 30s to let DB connect)
-  setTimeout(async () => {
-    try {
-      const { runFullSync } = require('./services/unifiedSyncService');
-      console.log('[Startup] Running initial full sync...');
-      await runFullSync('startup');
-    } catch (err) {
-      console.error('[Startup] Initial sync failed:', err.message);
-    }
-  }, 30000);
 });
 
 process.on('unhandledRejection', (err) => {

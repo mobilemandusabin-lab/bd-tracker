@@ -11,15 +11,8 @@
   ],
   "routes": [
     {
-      "src": "/api/cron/sync",
-      "dest": "src/server.js"
-    },
-    {
       "src": "/api/sync/process",
-      "dest": "src/server.js",
-      "headers": {
-        "x-vercel-cron": "1"
-      }
+      "dest": "src/server.js"
     },
     {
       "src": "/(.*)",
@@ -37,10 +30,9 @@
       ]
     }
   ],
-  "crons": [
-    {
-      "path": "/api/sync/process",
-      "schedule": "* * * * *"
+  "functions": {
+    "src/server.js": {
+      "maxDuration": 60
     }
-  ]
+  }
 }
