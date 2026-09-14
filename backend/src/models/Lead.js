@@ -124,6 +124,11 @@ const leadSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  // ponytail: sha1 of synced vendor fields — skip rows whose hash matches
+  syncHash: {
+    type: String,
+    default: null
+  },
   service_branches: [{
     branchId: { type: String },
     name: { type: String }

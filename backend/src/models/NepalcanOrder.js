@@ -72,6 +72,11 @@ const nepalcanOrderSchema = new mongoose.Schema({
   apiUpdatedAt: {
     type: Date
   },
+  // ponytail: sha1 of synced commerce fields — skip rows whose hash matches
+  syncHash: {
+    type: String,
+    default: null
+  },
   // Track status changes with timestamps
   statusHistory: [statusHistorySchema],
   // Full order data from API

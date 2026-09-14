@@ -130,7 +130,47 @@ const doBatch = async (job, workerId) => {
   }
   const saved = await SyncJob.findByIdAndUpdate(job._id, { $set: update }, { new: true }).lean();
   console.log(`[SYNC] checkpoint saved job=${job._id} phase=${nextPhase} processed=${processed}/${saved.total} +${r.count} (${elapsedMs}ms)`);
+  if (jobDone) {
+    // ponytail: keep legacy sales history working — one log row per completed job
+    try {
+      const NepalcanSyncLog = require('../models/NepalcanSyncLog');
+      const logType = job.sync_type === 'nepalcan_vendors' ? 'vendors' : job.sync_type === 'full' ? 'full' : 'orders';
+      await NepalcanSyncLog.create({
+        type: logType, success: true, ordersSynced: saved.successful || 0,
+        totalProcessed: saved.processed || 0, durationMs: Date.now() - new Date(saved.started_at || saved.createdAt).getTime()
+      });
+    } catch (e) { console.error('[SYNC] history log failed:', e.message); }
+  }
   return { saved, nextPhase, jobDone };
+};
+
+/**
+ * Shared: ensure an active job of syncType exists, claim it, run ONE batch.
+ * Used by kick endpoint and the sales Refresh button. Returns shape + done flag.
+ */
+exports.ensureAndRunOneBatch = async (syncType = 'full') => {
+  let active = await SyncJob.findOne({ status: { $in: ['pending', 'running', 'paused'] }, sync_type: syncType }).sort({ updatedAt: -1 });
+  if (!active) {
+    const now = new Date();
+    active = await SyncJob.create({
+      sync_type: syncType, status: 'pending', total: 0, processed: 0, successful: 0, failed: 0, skipped: 0,
+      batchSize: parseInt(process.env.SYNC_BATCH_SIZE) || 50,
+      current_page: 1, last_processed_id: null, cursor: null,
+      payload: { phase: phaseFor(syncType, null), pages: {}, totals: {}, totalApi: null },
+      started_at: now, startedAt: now, last_heartbeat_at: now, lastProcessedAt: now,
+      retry_count: 0
+    });
+    console.log(`[SYNC] ensure created job ${active._id} type=${syncType}`);
+  }
+  const now = new Date();
+  const workerId = `e_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const job = await claimJob(workerId, now);
+  if (!job) {
+    const cur = await SyncJob.findById(active._id).lean();
+    return { ...jobShape(cur, false), note: 'busy — next tick resumes' };
+  }
+  const { saved, nextPhase, jobDone } = await doBatch(job, workerId);
+  return { ...jobShape(saved, jobDone), phase: nextPhase };
 };
 
 /**

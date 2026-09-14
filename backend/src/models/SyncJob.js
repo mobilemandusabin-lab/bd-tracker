@@ -21,6 +21,7 @@ const syncJobSchema = new mongoose.Schema({
   processed: { type: Number, default: 0 },
   successful: { type: Number, default: 0 },
   failed: { type: Number, default: 0 },
+  skipped: { type: Number, default: 0 },
   batchSize: { type: Number, default: 100 },
   cursor: { type: String, default: null }, // legacy generic cursor
   current_page: { type: Number, default: 1 },

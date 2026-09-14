@@ -50,12 +50,20 @@ const NepalcanSalesPage = () => {
   const [editError, setEditError] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
 
+  const [syncMsg, setSyncMsg] = useState(null);
+  // ponytail: one click = a few resumable batches (each <10s), then refresh from DB
   const triggerSync = async () => {
     setSyncing(true);
+    setSyncMsg(null);
     try {
       const backendToken = localStorage.getItem('token');
       const headers = backendToken ? { 'Authorization': `Bearer ${backendToken}` } : {};
-      await axios.post(`${API_URL}/nepalcan-orders/sync`, {}, { headers });
+      for (let i = 0; i < 4; i++) {
+        const res = await axios.post(`${API_URL}/nepalcan-orders/sync`, {}, { headers });
+        const d = res.data || {};
+        setSyncMsg(d.message || `Batch ${d.processed ?? 0}/${d.total ?? 0}`);
+        if (d.done) break;
+      }
       await Promise.all([fetchOrders(), fetchStats(), fetchSyncLog()]);
     } catch (err) {
       setError(err.response?.data?.message || 'Sync failed');
@@ -264,6 +272,11 @@ const NepalcanSalesPage = () => {
       {error && (
         <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-bold border border-red-100 flex items-center gap-2">
           <AlertCircle size={16} /> {error}
+        </div>
+      )}
+      {syncMsg && !error && (
+        <div className="p-4 bg-emerald-50 text-emerald-700 rounded-xl text-sm font-bold border border-emerald-100 flex items-center gap-2">
+          <RefreshCw size={16} /> {syncMsg}
         </div>
       )}
 

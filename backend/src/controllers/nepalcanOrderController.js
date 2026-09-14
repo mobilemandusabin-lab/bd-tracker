@@ -16,14 +16,16 @@ function computeProcessingDuration(statusHistory) {
   return Math.round(diffMs / (1000 * 60 * 60));
 }
 
-// Sync Nepalcan orders only — standalone, no vendor sync
+// Sync Nepalcan orders — one resumable batch per call (ponytail: reuses SyncJob,
+// the old blocking syncNepalcanOrders never survives Hobby 10s). Hit repeatedly
+// via kick cron or the Refresh button until done:true.
 exports.syncNepalcanOrders = async (req, res) => {
   try {
-    const { syncNepalcanOrders } = require('../services/nepalcanOrderSyncService');
-    console.log('[Order Sync] Starting...');
-    const result = await syncNepalcanOrders();
-    console.log('[Order Sync] Complete:', result.message);
-    res.status(200).json({ status: 'success', message: result.message, synced: result.synced });
+    const { ensureAndRunOneBatch } = require('./syncController');
+    console.log('[Order Sync] Resumable batch starting...');
+    const result = await ensureAndRunOneBatch('nepalcan_orders');
+    console.log(`[Order Sync] Batch: phase=${result.phase} ${result.processed}/${result.total} done=${result.done}`);
+    res.status(200).json({ status: 'success', message: result.done ? 'Sales sync completed' : `Sales sync batch: ${result.processed}/${result.total}`, ...result });
   } catch (err) {
     console.error('[Order Sync] Error:', err);
     res.status(500).json({ status: 'fail', message: err.message });
