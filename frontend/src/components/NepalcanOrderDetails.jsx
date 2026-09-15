@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { API_URL } from '../config/api';
 import { formatDuration } from '../utils/formatDuration';
+import { formatNepaliDateTime } from '../utils/nepaliDate';
 
 const STATUS_COLORS = {
   Delivered: 'bg-emerald-100 text-emerald-700',
@@ -380,7 +381,7 @@ const NepalcanOrderDetails = ({ orderId, onBack }) => {
                           {proc.process}
                         </span>
                         <span className="text-[10px] text-slate-400 font-semibold">
-                          {proc.createdAt ? new Date(proc.createdAt).toLocaleString() : ''}
+                          {proc.createdAt ? formatNepaliDateTime(proc.createdAt) : ''}
                         </span>
                       </div>
                       <p className="text-xs text-slate-600 mt-1">{proc.description}</p>
@@ -469,8 +470,8 @@ const NepalcanOrderDetails = ({ orderId, onBack }) => {
                 ? Math.round((new Date(tracking.updatedAt) - new Date(tracking.createdAt)) / (1000 * 60 * 60))
                 : null
             )} highlight />
-            <InfoRow label="Created" value={tracking.createdAt ? new Date(tracking.createdAt).toLocaleString() : '-'} />
-            <InfoRow label="Updated" value={tracking.updatedAt ? new Date(tracking.updatedAt).toLocaleString() : '-'} />
+            <InfoRow label="Created" value={tracking.createdAt ? formatNepaliDateTime(tracking.createdAt) : '-'} />
+            <InfoRow label="Updated" value={tracking.updatedAt ? formatNepaliDateTime(tracking.updatedAt) : '-'} />
           </div>
         </Section>
       </div>
@@ -487,7 +488,7 @@ const NepalcanOrderDetails = ({ orderId, onBack }) => {
                   <div className="flex items-center justify-between gap-2 mb-1">
                     <span className="text-[10px] font-bold text-slate-400 uppercase">{note.type} · {note.addedBy}</span>
                     <span className="text-[10px] text-slate-400 font-semibold">
-                      {note.createdAt ? new Date(note.createdAt).toLocaleString() : ''}
+                      {note.createdAt ? formatNepaliDateTime(note.createdAt) : ''}
                     </span>
                   </div>
                   <p className="text-xs text-slate-700" dangerouslySetInnerHTML={{ __html: note.comment }} />

@@ -8,6 +8,7 @@ import {
   User, CheckCircle2, Calendar, ChevronDown, Search, X, ListChecks
 } from 'lucide-react';
 import { API_URL } from '../config/api';
+import { formatNepaliDate, formatNepaliMonthYear, bsLabelForInput, NEPALI_WEEKDAYS } from '../utils/nepaliDate';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Cell, PieChart as RechartsPie, Pie
@@ -31,8 +32,7 @@ const ALL_TABS = [
   { key: 'listing', label: 'Listing Snapshots', icon: ListChecks },
 ];
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const DAYS = NEPALI_WEEKDAYS;
 const SCORE_LABELS = ['0-20', '21-40', '41-60', '61-80', '81-100'];
 
 const CustomTooltip = ({ active, payload, label }) => {
@@ -122,7 +122,7 @@ const OverviewTab = () => {
 
   const trendData = useMemo(() => {
     if (!data?.monthlyTrends) return [];
-    return data.monthlyTrends.map(t => ({ month: MONTHS[t._id.month - 1], created: t.created, converted: t.converted }));
+    return data.monthlyTrends.map(t => ({ month: formatNepaliMonthYear(t._id.year, t._id.month), created: t.created, converted: t.converted }));
   }, [data]);
 
   const sourceData = useMemo(() => {
@@ -162,13 +162,13 @@ const OverviewTab = () => {
 
   const revenueData = useMemo(() => {
     if (!data?.revenueTrend) return [];
-    return data.revenueTrend.map(r => ({ month: MONTHS[r._id.month - 1], revenue: r.revenue, orders: r.orders }));
+    return data.revenueTrend.map(r => ({ month: formatNepaliMonthYear(r._id.year, r._id.month), revenue: r.revenue, orders: r.orders }));
   }, [data]);
 
   const vendorTrendData = useMemo(() => {
     if (!data?.vendorTrends) return [];
     return data.vendorTrends.map(t => ({
-      month: MONTHS[t._id.month - 1], total: t.total, verified: t.verified, activeSellers: t.activeSellers
+      month: formatNepaliMonthYear(t._id.year, t._id.month), total: t.total, verified: t.verified, activeSellers: t.activeSellers
     }));
   }, [data]);
 
@@ -413,7 +413,7 @@ const OverviewTab = () => {
                     {goal.end_date && (
                       <span className="text-[10px] text-slate-400 flex items-center gap-1">
                         <Calendar size={10} />
-                        Due: {new Date(goal.end_date).toLocaleDateString()}
+                        Due: {formatNepaliDate(goal.end_date)}
                       </span>
                     )}
                   </div>
@@ -787,12 +787,12 @@ const MyAnalyticsTab = () => {
 
   const trendData = useMemo(() => {
     if (!data?.monthlyTrends) return [];
-    return data.monthlyTrends.map(t => ({ month: MONTHS[t._id.month - 1], created: t.created, converted: t.converted }));
+    return data.monthlyTrends.map(t => ({ month: formatNepaliMonthYear(t._id.year, t._id.month), created: t.created, converted: t.converted }));
   }, [data]);
 
   const revenueTrendData = useMemo(() => {
     if (!data?.revenueTrend) return [];
-    return data.revenueTrend.map(r => ({ month: MONTHS[r._id.month - 1], revenue: r.revenue, orders: r.orders }));
+    return data.revenueTrend.map(r => ({ month: formatNepaliMonthYear(r._id.year, r._id.month), revenue: r.revenue, orders: r.orders }));
   }, [data]);
 
   const fetchStageLeads = async (stageName) => {
@@ -905,7 +905,7 @@ const MyAnalyticsTab = () => {
                     {goal.end_date && (
                       <span className="text-[10px] text-slate-400 flex items-center gap-1">
                         <Calendar size={10} />
-                        Due: {new Date(goal.end_date).toLocaleDateString()}
+                        Due: {formatNepaliDate(goal.end_date)}
                       </span>
                     )}
                   </div>
@@ -1146,12 +1146,12 @@ const TeamAnalyticsTab = () => {
 
   const trendData = useMemo(() => {
     if (!data?.monthlyTrends) return [];
-    return data.monthlyTrends.map(t => ({ name: `${MONTHS[t._id.month - 1]} ${t._id.year}`, created: t.created, converted: t.converted }));
+    return data.monthlyTrends.map(t => ({ name: formatNepaliMonthYear(t._id.year, t._id.month), created: t.created, converted: t.converted }));
   }, [data?.monthlyTrends]);
 
   const revenueTrendData = useMemo(() => {
     if (!data?.revenueTrend) return [];
-    return data.revenueTrend.map(r => ({ name: `${MONTHS[r._id.month - 1]} ${r._id.year}`, revenue: r.revenue, orders: r.orders }));
+    return data.revenueTrend.map(r => ({ name: formatNepaliMonthYear(r._id.year, r._id.month), revenue: r.revenue, orders: r.orders }));
   }, [data?.revenueTrend]);
 
   const heatmapData = useMemo(() => {
@@ -1206,12 +1206,18 @@ const TeamAnalyticsTab = () => {
           {/* Custom Date Range */}
           <div>
             <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Custom Range</label>
-            <div className="flex gap-2 items-center">
-              <input type="date" value={customStart} onChange={(e) => { setCustomStart(e.target.value); setPeriod('custom'); }}
-                className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500" />
-              <span className="text-slate-400 text-xs">to</span>
-              <input type="date" value={customEnd} onChange={(e) => { setCustomEnd(e.target.value); setPeriod('custom'); }}
-                className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500" />
+            <div className="flex gap-2 items-start">
+              <div className="flex flex-col gap-0.5">
+                <input type="date" value={customStart} onChange={(e) => { setCustomStart(e.target.value); setPeriod('custom'); }}
+                  className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500" />
+                <span className="text-[10px] font-bold text-red-600 px-1">{bsLabelForInput(customStart)}</span>
+              </div>
+              <span className="text-slate-400 text-xs pt-1.5">to</span>
+              <div className="flex flex-col gap-0.5">
+                <input type="date" value={customEnd} onChange={(e) => { setCustomEnd(e.target.value); setPeriod('custom'); }}
+                  className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500" />
+                <span className="text-[10px] font-bold text-red-600 px-1">{bsLabelForInput(customEnd)}</span>
+              </div>
             </div>
           </div>
         </div>

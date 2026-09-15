@@ -4,6 +4,7 @@ import axios from 'axios';
 import toast from 'react-hot-toast';
 import { Puzzle, Download, CheckCircle, Clock, Users, Monitor, RefreshCw, ExternalLink, ChevronRight, Package, ShieldCheck, ShieldX, FileText, TrendingUp, BarChart3 } from 'lucide-react';
 import { API_URL } from '../config/api';
+import { formatNepaliDate } from '../utils/nepaliDate';
 
 const ExtensionPage = () => {
   const { token } = useSelector((state) => state.auth);
@@ -79,7 +80,7 @@ const ExtensionPage = () => {
     if (diff < 60) return 'Just now';
     if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
     if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-    return d.toLocaleDateString();
+    return formatNepaliDate(d);
   };
 
   const installationSteps = [

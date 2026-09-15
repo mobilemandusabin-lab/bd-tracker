@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, LineChart, Line, AreaChart, Area } from 'recharts';
 import { API_URL } from '../config/api';
+import { formatNepaliDate, formatNepaliDateShort, formatNepaliDateTime, formatTime, bsLabelForInput, NEPALI_WEEKDAYS } from '../utils/nepaliDate';
 
 const OperationsAnalyticsPage = () => {
   const { token, user } = useSelector((state) => state.auth);
@@ -332,21 +333,27 @@ const OperationsAnalyticsPage = () => {
         </div>
 
         {/* Date Range Filter */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Calendar size={14} className="text-slate-400" />
-          <input
-            type="date"
-            value={startDate}
-            onChange={handleStartDate}
-            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-600 border-none outline-none"
-          />
+          <div className="flex flex-col">
+            <input
+              type="date"
+              value={startDate}
+              onChange={handleStartDate}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-600 border-none outline-none"
+            />
+            {startDate && <span className="text-[10px] font-bold text-slate-400 mt-0.5">{bsLabelForInput(startDate)}</span>}
+          </div>
           <span className="text-xs text-slate-400 font-bold">to</span>
-          <input
-            type="date"
-            value={endDate}
-            onChange={handleEndDate}
-            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-600 border-none outline-none"
-          />
+          <div className="flex flex-col">
+            <input
+              type="date"
+              value={endDate}
+              onChange={handleEndDate}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-600 border-none outline-none"
+            />
+            {endDate && <span className="text-[10px] font-bold text-slate-400 mt-0.5">{bsLabelForInput(endDate)}</span>}
+          </div>
           {startDate && (
             <button
               onClick={clearDateRange}
@@ -389,11 +396,12 @@ const OperationsAnalyticsPage = () => {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={comparisonRows} margin={{ top: 4, right: 4, left: -12, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} />
+                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} tickFormatter={(v) => formatNepaliDateShort(v)} />
                     <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} />
                     <Tooltip
                       contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }}
                       labelStyle={{ fontWeight: 700, marginBottom: 4 }}
+                      labelFormatter={(v) => formatNepaliDate(v)}
                     />
                     <Legend
                       wrapperStyle={{ fontSize: 10, fontWeight: 600 }}
@@ -502,7 +510,7 @@ const OperationsAnalyticsPage = () => {
                   <tbody className="divide-y divide-slate-50">
                     {comparisonRows.map((row) => (
                       <tr key={row.date} className="hover:bg-slate-50">
-                        <td className="px-4 py-2.5 font-bold text-slate-700">{row.date}</td>
+                        <td className="px-4 py-2.5 font-bold text-slate-700">{formatNepaliDate(row.date)}</td>
                         <td className="px-4 py-2.5 text-center font-bold text-amber-600">
                           {row.pending !== null ? row.pending.toLocaleString() : '—'}
                         </td>
@@ -677,14 +685,14 @@ const OperationsAnalyticsPage = () => {
                         <div className="flex items-center gap-2">
                           <ArrowUp size={12} className="text-emerald-500" />
                           <span className="text-[10px] text-slate-400 font-bold w-12">Best</span>
-                          <span className="text-xs font-bold text-slate-900">{data.best.date}</span>
+                          <span className="text-xs font-bold text-slate-900">{formatNepaliDateShort(data.best.date)}</span>
                           <span className={`ml-auto text-sm font-extrabold text-${color}-600`}>{data.best[key]}</span>
                         </div>
                         {data.worst && data.worst.date !== data.best.date && (
                           <div className="flex items-center gap-2">
                             <ArrowDown size={12} className="text-red-500" />
                             <span className="text-[10px] text-slate-400 font-bold w-12">Lowest</span>
-                            <span className="text-xs font-bold text-slate-900">{data.worst.date}</span>
+                            <span className="text-xs font-bold text-slate-900">{formatNepaliDateShort(data.worst.date)}</span>
                             <span className={`ml-auto text-sm font-extrabold text-slate-400`}>{data.worst[key]}</span>
                           </div>
                         )}
@@ -785,10 +793,10 @@ const OperationsAnalyticsPage = () => {
                           <td className="px-4 py-2.5 text-center font-bold text-emerald-600">{u.active_hours}h</td>
                           <td className="px-4 py-2.5 text-center font-extrabold text-slate-900">{u.total_events}</td>
                           <td className="px-4 py-2.5 text-center text-xs text-slate-500">
-                            {firstSession ? new Date(firstSession.start).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                            {firstSession ? formatNepaliDateTime(firstSession.start) : '—'}
                           </td>
                           <td className="px-4 py-2.5 text-center text-xs text-slate-500">
-                            {lastSession ? new Date(lastSession.end).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                            {lastSession ? formatNepaliDateTime(lastSession.end) : '—'}
                           </td>
                         </tr>
                       );
@@ -810,9 +818,9 @@ const OperationsAnalyticsPage = () => {
                           <div key={i} className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg text-xs">
                             <span className="font-bold text-slate-400">#{i + 1}</span>
                             <span className="text-slate-600">
-                              {new Date(s.start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                              {formatTime(s.start)}
                               {' — '}
-                              {new Date(s.end).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                              {formatTime(s.end)}
                             </span>
                             <span className="ml-auto font-bold text-slate-500">{s.duration_min}m</span>
                             <span className="text-slate-400">({s.event_count} events)</span>
@@ -916,9 +924,9 @@ const OperationsAnalyticsPage = () => {
                               <div className="flex items-center gap-1.5 ml-auto">
                                 <Clock size={12} className="text-slate-400" />
                                 <span className="text-[10px] text-slate-400">
-                                  {new Date(userSession.session_details[0].start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                                  {formatTime(userSession.session_details[0].start)}
                                   {' — '}
-                                  {new Date(userSession.session_details[userSession.session_details.length - 1].end).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                                  {formatTime(userSession.session_details[userSession.session_details.length - 1].end)}
                                 </span>
                               </div>
                             )}
@@ -1238,7 +1246,7 @@ const OperationsAnalyticsPage = () => {
                       const labels = [];
                       for (let i = 6; i >= 0; i--) {
                         const d = new Date(today - i * 86400000);
-                        labels.push(d.toLocaleDateString('en', { weekday: 'short' }));
+                        labels.push(NEPALI_WEEKDAYS[d.getDay()]);
                       }
                       return (
                         <div key={member.user_id} className="flex items-center gap-3">
@@ -1271,7 +1279,7 @@ const OperationsAnalyticsPage = () => {
                       const labels = [];
                       for (let i = 6; i >= 0; i--) {
                         const d = new Date(Date.now() - i * 86400000);
-                        labels.push(d.toLocaleDateString('en', { weekday: 'short' }));
+                        labels.push(NEPALI_WEEKDAYS[d.getDay()]);
                       }
                       return labels.map((l, i) => (
                         <span key={i} className="flex-1 text-center text-[9px] text-slate-400">{l}</span>
@@ -1315,7 +1323,7 @@ const OperationsAnalyticsPage = () => {
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-bold text-slate-800 truncate">{ev.product_name || 'Unknown Product'}</p>
                         <p className="text-[10px] text-slate-400 mt-0.5">
-                          {new Date(ev.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          {formatNepaliDateTime(ev.created_at)}
                           {ev.qc_status && <span className="ml-2 capitalize">QC: {ev.qc_status}</span>}
                         </p>
                       </div>
@@ -1357,7 +1365,7 @@ const UserDetailView = ({ userId, userDetail, loading, onBack, period, startDate
   };
 
   const periodLabel = startDate && endDate
-    ? `${new Date(startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+    ? `${formatNepaliDateShort(startDate)} – ${formatNepaliDateShort(endDate)}`
     : period === '7d' ? 'Last 7 days'
     : period === '30d' ? 'Last 30 days'
     : period === '90d' ? 'Last 90 days'
@@ -1415,7 +1423,7 @@ const UserDetailView = ({ userId, userDetail, loading, onBack, period, startDate
               <span className="text-[10px] font-bold text-red-500 bg-red-50 px-1.5 py-0.5 rounded">{periodLabel}</span>
           {eventDates && (
             <span className="text-[10px] text-slate-400 ml-1">
-              {eventDates.min.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – {eventDates.max.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+              {formatNepaliDateShort(eventDates.min)} – {formatNepaliDateShort(eventDates.max)}
             </span>
           )}
             </div>
@@ -1476,13 +1484,14 @@ const UserDetailView = ({ userId, userDetail, loading, onBack, period, startDate
           <h3 className="text-sm font-bold text-slate-700 mb-4">Daily Performance</h3>
           <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={dailyBreakdown} margin={{ top: 4, right: 4, left: -12, bottom: 0 }}>
+                <BarChart data={dailyBreakdown} margin={{ top: 4, right: 4, left: -12, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} tickFormatter={(v) => formatNepaliDateShort(v)} />
                 <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} />
                 <Tooltip
                   contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }}
                   labelStyle={{ fontWeight: 700, marginBottom: 4 }}
+                  labelFormatter={(v) => formatNepaliDate(v)}
                 />
                 <Legend wrapperStyle={{ fontSize: 10, fontWeight: 600 }} iconType="circle" iconSize={8} />
                 <Bar dataKey="listing_created" name="Listings" fill="#3b82f6" radius={[3, 3, 0, 0]} />
@@ -1513,9 +1522,9 @@ const UserDetailView = ({ userId, userDetail, loading, onBack, period, startDate
                 <div className="flex-1">
                   <div className="flex items-center gap-3">
                     <span className="text-xs font-bold text-slate-700">
-                      {new Date(s.start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                      {formatTime(s.start)}
                       {' — '}
-                      {new Date(s.end).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                      {formatTime(s.end)}
                     </span>
                     <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
                       {s.duration_min}m
@@ -1554,14 +1563,14 @@ const UserDetailView = ({ userId, userDetail, loading, onBack, period, startDate
                     <div className="flex items-center gap-2">
                       <ArrowUp size={12} className="text-emerald-500 shrink-0" />
                       <span className="text-[10px] font-bold text-emerald-600">Best</span>
-                      <span className="text-xs font-bold text-slate-900">{bw.best.date}</span>
+                      <span className="text-xs font-bold text-slate-900">{formatNepaliDateShort(bw.best.date)}</span>
                       <span className={`ml-auto text-sm font-extrabold ${c.text}`}>{bw.best.count}</span>
                     </div>
                     {bw.best.sessions?.length > 0 && (
                       <div className="ml-5 text-[9px] text-slate-400">
                         {bw.best.sessions.map(s => (
                           <div key={s.session_id}>
-                            Session #{s.session_id}: {new Date(s.start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} {' — '} {new Date(s.end).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} ({s.duration_min}m)
+                            Session #{s.session_id}: {formatTime(s.start)} {' — '} {formatTime(s.end)} ({s.duration_min}m)
                           </div>
                         ))}
                       </div>
@@ -1570,7 +1579,7 @@ const UserDetailView = ({ userId, userDetail, loading, onBack, period, startDate
                       <div className="flex items-center gap-2">
                         <ArrowDown size={12} className="text-red-500 shrink-0" />
                         <span className="text-[10px] font-bold text-red-500">Lowest</span>
-                        <span className="text-xs font-bold text-slate-900">{bw.worst.date}</span>
+                        <span className="text-xs font-bold text-slate-900">{formatNepaliDateShort(bw.worst.date)}</span>
                         <span className="ml-auto text-sm font-extrabold text-slate-400">{bw.worst.count}</span>
                       </div>
                     )}
@@ -1578,7 +1587,7 @@ const UserDetailView = ({ userId, userDetail, loading, onBack, period, startDate
                       <div className="ml-5 text-[9px] text-slate-400">
                         {bw.worst.sessions.map(s => (
                           <div key={s.session_id}>
-                            Session #{s.session_id}: {new Date(s.start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} {' — '} {new Date(s.end).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} ({s.duration_min}m)
+                            Session #{s.session_id}: {formatTime(s.start)} {' — '} {formatTime(s.end)} ({s.duration_min}m)
                           </div>
                         ))}
                       </div>
@@ -1603,7 +1612,7 @@ const UserDetailView = ({ userId, userDetail, loading, onBack, period, startDate
             {recentEvents.map((ev, i) => (
               <div key={i} className="px-5 py-2.5 flex items-center gap-3 hover:bg-slate-50">
                 <span className="text-[10px] font-bold text-slate-400 w-16 shrink-0">
-                  {new Date(ev.created_at).toLocaleTimeString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  {formatNepaliDateTime(ev.created_at)}
                 </span>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                   ev.event_type === 'listing_created' ? 'bg-blue-50 text-blue-600' :

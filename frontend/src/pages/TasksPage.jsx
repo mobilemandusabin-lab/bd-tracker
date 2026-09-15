@@ -6,6 +6,7 @@ import { fetchTasks, fetchAdminTasks, createTask, updateTask, deleteTask } from 
 import { Plus, ClipboardList, Clock, CheckCircle, AlertCircle, Trash2, Filter, X, Search } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { API_URL as BASE_URL } from '../config/api';
+import { formatNepaliDate, formatNepaliDateShort, bsLabelForInput } from '../utils/nepaliDate';
 
 const TasksPage = () => {
   const dispatch = useDispatch();
@@ -377,7 +378,7 @@ const TaskCard = ({ task, onStatusChange, onDelete, canEdit, canDelete, onCardCl
 
   const formatDate = (date) => {
     if (!date) return null;
-    return new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return formatNepaliDateShort(date);
   };
 
   const isOverdue = task.due_date && new Date(task.due_date) < new Date() && task.status !== 'Done';
@@ -614,6 +615,7 @@ const TaskModal = ({ isOpen, onClose, onSubmit, userRole, token }) => {
                     onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
                     className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:border-red-300 focus:ring-2 focus:ring-red-100 outline-none text-sm"
                   />
+                  {formData.due_date && <span className="text-[10px] font-bold text-slate-500 mt-1 block">{bsLabelForInput(formData.due_date)}</span>}
                 </div>
               </div>
             </>
@@ -665,9 +667,7 @@ const TaskDetailModal = ({ task, onClose, onDelete, canDelete }) => {
 
   const formatDate = (date) => {
     if (!date) return '-';
-    return new Date(date).toLocaleDateString('en-US', {
-      weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
-    });
+    return formatNepaliDate(date);
   };
 
   const isOverdue = task.due_date && new Date(task.due_date) < new Date() && task.status !== 'Done';

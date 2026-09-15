@@ -563,9 +563,7 @@ exports.generatePptx = async (report, templatePath) => {
   const sections = report.sections || [];
   const summary = report.summary || {};
   const nepaliDate = report.nepaliDate || '';
-  const engStart = report.weekStart ? new Date(report.weekStart).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : '';
-  const engEnd = report.weekEnd ? new Date(report.weekEnd).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : '';
-  const dateStr = engStart && engEnd ? `${nepaliDate} (${engStart} - ${engEnd})` : nepaliDate;
+  const dateStr = nepaliDate;
 
   // Get slide order from presentation.xml
   const presXml = await zip.file('ppt/presentation.xml').async('string');

@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { DollarSign, TrendingUp, Package, Percent, Search, Filter, ChevronLeft, ChevronRight, Trash2, RefreshCw, Download } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { API_URL } from '../config/api';
+import { formatNepaliDate, bsLabelForInput } from '../utils/nepaliDate';
 
 const FinancePage = () => {
   const { token } = useSelector((state) => state.auth);
@@ -147,10 +148,16 @@ const FinancePage = () => {
               <option value="Paid">Paid</option>
               <option value="Pending">Pending</option>
             </select>
-            <input type="date" value={filters.date_from} onChange={e => { setFilters(f => ({ ...f, date_from: e.target.value })); setPage(1); }}
-              className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 focus:outline-none" />
-            <input type="date" value={filters.date_to} onChange={e => { setFilters(f => ({ ...f, date_to: e.target.value })); setPage(1); }}
-              className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 focus:outline-none" />
+            <div>
+              <input type="date" value={filters.date_from} onChange={e => { setFilters(f => ({ ...f, date_from: e.target.value })); setPage(1); }}
+                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 focus:outline-none" />
+              {filters.date_from && <span className="text-[10px] font-bold text-slate-500">{bsLabelForInput(filters.date_from)}</span>}
+            </div>
+            <div>
+              <input type="date" value={filters.date_to} onChange={e => { setFilters(f => ({ ...f, date_to: e.target.value })); setPage(1); }}
+                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 focus:outline-none" />
+              {filters.date_to && <span className="text-[10px] font-bold text-slate-500">{bsLabelForInput(filters.date_to)}</span>}
+            </div>
           </div>
         )}
       </div>
@@ -215,7 +222,7 @@ const FinancePage = () => {
                 return (
                   <tr key={r._id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
                     <td className="px-3 py-2.5 text-xs font-bold text-slate-900 whitespace-nowrap">{r.order_id}</td>
-                    <td className="px-3 py-2.5 text-xs text-slate-600 whitespace-nowrap">{r.delivery_date ? new Date(r.delivery_date).toLocaleDateString() : '—'}</td>
+                    <td className="px-3 py-2.5 text-xs text-slate-600 whitespace-nowrap">{r.delivery_date ? formatNepaliDate(r.delivery_date) : '—'}</td>
                     <td className="px-3 py-2.5 text-xs text-slate-600 max-w-[200px] truncate border-r border-slate-200">{r.product_name}</td>
                     <td className="px-3 py-2.5 text-xs text-slate-400">—</td>
                     <td className="px-3 py-2.5 text-xs text-slate-400">—</td>
@@ -238,7 +245,7 @@ const FinancePage = () => {
                         {r.payment_status}
                       </span>
                     </td>
-                    <td className="px-3 py-2.5 text-xs text-slate-600 whitespace-nowrap border-r border-slate-200">{r.payment_date ? new Date(r.payment_date).toLocaleDateString() : '—'}</td>
+                    <td className="px-3 py-2.5 text-xs text-slate-600 whitespace-nowrap border-r border-slate-200">{r.payment_date ? formatNepaliDate(r.payment_date) : '—'}</td>
                     <td className="px-3 py-2.5 text-xs font-medium text-slate-700">{fmt(r.total_revenue)}</td>
                     <td className="px-3 py-2.5"><span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full text-[10px] font-bold">{r.delivery_type}</span></td>
                     <td className="px-3 py-2.5 text-xs text-slate-600">{fmt(r.service_cost)}</td>

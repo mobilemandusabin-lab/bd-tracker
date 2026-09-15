@@ -782,8 +782,8 @@ exports.getMonthlyData = async (req, res) => {
       {
         $group: {
           _id: {
-            year: { $year: '$createdAt' },
-            month: { $month: '$createdAt' }
+            year: { $year: { date: '$createdAt', timezone: NPT } },
+            month: { $month: { date: '$createdAt', timezone: NPT } }
           },
           totalOrders: { $sum: 1 },
           totalRevenue: { $sum: '$totalAmount' },
@@ -862,6 +862,112 @@ exports.getMonthlyData = async (req, res) => {
 };
 
 const ORDER_STATUSES = ['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled', 'Returned'];
+
+// Daily sales by createdAt (NPT days), excluding Cancelled — date-wise like vendor daily report.
+// ponytail: single agg + zero-fill loop, per-vendor matrix only on demand via ?vendor=
+const NPT = 'Asia/Kathmandu';
+const NPT_OFFSET_MS = 5.75 * 3600000;
+// ponytail: YYYY-MM-DD interpreted as NPT midnight (server tz varies: Vercel UTC vs local NPT)
+const nptDayStart = (ymd) => new Date(`${ymd}T00:00:00+05:45`);
+const nptDayEnd = (ymd) => new Date(`${ymd}T23:59:59.999+05:45`);
+const toNptDateStr = (d) => new Date(d.getTime() + NPT_OFFSET_MS).toISOString().split('T')[0];
+exports.getDailySalesData = async (req, res) => {
+  try {
+    let { startDate, endDate, vendor } = req.query;
+    const endD = endDate || toNptDateStr(new Date());
+    const end = nptDayEnd(endD);
+    let start = startDate ? nptDayStart(startDate)
+      : new Date(end.getTime() - 29 * 86400000);
+    // ponytail: clamp to 92 days, bigger ranges use /monthly
+    if ((end - start) / 86400000 > 92) start = new Date(end.getTime() - 91 * 86400000);
+
+    const match = { createdAt: { $gte: start, $lte: end }, orderStatus: { $ne: 'Cancelled' } };
+    if (vendor) match.vendor = new RegExp(`^${vendor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+
+    const [byDay, byVendor, hourlyRows, fallbackCount] = await Promise.all([
+      NepalcanOrder.aggregate([
+        { $match: match },
+        { $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: NPT } },
+          orders: { $sum: 1 },
+          revenue: { $sum: '$totalAmount' },
+          deliveredOrders: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, 1, 0] } },
+          deliveredRevenue: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, '$totalAmount', 0] } },
+          returnedOrders: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Returned'] }, 1, 0] } },
+          shippedOrders: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Shipped'] }, 1, 0] } },
+          pendingOrders: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Pending'] }, 1, 0] } },
+          processingOrders: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Processing'] }, 1, 0] } },
+          customers: { $addToSet: '$customer' },
+        } },
+        { $sort: { _id: 1 } },
+      ]),
+      NepalcanOrder.aggregate([
+        { $match: match },
+        { $group: {
+          _id: { $ifNull: ['$vendor', 'Unknown'] },
+          orders: { $sum: 1 },
+          revenue: { $sum: '$totalAmount' },
+          deliveredOrders: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, 1, 0] } },
+          returnedOrders: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Returned'] }, 1, 0] } },
+        } },
+        { $sort: { revenue: -1 } },
+        { $limit: 10 },
+        { $project: { _id: 0, vendor: '$_id', orders: 1, revenue: 1, deliveredOrders: 1, returnedOrders: 1,
+          avgAmount: { $round: [{ $divide: ['$revenue', '$orders'] }, 0] } } },
+      ]),
+      NepalcanOrder.aggregate([
+        { $match: match },
+        { $group: {
+          _id: { $hour: { date: '$createdAt', timezone: NPT } },
+          orders: { $sum: 1 },
+          revenue: { $sum: '$totalAmount' },
+        } },
+        { $sort: { _id: 1 } },
+      ]),
+      // ponytail: rows whose createdAt is sync-time fallback (API had no timestamp) poison the timeline
+      NepalcanOrder.countDocuments({ ...match,
+        $or: [{ 'rawData.createdAt': { $exists: false } }, { 'rawData.createdAt': null }] }),
+    ]);
+
+    const byDayMap = new Map(byDay.map(d => [d._id, d]));
+    const days = [];
+    for (let t = new Date(start); t <= end; t = new Date(t.getTime() + 86400000)) {
+      const key = toNptDateStr(t);
+      if (days.length && days[days.length - 1].date === key) continue;
+      const d = byDayMap.get(key) || {};
+      const orders = d.orders || 0;
+      days.push({
+        date: key,
+        orders,
+        revenue: d.revenue || 0,
+        avgOrderValue: orders ? Math.round((d.revenue || 0) / orders) : 0,
+        deliveredOrders: d.deliveredOrders || 0,
+        deliveredRevenue: d.deliveredRevenue || 0,
+        returnedOrders: d.returnedOrders || 0,
+        shippedOrders: d.shippedOrders || 0,
+        pendingOrders: d.pendingOrders || 0,
+        processingOrders: d.processingOrders || 0,
+        uniqueCustomers: d.customers ? d.customers.length : 0,
+      });
+    }
+    const hourlyMap = new Map(hourlyRows.map(h => [h._id, h]));
+    const hourly = Array.from({ length: 24 }, (_, h) => ({
+      hour: h, orders: hourlyMap.get(h)?.orders || 0, revenue: hourlyMap.get(h)?.revenue || 0,
+    }));
+    const summary = days.reduce((s, d) => ({
+      orders: s.orders + d.orders, revenue: s.revenue + d.revenue,
+      deliveredOrders: s.deliveredOrders + d.deliveredOrders,
+      deliveredRevenue: s.deliveredRevenue + d.deliveredRevenue,
+      returnedOrders: s.returnedOrders + d.returnedOrders,
+    }), { orders: 0, revenue: 0, deliveredOrders: 0, deliveredRevenue: 0, returnedOrders: 0 });
+
+    res.json({ days, hourly, topVendors: byVendor, summary, fallbackCount,
+      range: { startDate: toNptDateStr(start), endDate: toNptDateStr(end) } });
+  } catch (error) {
+    console.error('Get daily sales error:', error);
+    res.status(500).json({ message: 'Failed to fetch daily sales', error: error.message });
+  }
+};
 
 // Update a Nepalcan order manually. orderId is locked; statusHistory is preserved,
 // a status change appends a new entry instead.

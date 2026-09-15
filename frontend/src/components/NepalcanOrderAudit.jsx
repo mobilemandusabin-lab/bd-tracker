@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { API_URL } from '../config/api';
+import { formatNepaliDateTime } from '../utils/nepaliDate';
 
 const STATUS_STYLES = {
   OK: 'bg-emerald-100 text-emerald-700',
@@ -152,7 +153,7 @@ const NepalcanOrderAudit = () => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <p className="text-sm text-slate-500">
-          {audit ? `Last audit: ${new Date(audit.runAt).toLocaleString()}` : 'No audit run yet'}
+          {audit ? `Last audit: ${formatNepaliDateTime(audit.runAt)}` : 'No audit run yet'}
         </p>
         <button
           onClick={runAudit}

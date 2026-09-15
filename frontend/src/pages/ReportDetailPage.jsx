@@ -6,6 +6,7 @@ import {
   ArrowLeft, Edit3, Download, FileDown, Eye
 } from 'lucide-react';
 import PptxPreview from '../components/PptxPreview';
+import { formatNepaliDate } from '../utils/nepaliDate';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
@@ -79,9 +80,7 @@ export default function ReportDetailPage() {
 
   if (!report) return null;
 
-  const formatDate = (d) => new Date(d).toLocaleDateString('en-US', {
-    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
-  });
+  const formatDate = (d) => formatNepaliDate(d);
 
   return (
     <div className="space-y-4">

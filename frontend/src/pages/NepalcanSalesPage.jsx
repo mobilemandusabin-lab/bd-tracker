@@ -7,6 +7,7 @@ import {
   BarChart3, Calendar, X, Clock, DollarSign, History, ExternalLink, Search, Pencil, Save
 } from 'lucide-react';
 import { formatDuration } from '../utils/formatDuration';
+import { formatNepaliDate, formatNepaliDateShort, formatNepaliDateTime } from '../utils/nepaliDate';
 import { cn } from '../utils/cn';
 import NepalcanOrderAudit from '../components/NepalcanOrderAudit';
 import NepalcanOrderDetails from '../components/NepalcanOrderDetails';
@@ -178,7 +179,7 @@ const NepalcanSalesPage = () => {
       deliveredOrders: delivered.length,
       uniqueCustomers: [...new Set(orders.filter(o => ['Delivered', 'Pending'].includes(o.orderStatus)).map(o => o.customer).filter(Boolean))].length,
       topCustomers: Object.entries(customerOrders).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, count]) => ({ name, count })),
-      salesPerWeek: Object.entries(weeklySales).sort((a, b) => a[0].localeCompare(b[0])).map(([week, revenue]) => ({ week, revenue })),
+      salesPerWeek: Object.entries(weeklySales).sort((a, b) => a[0].localeCompare(b[0])).map(([week, revenue]) => ({ week, weekBs: formatNepaliDateShort(`${week}T00:00:00+05:45`), revenue })),
       statusData: Object.entries(ordersByStatus).map(([name, value]) => ({ name, value })),
     };
   }, [orders]);
@@ -287,7 +288,7 @@ const NepalcanSalesPage = () => {
         <div className={`p-4 rounded-xl text-sm font-bold border flex items-center justify-between ${syncLog.success ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-red-50 text-red-700 border-red-100'}`}>
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${syncLog.success ? 'bg-blue-500' : 'bg-red-500'}`} />
-            Last Sync: {new Date(syncLog.createdAt || syncLog.timestamp).toLocaleString()}
+            Last Sync: {syncLog && (syncLog.createdAt || syncLog.timestamp) ? formatNepaliDateTime(syncLog.createdAt || syncLog.timestamp) : '—'}
           </div>
           <span className="text-xs">{syncLog.success ? 'Success' : 'Failed'} - {syncLog.ordersSynced} orders</span>
         </div>
@@ -391,7 +392,7 @@ const NepalcanSalesPage = () => {
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis dataKey="week" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
+                  <XAxis dataKey="weekBs" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
                   <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
                   <Area type="monotone" dataKey="revenue" stroke="#dc2626" fill="url(#redGrad)" strokeWidth={2.5} dot={{ fill: '#dc2626', r: 3 }} />
@@ -511,7 +512,7 @@ const NepalcanSalesPage = () => {
                           {formatDuration(order.processingDurationHours)}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-sm text-slate-500">{order.createdAt ? new Date(order.createdAt).toLocaleDateString() : 'N/A'}</td>
+                      <td className="px-4 py-3 text-sm text-slate-500">{order.createdAt ? formatNepaliDate(order.createdAt) : 'N/A'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -562,7 +563,7 @@ const NepalcanSalesPage = () => {
                             <div className="flex-1">
                               <div className="flex items-center justify-between">
                                 <span className="text-xs font-bold text-slate-900 uppercase">{entry.status}</span>
-                                <span className="text-[10px] text-slate-400">{new Date(entry.timestamp).toLocaleString()}</span>
+                                <span className="text-[10px] text-slate-400">{formatNepaliDateTime(entry.timestamp)}</span>
                               </div>
                             </div>
                           </div>
@@ -599,7 +600,7 @@ const NepalcanSalesPage = () => {
                 <div key={i} className={`p-4 rounded-xl border ${log.success ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100'}`}>
                   <div className="flex items-center justify-between mb-1">
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${log.success ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{log.success ? 'Success' : 'Failed'}</span>
-                    <span className="text-xs text-slate-400">{new Date(log.createdAt).toLocaleString()}</span>
+                    <span className="text-xs text-slate-400">{formatNepaliDateTime(log.createdAt)}</span>
                   </div>
                   <p className="text-sm font-bold text-slate-900">{log.ordersSynced} orders <span className="text-[10px] font-normal text-slate-400">({log.durationMs}ms)</span></p>
                   {log.errorMessage && <p className="text-[10px] text-red-600 mt-1">{log.errorMessage}</p>}
@@ -736,7 +737,7 @@ const NepalcanSalesPage = () => {
                               {order.orderStatus || 'Unknown'}
                             </span>
                           </div>
-                          <p className="text-[10px] text-slate-400 mt-0.5">{order.vendor || 'N/A'} &middot; {order.createdAt ? new Date(order.createdAt).toLocaleDateString() : 'N/A'}</p>
+                          <p className="text-[10px] text-slate-400 mt-0.5">{order.vendor || 'N/A'} &middot; {order.createdAt ? formatNepaliDateTime(order.createdAt) : 'N/A'}</p>
                         </div>
                         <div className="text-right ml-4">
                           <p className="text-sm font-extrabold text-slate-900">Rs. {(order.totalAmount || 0).toLocaleString()}</p>

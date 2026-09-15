@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '../components/ui/dialog';
 import PptxPreview from '../components/PptxPreview';
+import { bsLabelForInput } from '../utils/nepaliDate';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
@@ -479,12 +480,14 @@ export default function ReportFormPage() {
             <input type="date" value={form.weekStart}
               onChange={e => setForm(prev => ({ ...prev, weekStart: e.target.value }))}
               className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-200" />
+            {form.weekStart && <span className="text-[10px] font-bold text-slate-400 mt-0.5 block">{bsLabelForInput(form.weekStart)}</span>}
           </div>
           <div>
             <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Week End (Fri)</label>
             <input type="date" value={form.weekEnd}
               onChange={e => setForm(prev => ({ ...prev, weekEnd: e.target.value }))}
               className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-200" />
+            {form.weekEnd && <span className="text-[10px] font-bold text-slate-400 mt-0.5 block">{bsLabelForInput(form.weekEnd)}</span>}
           </div>
           <div>
             <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Title</label>

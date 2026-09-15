@@ -320,9 +320,7 @@ export default function VendorSnapshotsPage({ embedded }) {
               </div>
               <p className="text-lg font-extrabold text-slate-900">{latest ? formatNepaliDate(latest.snapshotDate) : '-'}</p>
               {latest && (
-                <p className="text-[10px] text-slate-400 mt-1">
-                  {new Date(latest.snapshotDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
-                </p>
+                <p className="text-[10px] text-slate-400 mt-1">                </p>
               )}
               {latest && latest.createdAt && (
                 <p className="text-[10px] text-slate-400 mt-0.5">
@@ -522,11 +520,9 @@ export default function VendorSnapshotsPage({ embedded }) {
                   <tr key={snap._id} className={i === 0 ? 'bg-red-50/30' : 'hover:bg-slate-50/50'}>
                     <td className="px-5 py-3.5">
                       <div className="flex flex-col">
-                        <span className="text-sm font-bold text-slate-900">{snap.nepaliDate}</span>
-                        <span className="text-[10px] text-slate-400">{new Date(snap.snapshotDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</span>
-                        {snap.createdAt && <span className="text-[9px] text-slate-400">{formatTime(snap.createdAt)}</span>}
+                        <span className="text-sm font-bold text-slate-900">{snap.nepaliDate}</span>                        {snap.createdAt && <span className="text-[9px] text-slate-400">{formatTime(snap.createdAt)}</span>}
                         {snap.prevNepaliDate && (
-                          <span className="text-[10px] text-slate-400 mt-1">vs {snap.prevNepaliDate} ({new Date(snap.prevSnapshotDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})</span>
+                          <span className="text-[10px] text-slate-400 mt-1">vs {snap.prevNepaliDate}</span>
                         )}
                       </div>
                     </td>
@@ -616,9 +612,7 @@ export default function VendorSnapshotsPage({ embedded }) {
               <div key={snap._id} className="p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <span className="text-sm font-bold text-slate-900">{snap.nepaliDate}</span>
-                    <span className="text-[10px] text-slate-400 ml-2">{new Date(snap.snapshotDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
-                    {snap.createdAt && <span className="text-[9px] text-slate-400 ml-2">{formatTime(snap.createdAt)}</span>}
+                    <span className="text-sm font-bold text-slate-900">{snap.nepaliDate}</span>                    {snap.createdAt && <span className="text-[9px] text-slate-400 ml-2">{formatTime(snap.createdAt)}</span>}
                   </div>
                   {snap.prevNepaliDate && (
                     <span className="text-[10px] text-slate-400">vs {snap.prevNepaliDate}</span>

@@ -39,6 +39,7 @@ import {
   Area
 } from 'recharts';
 import { API_URL } from '../config/api';
+import { formatNepaliDate, formatNepaliDateTime, formatTime, NEPALI_WEEKDAYS } from '../utils/nepaliDate';
 
 const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
@@ -266,7 +267,7 @@ const DashboardPage = () => {
             <h1 className="text-2xl lg:text-4xl font-black text-white tracking-tight">Executive Dashboard</h1>
             <p className="text-sm text-white/60 mt-1 font-medium">
               <Calendar size={14} className="inline mr-1" />
-              {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+              {NEPALI_WEEKDAYS[new Date().getDay()]}, {formatNepaliDate(new Date())}
             </p>
           </div>
 
@@ -366,7 +367,7 @@ const DashboardPage = () => {
                   <div className="h-full bg-emerald-400 transition-all" style={{ width: `${Math.min(100, Math.max(0, syncJob.progress ?? 0))}%` }} />
                 </div>
                 <p className="text-[10px] text-white/50">
-                  Heartbeat: {syncJob.lastHeartbeat ? new Date(syncJob.lastHeartbeat).toLocaleTimeString() : '—'}
+                  Heartbeat: {syncJob.lastHeartbeat ? formatTime(syncJob.lastHeartbeat) : '—'}
                   {syncJob.estimatedRemaining && syncJob.estimatedRemaining !== 'calculating' ? ` · ETA ${syncJob.estimatedRemaining}` : ''}
                 </p>
               </div>
@@ -396,7 +397,7 @@ const DashboardPage = () => {
                       </span>
                     </div>
                     <span className="text-[10px] text-white/50">
-                      {new Date(log.createdAt).toLocaleString()} · {(log.durationMs / 1000).toFixed(1)}s
+                      {formatNepaliDateTime(log.createdAt)} · {(log.durationMs / 1000).toFixed(1)}s
                     </span>
                   </div>
                   {log.tasks && (log.tasks.nepalcanOrders?.ran || log.tasks.vendorSync?.ran) && (

@@ -7,6 +7,7 @@ import LeadActionModal from '../components/LeadActionModal';
 import { cn } from '../utils/cn';
 import { PieChart, Pie, Cell as PieCell, Tooltip as ReTooltip } from 'recharts';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { formatNepaliDate } from '../utils/nepaliDate';
 
 const StatusBadge = ({ status }) => {
   const getColors = (s) => {
@@ -393,7 +394,7 @@ const ActiveSellersPage = () => {
                 </div>
                 <div className="flex items-center justify-between py-2 border-b border-slate-100">
                   <span className="text-xs font-bold text-slate-400">Last Order</span>
-                  <span className="text-xs font-bold text-slate-700">{chartDrillDown.last_order_date ? new Date(chartDrillDown.last_order_date).toLocaleDateString() : 'N/A'}</span>
+                  <span className="text-xs font-bold text-slate-700">{chartDrillDown.last_order_date ? formatNepaliDate(chartDrillDown.last_order_date) : 'N/A'}</span>
                 </div>
                 <div className="flex items-center justify-between py-2">
                   <span className="text-xs font-bold text-slate-400">Manager</span>

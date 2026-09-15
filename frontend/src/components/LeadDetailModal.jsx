@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { API_URL } from '../config/api';
+import { formatNepaliDate, formatNepaliDateTime, bsLabelForInput } from '../utils/nepaliDate';
 
 const LeadDetailModal = ({ isOpen, onClose, lead, token, user, onSuccess }) => {
   const [activities, setActivities] = useState([]);
@@ -290,7 +291,7 @@ const LeadDetailModal = ({ isOpen, onClose, lead, token, user, onSuccess }) => {
                 </div>
                 <div className="space-y-2">
                   {[
-                    { label: 'Created', value: new Date(lead.created_at).toLocaleDateString(), icon: Calendar },
+                    { label: 'Created', value: formatNepaliDate(lead.created_at), icon: Calendar },
                     { label: 'Source', value: lead.lead_source, icon: TrendingUp, color: 'text-red-600' },
                   ].map((item, i) => (
                     <div key={i} className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl">
@@ -363,8 +364,11 @@ const LeadDetailModal = ({ isOpen, onClose, lead, token, user, onSuccess }) => {
                     </label>
                     {newActivity.follow_up_required && (
                       <div className="flex items-center gap-2 animate-in fade-in">
-                        <input type="date" value={newActivity.follow_up_date} onChange={(e) => setNewActivity({ ...newActivity, follow_up_date: e.target.value })}
-                          className="px-3 py-2 bg-slate-50 border border-slate-100 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-red-100" />
+                        <div className="flex flex-col">
+                          <input type="date" value={newActivity.follow_up_date} onChange={(e) => setNewActivity({ ...newActivity, follow_up_date: e.target.value })}
+                            className="px-3 py-2 bg-slate-50 border border-slate-100 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-red-100" />
+                          {newActivity.follow_up_date && <span className="text-[10px] font-bold text-slate-400 mt-0.5">{bsLabelForInput(newActivity.follow_up_date)}</span>}
+                        </div>
                         <input type="time" value={newActivity.follow_up_time} onChange={(e) => setNewActivity({ ...newActivity, follow_up_time: e.target.value })}
                           className="px-3 py-2 bg-slate-50 border border-slate-100 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-red-100" />
                       </div>
@@ -425,14 +429,14 @@ const LeadDetailModal = ({ isOpen, onClose, lead, token, user, onSuccess }) => {
                                 <span className="text-[10px] font-bold uppercase">Follow-up Due</span>
                               </div>
                               <div className="flex items-center gap-2">
-                                <span className="text-[9px] font-bold">{new Date(activity.follow_up_date).toLocaleDateString()}</span>
+                                <span className="text-[9px] font-bold">{formatNepaliDate(activity.follow_up_date)}</span>
                                 {activity.follow_up_time && <span className="text-[9px] font-bold">{activity.follow_up_time}</span>}
                               </div>
                             </div>
                           </div>
                         )}
                         <div className="flex items-center gap-2 mb-2">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase">{new Date(activity.created_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase">{formatNepaliDateTime(activity.created_at)}</span>
                           <div className="w-1 h-1 bg-slate-200 rounded-full" />
                           <span className="text-[10px] font-bold text-red-600 uppercase">{activity.activity_type.replace('_', ' ')}</span>
                         </div>
@@ -442,7 +446,7 @@ const LeadDetailModal = ({ isOpen, onClose, lead, token, user, onSuccess }) => {
                           <div className="mb-3 p-3 bg-amber-50 border border-amber-100 rounded-xl">
                             <p className="text-[10px] font-bold text-amber-600 uppercase mb-1">Early Call Intel</p>
                             <div className="grid grid-cols-2 gap-2 text-[10px]">
-                              <div><span className="text-slate-400">Schedule:</span> <span className="font-bold text-slate-700">{activity.original_follow_up_date ? new Date(activity.original_follow_up_date).toLocaleDateString() : 'N/A'} at {activity.original_follow_up_time || 'N/A'}</span></div>
+                              <div><span className="text-slate-400">Schedule:</span> <span className="font-bold text-slate-700">{activity.original_follow_up_date ? formatNepaliDate(activity.original_follow_up_date) : 'N/A'} at {activity.original_follow_up_time || 'N/A'}</span></div>
                               <div><span className="text-slate-400">Status:</span> <span className={cn("font-bold", activity.early_call_status === 'continued' ? "text-blue-600" : "text-red-600")}>{activity.early_call_status.replace('_', ' ')}</span></div>
                             </div>
                           </div>

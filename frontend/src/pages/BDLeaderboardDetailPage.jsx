@@ -7,6 +7,7 @@ import {
   Trophy, DollarSign, TrendingUp, Flame, Calendar, Clock, Shield
 } from 'lucide-react';
 import { API_URL } from '../config/api';
+import { formatNepaliDate } from '../utils/nepaliDate';
 
 const EmptyState = ({ icon, text }) => (
   <div className="text-center py-12 text-slate-400">
@@ -145,7 +146,7 @@ const BDLeaderboardDetailPage = () => {
                   <div key={o._id} className="flex items-center gap-3 p-3 bg-red-50/50 rounded-xl hover:bg-red-50 transition-colors">
                     <div className="w-9 h-9 rounded-xl bg-red-100 flex items-center justify-center"><ShoppingCart size={14} className="text-red-600" /></div>
                     <div className="flex-1 min-w-0"><p className="font-semibold text-sm text-slate-900">{o.orderId}</p><p className="text-[10px] text-slate-400">{o.vendor || 'N/A'}</p></div>
-                    <div className="text-right"><p className="font-bold text-sm text-red-700">Rs. {(o.totalAmount || 0).toLocaleString()}</p><p className="text-[10px] text-slate-400">{new Date(o.createdAt).toLocaleDateString()}</p></div>
+                    <div className="text-right"><p className="font-bold text-sm text-red-700">Rs. {(o.totalAmount || 0).toLocaleString()}</p><p className="text-[10px] text-slate-400">{formatNepaliDate(o.createdAt)}</p></div>
                   </div>
                 ))}
               </div>
@@ -158,7 +159,7 @@ const BDLeaderboardDetailPage = () => {
                   <div key={l._id} className="flex items-center gap-3 p-3 bg-red-50/50 rounded-xl hover:bg-red-50 transition-colors">
                     <div className="w-9 h-9 rounded-xl bg-red-600 flex items-center justify-center shadow-sm"><span className="font-bold text-sm text-white">{l.business_name?.charAt(0) || '?'}</span></div>
                     <div className="flex-1 min-w-0"><p className="font-semibold text-sm text-slate-900 truncate">{l.business_name}</p><p className="text-[10px] text-slate-400">{l.lead_status}</p></div>
-                    <div className="text-right"><p className="text-[10px] text-slate-400">{new Date(l.created_at).toLocaleDateString()}</p></div>
+                    <div className="text-right"><p className="text-[10px] text-slate-400">{formatNepaliDate(l.created_at)}</p></div>
                   </div>
                 ))}
               </div>
@@ -171,7 +172,7 @@ const BDLeaderboardDetailPage = () => {
                   <div key={a._id} className="flex items-center gap-3 p-3 bg-red-50/50 rounded-xl hover:bg-red-50 transition-colors">
                     <div className="w-9 h-9 rounded-xl bg-red-100 flex items-center justify-center"><ActivityIcon size={14} className="text-red-600" /></div>
                     <div className="flex-1 min-w-0"><p className="font-semibold text-sm text-slate-900 capitalize">{a.activity_type?.replace('_', ' ')}</p><p className="text-[10px] text-slate-400 truncate">{a.lead_id?.business_name || 'N/A'}</p></div>
-                    <div className="text-right"><p className="text-[10px] text-slate-400">{new Date(a.created_at).toLocaleDateString()}</p></div>
+                    <div className="text-right"><p className="text-[10px] text-slate-400">{formatNepaliDate(a.created_at)}</p></div>
                   </div>
                 ))}
               </div>

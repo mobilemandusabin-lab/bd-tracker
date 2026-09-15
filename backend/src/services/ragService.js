@@ -4,6 +4,7 @@ const NepalcanOrder = require('../models/NepalcanOrder');
 const Activity = require('../models/Activity');
 const Goal = require('../models/Goal');
 const User = require('../models/User');
+const { toNepaliDateObject } = require('../utils/nepaliDate');
 
 let groq = null;
 function getGroq() {
@@ -208,7 +209,7 @@ async function searchGoals() {
 
 function formatDate(d) {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return toNepaliDateObject(new Date(d)).formatted;
 }
 
 function formatContext(leads, orders, activities, goals, fallbackStats) {

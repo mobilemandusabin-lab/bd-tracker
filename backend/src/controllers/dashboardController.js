@@ -6,6 +6,7 @@ const SystemSyncLog = require('../models/SystemSyncLog');
 const NepalcanSyncLog = require('../models/NepalcanSyncLog');
 const Goal = require('../models/Goal');
 const User = require('../models/User');
+const { toNepaliDateObject } = require('../utils/nepaliDate');
 
 exports.getStats = async (req, res) => {
   try {
@@ -753,7 +754,7 @@ exports.getFullExportReport = async (req, res) => {
       'Contact Name': activity.lead_id?.contact_person || 'N/A',
       'Officer Name': activity.user_id?.name || 'N/A',
       'Discussion Details': activity.description || 'N/A',
-      'Follow-up Date': activity.follow_up_date ? new Date(activity.follow_up_date).toLocaleDateString() : 'N/A',
+      'Follow-up Date': activity.follow_up_date ? toNepaliDateObject(new Date(activity.follow_up_date)).formatted : 'N/A',
       'Follow-up Time': activity.follow_up_time || 'N/A',
       'Activity Date': new Date(activity.created_at).toLocaleString()
     }));
@@ -1547,7 +1548,7 @@ exports.getMyAnalytics = async (req, res) => {
     const userId = (req.user.role === 'super_admin' && targetUserId) ? targetUserId : req.user._id;
 
     // Fetch the target user's info for display
-    const User = require('../models/User');
+const User = require('../models/User');
     const targetUser = await User.findById(userId).select('name email role').lean();
 
     const now = new Date();
@@ -1879,8 +1880,9 @@ exports.getWeekCompare = async (req, res) => {
 
     const pct = (a, b) => b > 0 ? parseFloat((((a - b) / b) * 100).toFixed(1)) : null;
 
-    const currentWeekLabel = `Sun ${currentSunday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
-    const prevWeekLabel = `Sun ${prevSunday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${prevEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+    const bs = (d) => toNepaliDateObject(d).formatted;
+    const currentWeekLabel = `${bs(currentSunday)} - ${bs(selectedDate)}`;
+    const prevWeekLabel = `${bs(prevSunday)} - ${bs(prevEnd)}`;
 
     res.status(200).json({
       status: 'success',

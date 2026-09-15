@@ -5,6 +5,7 @@ import { fetchTickets, fetchAdmins, createTicket, updateTicket, deleteTicket } f
 import { Plus, MessageSquare, Clock, CheckCircle, AlertCircle, Trash2, X, Send, Search } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { API_URL as BASE_URL } from '../config/api';
+import { formatNepaliDateTime } from '../utils/nepaliDate';
 
 const TicketsPage = () => {
   const dispatch = useDispatch();
@@ -48,9 +49,7 @@ const TicketsPage = () => {
   };
 
   const formatDate = (date) => {
-    return new Date(date).toLocaleDateString('en-US', {
-      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-    });
+    return formatNepaliDateTime(date);
   };
 
   const availableAdmins = admins.filter(admin => admin._id !== user?._id);

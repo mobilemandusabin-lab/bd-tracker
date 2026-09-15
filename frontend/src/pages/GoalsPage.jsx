@@ -4,6 +4,7 @@ import { fetchGoals, deleteGoal } from '../store/goalSlice';
 import { Plus, Target, Calendar, TrendingUp, Users, Clock, Edit2, Trash2, CheckCircle, Search, X, Filter } from 'lucide-react';
 import GoalModal from '../components/GoalModal';
 import { cn } from '../utils/cn';
+import { formatNepaliDate } from '../utils/nepaliDate';
 
 const GoalsPage = () => {
   const dispatch = useDispatch();
@@ -76,11 +77,7 @@ const GoalsPage = () => {
   };
 
   const formatDate = (date) => {
-    return new Date(date).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
+    return formatNepaliDate(date);
   };
 
   const roleFilteredGoals = goals.filter(goal => {

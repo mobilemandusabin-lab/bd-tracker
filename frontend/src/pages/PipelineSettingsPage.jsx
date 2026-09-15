@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Edit, Trash2, Save, X, ChevronUp, ChevronDown, ChevronRight, Cog, Layers, RefreshCw, Loader2, MapPin, Store } from 'lucide-react';
 import { cn } from '../utils/cn';
+import { formatNepaliDateTime } from '../utils/nepaliDate';
 import { API_URL } from '../config/api';
 
 const PipelineSettingsPage = () => {
@@ -293,7 +294,7 @@ const PipelineSettingsPage = () => {
                       </div>
                       {group.syncedAt && (
                         <p className="text-[10px] text-slate-400 mt-3">
-                          Last synced: {new Date(group.syncedAt).toLocaleString()}
+                          Last synced: {group.syncedAt ? formatNepaliDateTime(group.syncedAt) : '—'}
                         </p>
                       )}
                     </div>

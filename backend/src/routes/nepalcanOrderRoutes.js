@@ -10,6 +10,7 @@ const {
   getOrderTracking,
   getNepalcanAnalytics,
   getMonthlyData,
+  getDailySalesData,
   syncNepalcanOrders,
   recalculateRevenue
 } = require('../controllers/nepalcanOrderController');
@@ -39,6 +40,9 @@ router.get('/analytics', getNepalcanAnalytics);
 
 // Get monthly aggregated data
 router.get('/monthly', getMonthlyData);
+
+// Get daily sales by date (createdAt, excl Cancelled) — date-wise like vendor daily report
+router.get('/daily', getDailySalesData);
 
 // Get single order by ID with status history
 router.get('/order/:id', getNepalcanOrderById);

@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { API_URL } from '../config/api';
+import { formatNepaliDate, formatNepaliDateTime, bsLabelForInput } from '../utils/nepaliDate';
 
 const VendorDetailModal = ({ isOpen, onClose, vendor, token, user, onSuccess }) => {
   const [activities, setActivities] = useState([]);
@@ -269,8 +270,11 @@ const VendorDetailModal = ({ isOpen, onClose, vendor, token, user, onSuccess }) 
                     </label>
                     {newActivity.follow_up_required && (
                       <div className="flex items-center gap-2 animate-in fade-in">
-                        <input type="date" value={newActivity.follow_up_date} onChange={(e) => setNewActivity({ ...newActivity, follow_up_date: e.target.value })}
-                          className="px-3 py-2 bg-slate-50 border border-slate-100 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-red-100" />
+                        <div className="flex flex-col">
+                          <input type="date" value={newActivity.follow_up_date} onChange={(e) => setNewActivity({ ...newActivity, follow_up_date: e.target.value })}
+                            className="px-3 py-2 bg-slate-50 border border-slate-100 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-red-100" />
+                          {newActivity.follow_up_date && <span className="text-[10px] font-bold text-slate-400 mt-0.5">{bsLabelForInput(newActivity.follow_up_date)}</span>}
+                        </div>
                         <input type="time" value={newActivity.follow_up_time} onChange={(e) => setNewActivity({ ...newActivity, follow_up_time: e.target.value })}
                           className="px-3 py-2 bg-slate-50 border border-slate-100 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-red-100" />
                       </div>
@@ -326,13 +330,13 @@ const VendorDetailModal = ({ isOpen, onClose, vendor, token, user, onSuccess }) 
                                 <AlertCircle size={10} className="animate-pulse" />
                                 <span className="text-[10px] font-bold uppercase">Follow-up Due</span>
                               </div>
-                              <span className="text-[9px] font-bold">{new Date(activity.follow_up_date).toLocaleDateString()}</span>
+                              <span className="text-[9px] font-bold">{formatNepaliDate(activity.follow_up_date)}</span>
                               {activity.follow_up_time && <span className="text-[9px] font-bold ml-2">{activity.follow_up_time}</span>}
                             </div>
                           </div>
                         )}
                         <div className="flex items-center gap-2 mb-2">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase">{new Date(activity.created_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase">{formatNepaliDateTime(activity.created_at)}</span>
                           <div className="w-1 h-1 bg-slate-200 rounded-full" />
                           <span className="text-[10px] font-bold text-red-600 uppercase">{activity.activity_type.replace('_', ' ')}</span>
                         </div>

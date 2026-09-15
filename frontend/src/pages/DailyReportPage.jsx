@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { API_URL } from '../config/api';
-import { formatNepaliDate, formatNepaliDateLong } from '../utils/nepaliDate';
+import { formatNepaliDate, formatNepaliMonthYear, formatNepaliWeekday, formatTime, bsLabelForInput } from '../utils/nepaliDate';
 
 const ACTIVITY_ICONS = {
   call: Phone,
@@ -225,7 +225,7 @@ export default function DailyReportPage({ embedded }) {
                   </button>
                   <div className="text-center">
                     <h2 className="text-white font-extrabold text-base">
-                      {currentMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                      {formatNepaliMonthYear(currentMonth.getFullYear(), currentMonth.getMonth() + 1)}
                     </h2>
                   </div>
                   <button onClick={nextMonth} className="p-1.5 hover:bg-white/15 rounded-lg transition-colors">
@@ -288,7 +288,7 @@ export default function DailyReportPage({ embedded }) {
               {selectedDate && formatNepaliDate(selectedDate)}
             </h1>
             <p className="text-sm text-slate-500 mt-1">
-              {selectedDate && new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+              {selectedDate && formatNepaliWeekday(selectedDate)}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -332,13 +332,16 @@ export default function DailyReportPage({ embedded }) {
             <div className="flex flex-col sm:flex-row items-center gap-3">
               {compareMode === 'day' ? (
                 <>
-                  <input
-                    type="date"
-                    value={compareDate}
-                    onChange={(e) => setCompareDate(e.target.value)}
-                    max={todayStr}
-                    className="px-3 py-2 border border-slate-200 rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
-                  />
+                  <div className="flex flex-col">
+                    <input
+                      type="date"
+                      value={compareDate}
+                      onChange={(e) => setCompareDate(e.target.value)}
+                      max={todayStr}
+                      className="px-3 py-2 border border-slate-200 rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                    />
+                    {compareDate && <span className="text-[10px] font-bold text-slate-400 mt-0.5">{bsLabelForInput(compareDate)}</span>}
+                  </div>
                   <button
                     onClick={handleCompare}
                     disabled={!compareDate || compareLoading}
@@ -523,7 +526,7 @@ export default function DailyReportPage({ embedded }) {
                                     <div className="flex items-center gap-2 mb-0.5">
                                       <span className="text-xs font-bold text-slate-900 capitalize">{act.activity_type?.replace('_', ' ')}</span>
                                       <span className="text-[10px] text-slate-400">
-                                        {new Date(act.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                                        {formatTime(act.created_at)}
                                       </span>
                                     </div>
                                     <p className="text-xs text-slate-600">{act.description}</p>
@@ -538,7 +541,7 @@ export default function DailyReportPage({ embedded }) {
                                     )}
                                     {act.follow_up_required && (
                                       <span className="inline-block mt-1 px-2 py-0.5 bg-amber-50 text-amber-600 text-[10px] font-bold rounded">
-                                        Follow-up: {act.follow_up_date ? new Date(act.follow_up_date).toLocaleDateString() : 'Required'}
+                                        Follow-up: {act.follow_up_date ? formatNepaliDate(act.follow_up_date) : 'Required'}
                                       </span>
                                     )}
                                   </div>
@@ -631,7 +634,7 @@ export default function DailyReportPage({ embedded }) {
                                 </span>
                               </div>
                               <span className="text-[10px] text-slate-400 font-semibold shrink-0">
-                                {new Date(act.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                {formatTime(act.created_at)}
                               </span>
                             </div>
                             <p className="text-xs text-slate-500 line-clamp-2">{act.description}</p>

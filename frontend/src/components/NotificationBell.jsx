@@ -5,6 +5,7 @@ import { Bell, Check, BellOff, Clock, AlertCircle, Calendar } from 'lucide-react
 import toast from 'react-hot-toast';
 import { cn } from '../utils/cn';
 import { API_URL } from '../config/api';
+import { formatNepaliDate, formatTime } from '../utils/nepaliDate';
 
 const NotificationBell = ({ token }) => {
   const navigate = useNavigate();
@@ -170,12 +171,12 @@ const NotificationBell = ({ token }) => {
                         <div className="flex items-center gap-2">
                           <div className="flex items-center gap-1 text-[10px] font-bold text-slate-400">
                             <Calendar size={10} />
-                            {new Date(n.scheduled_for).toLocaleDateString()}
+                            {formatNepaliDate(n.scheduled_for)}
                           </div>
                           <div className="w-0.5 h-0.5 bg-slate-200 rounded-full" />
                           <div className="flex items-center gap-1 text-[10px] font-bold text-slate-400">
                             <Clock size={10} />
-                            {new Date(n.scheduled_for).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            {formatTime(n.scheduled_for)}
                           </div>
                         </div>
                       </div>

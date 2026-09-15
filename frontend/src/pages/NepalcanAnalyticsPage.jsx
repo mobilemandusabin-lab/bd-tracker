@@ -14,18 +14,20 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
 import { API_URL } from '../config/api';
+import {
+  formatNepaliDate, formatNepaliDateShort, formatNepaliDateTime,
+  formatNepaliMonthYear, bsLabelForInput, NEPALI_WEEKDAYS
+} from '../utils/nepaliDate';
+const NEPALI_DOW = { Sun: NEPALI_WEEKDAYS[0], Mon: NEPALI_WEEKDAYS[1], Tue: NEPALI_WEEKDAYS[2], Wed: NEPALI_WEEKDAYS[3], Thu: NEPALI_WEEKDAYS[4], Fri: NEPALI_WEEKDAYS[5], Sat: NEPALI_WEEKDAYS[6] };
 
 const RED_GRADIENT = ['#DC2626', '#EF4444', '#F87171', '#FCA5A5', '#FECACA', '#FEE2E2', '#FECDD3', '#FBD38D', '#F6AD55', '#ED8936'];
 const STATUS_COLORS = { Pending: '#fbbf24', Processing: '#3b82f6', Shipped: '#f59e0b', Delivered: '#10b981', Cancelled: '#ef4444', Returned: '#8b5cf6' };
-const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-// ─── Helpers ────────────────────────────────────────────────────
+// ─── Helpers (BS dates throughout) ────────────────────────────────
 const formatRs = (amount) => `Rs. ${(amount || 0).toLocaleString()}`;
-const formatDate = (dateStr) => {
-  const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-};
-const monthLabel = (m) => `${MONTH_NAMES[m.month - 1]} ${m.year}`;
+const formatDate = (dateStr) => formatNepaliDateShort(`${dateStr}T00:00:00+05:45`);
+const formatDateLong = (dateStr) => formatNepaliDate(`${dateStr}T00:00:00+05:45`);
+const monthLabel = (m) => formatNepaliMonthYear(m.year, m.month);
 const pctChange = (current, prev) => {
   if (!prev || prev === 0) return current > 0 ? 100 : 0;
   return Math.round(((current - prev) / prev) * 100);
@@ -147,6 +149,7 @@ const DrilldownModal = ({ isOpen, onClose, title, subtitle, icon: Icon, filters,
         if (filters.vendor) filtered = filtered.filter(o => (o.vendor || '').toLowerCase() === filters.vendor.toLowerCase());
         if (filters.paymentMethod) filtered = filtered.filter(o => (o.paymentMethod || 'Unknown') === filters.paymentMethod);
         if (filters.statusIn) filtered = filtered.filter(o => filters.statusIn.includes(o.orderStatus));
+        if (filters.excludeCancelled) filtered = filtered.filter(o => o.orderStatus !== 'Cancelled');
 
         setOrders(filtered);
       } catch {
@@ -204,7 +207,7 @@ const DrilldownModal = ({ isOpen, onClose, title, subtitle, icon: Icon, filters,
                         {order.orderStatus}
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-500 truncate">{order.customer || 'Unknown'} &middot; {order.vendor || 'No vendor'} &middot; {order.createdAt ? new Date(order.createdAt).toLocaleDateString() : ''}</p>
+                    <p className="text-[11px] text-slate-500 truncate">{order.customer || 'Unknown'} &middot; {order.vendor || 'No vendor'} &middot; {order.createdAt ? formatNepaliDateTime(order.createdAt) : ''}</p>
                   </div>
                   <div className="flex items-center gap-3 shrink-0 ml-3">
                     <span className="text-sm font-extrabold text-slate-900">{formatRs(order.totalAmount)}</span>
@@ -296,7 +299,35 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
   const [compareMode, setCompareMode] = useState(false);
   const [compareWith, setCompareWith] = useState(null);
   const [drilldown, setDrilldown] = useState(null);
+  const [activeTab, setActiveTab] = useState('monthly'); // 'monthly' | 'daily'
+  const todayStr = new Date().toISOString().split('T')[0];
+  const defaultStart = new Date(Date.now() - 29 * 86400000).toISOString().split('T')[0];
+  const [dailyStart, setDailyStart] = useState(defaultStart);
+  const [dailyEnd, setDailyEnd] = useState(todayStr);
+  const [dailyVendor, setDailyVendor] = useState('');
+  const [dailyData, setDailyData] = useState({ days: [], topVendors: [], summary: null });
+  const [dailyLoading, setDailyLoading] = useState(false);
   const token = useSelector((state) => state.auth.token);
+
+  const fetchDaily = async () => {
+    setDailyLoading(true);
+    try {
+      const params = new URLSearchParams({ startDate: dailyStart, endDate: dailyEnd });
+      if (dailyVendor.trim()) params.append('vendor', dailyVendor.trim());
+      const res = await axios.get(`${API_URL}/nepalcan-orders/daily?${params}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setDailyData({ days: res.data.days || [], hourly: res.data.hourly || [],
+        topVendors: res.data.topVendors || [], summary: res.data.summary || null,
+        fallbackCount: res.data.fallbackCount || 0 });
+    } catch {
+      setDailyData({ days: [], hourly: [], topVendors: [], summary: null, fallbackCount: 0 });
+    } finally {
+      setDailyLoading(false);
+    }
+  };
+
+  useEffect(() => { if (activeTab === 'daily') fetchDaily(); }, [activeTab, token]); // eslint-disable-line
 
   const fetchData = async () => {
     setLoading(true);
@@ -329,7 +360,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
   const trendData = useMemo(() => [...monthlyData].reverse().map(m => ({
     ...m,
     label: monthLabel(m),
-    shortLabel: `${MONTH_NAMES[m.month - 1].slice(0, 3)} '${String(m.year).slice(2)}`
+    shortLabel: formatNepaliMonthYear(m.year, m.month)
   })), [monthlyData]);
 
   const handleBarClick = (data) => {
@@ -401,7 +432,15 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
       )}
 
       {/* ── Month Selector ──────────────────────────────── */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center gap-3">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center gap-3 flex-wrap">
+        <div className="flex bg-slate-100 rounded-xl p-1 shrink-0">
+          {['monthly', 'daily'].map(t => (
+            <button key={t} onClick={() => setActiveTab(t)}
+              className={`px-4 py-2 rounded-lg text-xs font-extrabold capitalize transition-all ${activeTab === t ? 'bg-white text-red-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+              {t === 'daily' ? 'Daily Sales' : 'Monthly'}
+            </button>
+          ))}
+        </div>
         <div className="flex-1">
           <MonthSelector months={monthlyData} selected={selectedMonth || {}} onChange={setSelectedMonth}
             compareMode={compareMode} compareWith={compareWith || {}} onCompareChange={(val) => {
@@ -422,8 +461,140 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
         )}
       </div>
 
+      {/* ── Daily Sales by Date (excl Cancelled) ──────────── */}
+      {activeTab === 'daily' && (
+        <SectionCard title="Daily Sales Report" icon={BarChart3} badge="NPT days · excl Cancelled">
+          <div className="flex items-center gap-2 flex-wrap mb-4">
+            <div className="flex flex-col gap-0.5">
+              <input type="date" value={dailyStart} max={dailyEnd} onChange={e => setDailyStart(e.target.value)}
+                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700" />
+              <span className="text-[10px] font-bold text-red-600 px-1">{bsLabelForInput(dailyStart)}</span>
+            </div>
+            <span className="text-xs text-slate-400 font-bold">→</span>
+            <div className="flex flex-col gap-0.5">
+              <input type="date" value={dailyEnd} min={dailyStart} max={todayStr} onChange={e => setDailyEnd(e.target.value)}
+                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700" />
+              <span className="text-[10px] font-bold text-red-600 px-1">{bsLabelForInput(dailyEnd)}</span>
+            </div>
+            <input value={dailyVendor} onChange={e => setDailyVendor(e.target.value)} placeholder="Filter vendor…"
+              className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 w-40" />
+            <button onClick={fetchDaily}
+              className="px-4 py-2 bg-red-600 text-white text-xs font-bold rounded-xl hover:bg-red-700 transition-colors">
+              {dailyLoading ? 'Loading…' : 'Apply'}
+            </button>
+          </div>
+          {dailyData.fallbackCount > 0 && (
+            <p className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mb-4">
+              {dailyData.fallbackCount} order{dailyData.fallbackCount > 1 ? 's' : ''} timed at sync, not API — createdAt missing from API response.
+            </p>
+          )}
+          {dailyData.summary && (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+              <MetricCard icon={Package} label="Orders" value={dailyData.summary.orders}
+                subValue={`${dailyData.days.length} days in range`} />
+              <MetricCard icon={DollarSign} label="Revenue" value={formatRs(dailyData.summary.revenue)}
+                subValue={`Delivered: ${formatRs(dailyData.summary.deliveredRevenue)}`} />
+              <MetricCard icon={Truck} label="Delivered" value={dailyData.summary.deliveredOrders}
+                subValue={`${dailyData.summary.orders ? Math.round((dailyData.summary.deliveredOrders / dailyData.summary.orders) * 100) : 0}% rate`} />
+              <MetricCard icon={RotateCcw} label="Returns" value={dailyData.summary.returnedOrders}
+                subValue={`${dailyData.summary.orders ? Math.round((dailyData.summary.returnedOrders / dailyData.summary.orders) * 1000) / 10 : 0}% rate`} />
+            </div>
+          )}
+          {dailyData.days.length > 0 && (
+            <div className="h-[280px] mb-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={dailyData.days.map(d => ({ ...d, label: formatDate(d.date) }))}>
+                  <defs>
+                    <linearGradient id="dailyRevGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#DC2626" stopOpacity={0.15} />
+                      <stop offset="95%" stopColor="#DC2626" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="label" tick={{ fontSize: 9, fontWeight: 600 }} axisLine={false} tickLine={false} minTickGap={24} />
+                  <YAxis yAxisId="revenue" orientation="left" tickFormatter={(v) => v.toLocaleString()} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={80} />
+                  <YAxis yAxisId="orders" orientation="right" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={40} />
+                  <Tooltip content={<RichTooltip />} />
+                  <Legend verticalAlign="top" height={36} formatter={(v) => <span className="text-xs font-bold text-slate-600">{v}</span>} />
+                  <Area yAxisId="revenue" type="monotone" dataKey="revenue" name="Revenue" stroke="#DC2626" strokeWidth={2.5} fill="url(#dailyRevGrad)" />
+                  <Area yAxisId="orders" type="monotone" dataKey="orders" name="Orders" stroke="#F59E0B" strokeWidth={2} fill="none" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          {dailyData.hourly?.some(h => h.orders > 0) && (
+            <div className="mb-4">
+              <p className="text-[11px] font-extrabold text-slate-500 uppercase tracking-widest mb-2">Orders by hour (NPT)</p>
+              <div className="h-[200px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={dailyData.hourly.map(h => ({ ...h, label: `${h.hour}:00` }))} barSize={14}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                    <XAxis dataKey="label" tick={{ fontSize: 9, fontWeight: 600 }} axisLine={false} tickLine={false} interval={2} />
+                    <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
+                    <Tooltip content={<RichTooltip />} />
+                    <Bar dataKey="orders" name="Orders" fill="#DC2626" radius={[6, 6, 0, 0]}>
+                      {dailyData.hourly.map((entry, i) => {
+                        const max = Math.max(...dailyData.hourly.map(d => d.orders));
+                        return <Cell key={i} fill={entry.orders === max && max > 0 ? '#DC2626' : '#FCA5A5'} />;
+                      })}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+          {dailyData.days.length > 0 && (
+            <div className="overflow-x-auto max-h-[320px] overflow-y-auto border border-slate-100 rounded-xl">
+              <table className="w-full">
+                <thead className="sticky top-0 bg-slate-50">
+                  <tr className="border-b border-slate-100">
+                    {['Date', 'Orders', 'Revenue', 'AOV', 'Delivered', 'Returned', 'Customers'].map(h => (
+                      <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {[...dailyData.days].reverse().map(d => (
+                    <tr key={d.date} className="hover:bg-red-50/30 transition-colors">
+                      <td className="px-4 py-2.5 text-xs font-extrabold text-slate-900 whitespace-nowrap" title={formatDateLong(d.date)}>{formatDate(d.date)}</td>
+                      <td className="px-4 py-2.5 text-xs font-bold text-slate-700">{d.orders}</td>
+                      <td className="px-4 py-2.5 text-xs font-extrabold text-slate-900 whitespace-nowrap">{formatRs(d.revenue)}</td>
+                      <td className="px-4 py-2.5 text-xs text-slate-500 whitespace-nowrap">{formatRs(d.avgOrderValue)}</td>
+                      <td className="px-4 py-2.5 text-xs font-bold text-emerald-600">{d.deliveredOrders}</td>
+                      <td className="px-4 py-2.5 text-xs font-bold text-violet-600">{d.returnedOrders}</td>
+                      <td className="px-4 py-2.5 text-xs text-slate-500">{d.uniqueCustomers}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {dailyData.topVendors?.length > 0 && (
+            <div className="mt-4">
+              <p className="text-[11px] font-extrabold text-slate-500 uppercase tracking-widest mb-2">Top vendors in range</p>
+              <div className="space-y-2">
+                {dailyData.topVendors.map((v, i) => (
+                  <button key={v.vendor + i} onClick={() => openDrilldown(v.vendor, `${v.orders} orders · ${formatRs(v.revenue)}`, Store, { vendor: v.vendor, startDate: dailyStart, endDate: dailyEnd, excludeCancelled: true })}
+                    className="w-full flex items-center justify-between p-3 bg-slate-50 rounded-xl hover:bg-red-50/40 transition-colors text-left group">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-extrabold shrink-0 ${i === 0 ? 'bg-red-600 text-white' : 'bg-white text-slate-500 border border-slate-200'}`}>{i + 1}</span>
+                      <span className="text-xs font-bold text-slate-900 group-hover:text-red-600 truncate">{v.vendor}</span>
+                    </div>
+                    <div className="flex items-center gap-4 shrink-0">
+                      <span className="text-[11px] text-slate-500 font-medium">{v.orders} orders</span>
+                      <span className="text-xs font-extrabold text-slate-900">{formatRs(v.revenue)}</span>
+                      <ChevronRight size={14} className="text-slate-200 group-hover:text-red-400" />
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </SectionCard>
+      )}
+
       {/* ── Monthly Trend Chart ─────────────────────────── */}
-      {trendData.length > 0 && (
+      {activeTab === 'monthly' && trendData.length > 0 && (
         <SectionCard title="Monthly Revenue & Orders" icon={TrendingUp} badge={`${trendData.length} months`}>
           <div className="h-[320px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -457,7 +628,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
       )}
 
       {/* ── Selected Month Summary ──────────────────────── */}
-      {current && (
+      {activeTab === 'monthly' && current && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <MetricCard icon={Package} label="Total Orders" value={current.totalOrders}
             subValue={`${current.pendingOrders} pending \u00B7 ${current.processingOrders} processing`}
@@ -487,7 +658,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
       )}
 
       {/* ── Comparison Panel (when compare mode is on) ──── */}
-      {compareMode && compare && current && (
+      {activeTab === 'monthly' && compareMode && compare && current && (
         <SectionCard title={`${monthLabel(current)} vs ${monthLabel(compare)}`} icon={GitCompareArrows} badge="Comparison">
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -544,7 +715,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
       )}
 
       {/* ── Status Breakdown for Selected Month ─────────── */}
-      {current && (
+      {activeTab === 'monthly' && current && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Status Distribution */}
           <SectionCard title={`${monthLabel(current)} - Status Breakdown`} icon={BarChart3}>
@@ -606,7 +777,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
       )}
 
       {/* ── Vendors & Customers for Selected Month ──────── */}
-      {current && (
+      {activeTab === 'monthly' && current && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <MetricCard icon={Store} label="Active Vendors" value={current.uniqueVendors}
             tooltip={`${current.uniqueVendors} unique vendors had orders in ${monthLabel(current)}`}
@@ -620,7 +791,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
       )}
 
       {/* ── Vendor Performance Table (from analytics endpoint) ── */}
-      {analyticsData?.vendorPerformance?.length > 0 && (
+      {activeTab === 'monthly' && analyticsData?.vendorPerformance?.length > 0 && (
         <SectionCard title="All-Time Vendor Performance (Top 15)" icon={Store} badge="All time">
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -658,7 +829,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
       )}
 
       {/* ── Vendor Processing Time Performance ──────────── */}
-      {analyticsData?.vendorProcessingTime && (
+      {activeTab === 'monthly' && analyticsData?.vendorProcessingTime && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Best & Worst Processing Time */}
           <SectionCard title="Processing Time (Pending → Processing)" icon={Timer} badge="Avg hours">
@@ -775,7 +946,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
       )}
 
       {/* ── Processing Time Distribution ────────────────── */}
-      {analyticsData?.processingTimeDistribution && (
+      {activeTab === 'monthly' && analyticsData?.processingTimeDistribution && (
         <SectionCard title="Processing Time Distribution" icon={BarChart3} badge="All orders">
           <div className="h-[250px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -801,7 +972,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
       )}
 
       {/* ── Hourly Order Pattern ────────────────────────── */}
-      {analyticsData?.hourlyPattern && (
+      {activeTab === 'monthly' && analyticsData?.hourlyPattern && (
         <SectionCard title="Orders by Hour of Day" icon={Clock} badge="24h pattern">
           <div className="h-[250px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -833,7 +1004,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
       )}
 
       {/* ── Return Rate vs Processing Time Scatter ──────── */}
-      {analyticsData?.returnVsProcessing?.length > 0 && (
+      {activeTab === 'monthly' && analyticsData?.returnVsProcessing?.length > 0 && (
         <SectionCard title="Return Rate vs Processing Time" icon={GitCompareArrows} badge="Correlation">
           <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -867,7 +1038,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
       )}
 
       {/* ── Vendor Growth Trend ─────────────────────────── */}
-      {analyticsData?.vendorGrowthTrend?.length > 0 && (
+      {activeTab === 'monthly' && analyticsData?.vendorGrowthTrend?.length > 0 && (
         <SectionCard title="Vendor Growth Trend" icon={TrendingUp} badge="Top 5 vendors">
           <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -899,7 +1070,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
                 }} />
                 <Legend />
                 {analyticsData.vendorGrowthTrend.map((v, i) => (
-                  <Area key={v.vendor} type="monotone" data={v.months.map(m => ({ ...m, label: `${MONTH_NAMES[m.month - 1]} ${m.year}` }))} dataKey="orders" name={v.vendor} stroke={RED_GRADIENT[i]} strokeWidth={2} fill={`url(#vendorGrad${i})`} />
+                  <Area key={v.vendor} type="monotone" data={v.months.map(m => ({ ...m, label: monthLabel(m) }))} dataKey="orders" name={v.vendor} stroke={RED_GRADIENT[i]} strokeWidth={2} fill={`url(#vendorGrad${i})`} />
                 ))}
               </AreaChart>
             </ResponsiveContainer>
@@ -909,7 +1080,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
       )}
 
       {/* ── Status Flow ─────────────────────────────────── */}
-      {analyticsData?.statusFlow?.length > 0 && (
+      {activeTab === 'monthly' && analyticsData?.statusFlow?.length > 0 && (
         <SectionCard title="Order Status Flow" icon={Truck} badge="Transitions">
           <div className="space-y-2">
             {analyticsData.statusFlow.slice(0, 12).map((flow, i) => {
@@ -935,7 +1106,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
       )}
 
       {/* ── Customer Lifetime Value ─────────────────────── */}
-      {analyticsData?.customerLTV?.length > 0 && (
+      {activeTab === 'monthly' && analyticsData?.customerLTV?.length > 0 && (
         <SectionCard title="Top Customers by Lifetime Value" icon={Users} badge="LTV">
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -969,7 +1140,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
 
       {/* ── Customer Retention & Day of Week ────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {analyticsData?.customerRetention && (
+        {activeTab === 'monthly' && analyticsData?.customerRetention && (
           <SectionCard title="Customer Retention" icon={Users}
             onClick={() => openDrilldown('All Orders', 'Complete order list', Users, {})}>
             <div className="space-y-5">
@@ -1000,11 +1171,11 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
           </SectionCard>
         )}
 
-        {analyticsData?.dayOfWeek?.length > 0 && (
+        {activeTab === 'monthly' && analyticsData?.dayOfWeek?.length > 0 && (
           <SectionCard title="Orders by Day of Week" icon={BarChart3}>
             <div className="h-[260px]">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={analyticsData.dayOfWeek} barSize={32}>
+                <BarChart data={analyticsData.dayOfWeek.map(d => ({ ...d, day: NEPALI_DOW[d.day] || d.day }))} barSize={32}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                   <XAxis dataKey="day" tick={{ fontSize: 11, fontWeight: 700 }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
@@ -1023,7 +1194,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
       </div>
 
       {/* ── Orders At Risk ──────────────────────────────── */}
-      {analyticsData?.ordersAtRisk && (
+      {activeTab === 'monthly' && analyticsData?.ordersAtRisk && (
         <SectionCard title="Orders At Risk" icon={AlertTriangle}
           className={analyticsData.ordersAtRisk.length > 0 ? 'ring-1 ring-amber-200 bg-amber-50/20' : ''}
           onClick={analyticsData.ordersAtRisk.length > 0 ? () => openDrilldown('Orders At Risk', 'Stuck in Processing or Shipped', AlertTriangle, { statusIn: ['Processing', 'Shipped'] }) : undefined}
@@ -1063,7 +1234,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
 
       {/* ── Return Analysis & Payment Methods ───────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {analyticsData?.returnAnalysis?.length > 0 && (
+        {activeTab === 'monthly' && analyticsData?.returnAnalysis?.length > 0 && (
           <SectionCard title="Return Analysis by Vendor" icon={RotateCcw} badge={`${analyticsData.returnAnalysis.length} vendors`}>
             <div className="h-[260px]">
               <ResponsiveContainer width="100%" height="100%">
@@ -1086,7 +1257,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
           </SectionCard>
         )}
 
-        {analyticsData?.paymentMethods?.length > 0 && (
+        {activeTab === 'monthly' && analyticsData?.paymentMethods?.length > 0 && (
           <SectionCard title="Payment Methods" icon={CreditCard} badge={`${analyticsData.paymentMethods.length} methods`}>
             <div className="space-y-4">
               {analyticsData.paymentMethods.length > 1 && (

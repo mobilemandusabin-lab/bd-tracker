@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { X, Loader2, RefreshCcw, CheckCircle2, Trash2 } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { API_URL } from '../config/api';
+import { bsLabelForInput } from '../utils/nepaliDate';
 
 const LeadActionModal = ({ isOpen, onClose, lead, token, onSuccess }) => {
   const [loading, setLoading] = useState(false);
@@ -147,6 +148,7 @@ const LeadActionModal = ({ isOpen, onClose, lead, token, onSuccess }) => {
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Follow-up Date</label>
               <input type="date" value={followUpDate} onChange={(e) => setFollowUpDate(e.target.value)}
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-100 focus:border-red-300 outline-none font-medium text-sm" />
+              {followUpDate && <span className="text-[10px] font-bold text-slate-400">{bsLabelForInput(followUpDate)}</span>}
             </div>
             <div className="space-y-2">
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Follow-up Time</label>

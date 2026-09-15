@@ -9,6 +9,7 @@ import VendorDetailModal from '../components/VendorDetailModal';
 import LeadActionModal from '../components/LeadActionModal';
 import { cn } from '../utils/cn';
 import { API_URL } from '../config/api';
+import { formatNepaliDate, formatNepaliDateTime, formatTime } from '../utils/nepaliDate';
 import toast from 'react-hot-toast';
 
 const StatusBadge = ({ status }) => {
@@ -456,8 +457,9 @@ const VendorManagementPage = () => {
                         </div>
                         <div className="flex flex-col">
                           <span className={cn("font-bold text-sm", followup.is_overdue ? "text-red-600" : "text-slate-900")}>
-                            {followup.display_time ? new Date(`1970-01-01T${followup.display_time}`).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : followup.display_scheduled_for ? new Date(followup.display_scheduled_for).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'No Time'}
+                            {followup.display_time ? new Date(`1970-01-01T${followup.display_time}`).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : followup.display_scheduled_for ? formatTime(followup.display_scheduled_for) : 'No Time'}
                           </span>
+                          {followup.display_scheduled_for && <span className="text-[9px] font-bold text-slate-400">{formatNepaliDate(followup.display_scheduled_for)}</span>}
                           {followup.is_overdue && <span className="text-[8px] font-black uppercase text-red-500">Overdue</span>}
                         </div>
                       </div>
@@ -581,8 +583,9 @@ const VendorManagementPage = () => {
                     </div>
                     <div className="flex flex-col">
                       <span className={cn("font-bold text-xs", followup.is_overdue ? "text-red-600" : "text-slate-900")}>
-                        {followup.display_time ? new Date(`1970-01-01T${followup.display_time}`).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : followup.display_scheduled_for ? new Date(followup.display_scheduled_for).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'No Time'}
+                        {followup.display_time ? new Date(`1970-01-01T${followup.display_time}`).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : followup.display_scheduled_for ? formatTime(followup.display_scheduled_for) : 'No Time'}
                       </span>
+                      {followup.display_scheduled_for && <span className="text-[9px] font-bold text-slate-400">{formatNepaliDate(followup.display_scheduled_for)}</span>}
                       {followup.is_overdue && <span className="text-[7px] font-black uppercase text-red-500">Overdue</span>}
                     </div>
                   </div>
@@ -783,7 +786,7 @@ const VendorManagementPage = () => {
                         <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider", log.success ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700')}>
                           {log.success ? 'Success' : 'Failed'}
                         </span>
-                        <span className="text-[10px] text-slate-400">{new Date(log.createdAt).toLocaleString()}</span>
+                        <span className="text-[10px] text-slate-400">{formatNepaliDateTime(log.createdAt)}</span>
                       </div>
                       <div className="text-sm font-bold text-slate-900">{log.vendorsSynced} vendors <span className="text-[10px] font-normal text-slate-400 ml-1">({log.durationMs}ms)</span></div>
                       <div className="text-[10px] text-slate-500 mt-0.5">{log.mergedRecords} updated, {log.leadsSynced} created</div>

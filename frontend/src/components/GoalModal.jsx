@@ -3,6 +3,7 @@ import axios from 'axios';
 import toast from 'react-hot-toast';
 import { X, Loader2, Save, Target } from 'lucide-react';
 import { API_URL } from '../config/api';
+import { bsLabelForInput } from '../utils/nepaliDate';
 
 const GoalModal = ({ isOpen, onClose, onSuccess, token, goal }) => {
   const [users, setUsers] = useState([]);
@@ -149,10 +150,12 @@ const GoalModal = ({ isOpen, onClose, onSuccess, token, goal }) => {
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-500">Start Date</label>
               <input type="date" name="start_date" required value={formData.start_date} onChange={handleChange} className={inputClass} />
+              {formData.start_date && <span className="text-[10px] font-bold text-slate-400">{bsLabelForInput(formData.start_date)}</span>}
             </div>
             <div className="space-y-1.5 md:col-span-2">
               <label className="text-xs font-bold text-slate-500">End Date</label>
               <input type="date" name="end_date" required value={formData.end_date} onChange={handleChange} className={inputClass} />
+              {formData.end_date && <span className="text-[10px] font-bold text-slate-400">{bsLabelForInput(formData.end_date)}</span>}
             </div>
           </div>
           <div className="mt-4 space-y-1.5">

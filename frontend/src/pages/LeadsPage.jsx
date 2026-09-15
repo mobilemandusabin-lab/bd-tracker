@@ -14,6 +14,7 @@ import { Button } from '../components/ui/button';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
 import { API_URL } from '../config/api';
+import { formatNepaliDate } from '../utils/nepaliDate';
 
 const StatusBadge = ({ status }) => {
   const getColors = (s) => {
@@ -1203,7 +1204,7 @@ const FollowupConfirmModal = ({ isOpen, onClose, onDecision, followupInfo }) => 
                     <div className="bg-slate-50 p-3 rounded-xl mb-4">
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Scheduled for:</p>
                       <p className="text-xs font-bold text-slate-900">
-                        {new Date(followupInfo.scheduled_for).toLocaleDateString()} at {followupInfo.scheduled_time || 'No Time'}
+                        {formatNepaliDate(followupInfo.scheduled_for)} at {followupInfo.scheduled_time || 'No Time'}
                       </p>
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-2 mb-1">Note:</p>
                       <p className="text-xs font-medium text-slate-900 italic">"{followupInfo.message}"</p>
