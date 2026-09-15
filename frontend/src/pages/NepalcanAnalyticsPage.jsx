@@ -16,7 +16,8 @@ import {
 import { API_URL } from '../config/api';
 import {
   formatNepaliDate, formatNepaliDateShort, formatNepaliDateTime,
-  formatNepaliMonthYear, bsLabelForInput, NEPALI_WEEKDAYS
+  formatNepaliMonthYear, bsLabelForInput, NEPALI_WEEKDAYS,
+  adInputStr, bsTodayParts, bsMonthAdRange, nptWeekAdRange
 } from '../utils/nepaliDate';
 const NEPALI_DOW = { Sun: NEPALI_WEEKDAYS[0], Mon: NEPALI_WEEKDAYS[1], Tue: NEPALI_WEEKDAYS[2], Wed: NEPALI_WEEKDAYS[3], Thu: NEPALI_WEEKDAYS[4], Fri: NEPALI_WEEKDAYS[5], Sat: NEPALI_WEEKDAYS[6] };
 
@@ -300,19 +301,24 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
   const [compareWith, setCompareWith] = useState(null);
   const [drilldown, setDrilldown] = useState(null);
   const [activeTab, setActiveTab] = useState('monthly'); // 'monthly' | 'daily'
-  const todayStr = new Date().toISOString().split('T')[0];
-  const defaultStart = new Date(Date.now() - 29 * 86400000).toISOString().split('T')[0];
-  const [dailyStart, setDailyStart] = useState(defaultStart);
+  const todayStr = adInputStr(new Date());
+  const [dailyStart, setDailyStart] = useState(() => {
+    const { y, mIdx } = bsTodayParts();
+    return bsMonthAdRange(y, mIdx).start;
+  });
   const [dailyEnd, setDailyEnd] = useState(todayStr);
   const [dailyVendor, setDailyVendor] = useState('');
   const [dailyData, setDailyData] = useState({ days: [], topVendors: [], summary: null });
   const [dailyLoading, setDailyLoading] = useState(false);
+  const [dailyPreset, setDailyPreset] = useState('month'); // 'today' | 'week' | 'month' | 'custom'
   const token = useSelector((state) => state.auth.token);
 
-  const fetchDaily = async () => {
+  const fetchDaily = async (override) => {
+    const s = override?.start || dailyStart;
+    const e = override?.end || dailyEnd;
     setDailyLoading(true);
     try {
-      const params = new URLSearchParams({ startDate: dailyStart, endDate: dailyEnd });
+      const params = new URLSearchParams({ startDate: s, endDate: e });
       if (dailyVendor.trim()) params.append('vendor', dailyVendor.trim());
       const res = await axios.get(`${API_URL}/nepalcan-orders/daily?${params}`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -328,6 +334,26 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
   };
 
   useEffect(() => { if (activeTab === 'daily') fetchDaily(); }, [activeTab, token]); // eslint-disable-line
+
+  const applyPreset = (preset) => {
+    setDailyPreset(preset);
+    let s, e;
+    if (preset === 'today') {
+      s = e = adInputStr(new Date());
+    } else if (preset === 'week') {
+      ({ start: s, end: e } = nptWeekAdRange());
+    } else if (preset === 'month') {
+      const { y, mIdx } = bsTodayParts();
+      ({ start: s, end: e } = bsMonthAdRange(y, mIdx));
+      const today = adInputStr(new Date());
+      if (e > today) e = today;
+    } else {
+      return; // custom: user drives inputs + Apply
+    }
+    setDailyStart(s);
+    setDailyEnd(e);
+    fetchDaily({ start: s, end: e });
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -464,7 +490,17 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
       {/* ── Daily Sales by Date (excl Cancelled) ──────────── */}
       {activeTab === 'daily' && (
         <SectionCard title="Daily Sales Report" icon={BarChart3} badge="NPT days · excl Cancelled">
-          <div className="flex items-center gap-2 flex-wrap mb-4">
+          <div className="flex items-center gap-1.5 flex-wrap mb-3">
+            {[['today', 'Today'], ['week', 'This Week'], ['month', 'This Month'], ['custom', 'Custom']].map(([key, label]) => (
+              <button key={key} onClick={() => applyPreset(key)}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-extrabold transition-all ${dailyPreset === key ? 'bg-red-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
+                {label}
+              </button>
+            ))}
+            <span className="text-[11px] font-bold text-red-600 ml-1">{bsLabelForInput(dailyStart)} → {bsLabelForInput(dailyEnd)}</span>
+          </div>
+          {dailyPreset === 'custom' && (
+          <div className="flex items-center gap-2 flex-wrap mb-3">
             <div className="flex flex-col gap-0.5">
               <input type="date" value={dailyStart} max={dailyEnd} onChange={e => setDailyStart(e.target.value)}
                 className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700" />
@@ -476,9 +512,12 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
                 className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700" />
               <span className="text-[10px] font-bold text-red-600 px-1">{bsLabelForInput(dailyEnd)}</span>
             </div>
+          </div>
+          )}
+          <div className="flex items-center gap-2 flex-wrap mb-4">
             <input value={dailyVendor} onChange={e => setDailyVendor(e.target.value)} placeholder="Filter vendor…"
               className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 w-40" />
-            <button onClick={fetchDaily}
+            <button onClick={() => fetchDaily()}
               className="px-4 py-2 bg-red-600 text-white text-xs font-bold rounded-xl hover:bg-red-700 transition-colors">
               {dailyLoading ? 'Loading…' : 'Apply'}
             </button>
@@ -489,11 +528,13 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
             </p>
           )}
           {dailyData.summary && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
               <MetricCard icon={Package} label="Orders" value={dailyData.summary.orders}
                 subValue={`${dailyData.days.length} days in range`} />
               <MetricCard icon={DollarSign} label="Revenue" value={formatRs(dailyData.summary.revenue)}
                 subValue={`Delivered: ${formatRs(dailyData.summary.deliveredRevenue)}`} />
+              <MetricCard icon={BarChart3} label="AOV" value={formatRs(dailyData.summary.orders ? Math.round(dailyData.summary.revenue / dailyData.summary.orders) : 0)}
+                subValue={`Delivered: ${formatRs(dailyData.summary.deliveredOrders ? Math.round(dailyData.summary.deliveredRevenue / dailyData.summary.deliveredOrders) : 0)}`} />
               <MetricCard icon={Truck} label="Delivered" value={dailyData.summary.deliveredOrders}
                 subValue={`${dailyData.summary.orders ? Math.round((dailyData.summary.deliveredOrders / dailyData.summary.orders) * 100) : 0}% rate`} />
               <MetricCard icon={RotateCcw} label="Returns" value={dailyData.summary.returnedOrders}

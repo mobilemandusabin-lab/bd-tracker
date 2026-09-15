@@ -16,6 +16,13 @@ function computeProcessingDuration(statusHistory) {
   return Math.round(diffMs / (1000 * 60 * 60));
 }
 
+// NPT day helpers — YYYY-MM-DD interpreted as NPT midnight (server tz varies: Vercel UTC vs local NPT)
+const NPT = 'Asia/Kathmandu';
+const NPT_OFFSET_MS = 5.75 * 3600000;
+const nptDayStart = (ymd) => new Date(`${ymd}T00:00:00+05:45`);
+const nptDayEnd = (ymd) => new Date(`${ymd}T23:59:59.999+05:45`);
+const toNptDateStr = (d) => new Date(d.getTime() + NPT_OFFSET_MS).toISOString().split('T')[0];
+
 // Sync Nepalcan orders — one resumable batch per call (ponytail: reuses SyncJob,
 // the old blocking syncNepalcanOrders never survives Hobby 10s). Hit repeatedly
 // via kick cron or the Refresh button until done:true.
@@ -49,9 +56,10 @@ exports.getNepalcanOrders = async (req, res) => {
     if (status) query.orderStatus = status;
     if (customer) query.customer = new RegExp(customer, 'i');
     if (startDate || endDate) {
+      // ponytail: YYYY-MM-DD = whole NPT day; bare new Date(end) would drop the end day after 05:45 NPT
       query.createdAt = {};
-      if (startDate) query.createdAt.$gte = new Date(startDate);
-      if (endDate) query.createdAt.$lte = new Date(endDate);
+      if (startDate) query.createdAt.$gte = /^\d{4}-\d{2}-\d{2}$/.test(startDate) ? nptDayStart(startDate) : new Date(startDate);
+      if (endDate) query.createdAt.$lte = /^\d{4}-\d{2}-\d{2}$/.test(endDate) ? nptDayEnd(endDate) : new Date(endDate);
     }
 
     const skip = (page - 1) * limit;
@@ -865,12 +873,6 @@ const ORDER_STATUSES = ['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancel
 
 // Daily sales by createdAt (NPT days), excluding Cancelled — date-wise like vendor daily report.
 // ponytail: single agg + zero-fill loop, per-vendor matrix only on demand via ?vendor=
-const NPT = 'Asia/Kathmandu';
-const NPT_OFFSET_MS = 5.75 * 3600000;
-// ponytail: YYYY-MM-DD interpreted as NPT midnight (server tz varies: Vercel UTC vs local NPT)
-const nptDayStart = (ymd) => new Date(`${ymd}T00:00:00+05:45`);
-const nptDayEnd = (ymd) => new Date(`${ymd}T23:59:59.999+05:45`);
-const toNptDateStr = (d) => new Date(d.getTime() + NPT_OFFSET_MS).toISOString().split('T')[0];
 exports.getDailySalesData = async (req, res) => {
   try {
     let { startDate, endDate, vendor } = req.query;

@@ -113,7 +113,9 @@ const nepalcanOrderSchema = new mongoose.Schema({
     default: 'commerce_api'
   }
 }, {
-  timestamps: true
+  // ponytail: createdAt must stay API time — auto-createdAt stomps explicit
+  // $setOnInsert values on upsert, so only updatedAt is automatic
+  timestamps: { createdAt: false, updatedAt: true }
 });
 
 // Calculate time spent in each status

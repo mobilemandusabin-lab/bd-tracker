@@ -87,4 +87,30 @@ export function bsLabelForInput(yyyyMmDd) {
   return formatNepaliDate(`${yyyyMmDd}T00:00:00+05:45`);
 }
 
+/** AD YYYY-MM-DD for any instant, NPT-wall based (viewer-tz independent) */
+export function adInputStr(date) {
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return new Date(d.getTime() + 5.75 * 3600000).toISOString().split('T')[0];
+}
+
+/** Today in BS parts: { y, mIdx (0-11), d } */
+export function bsTodayParts() {
+  const nd = new NepaliDate(toNptWall(new Date()));
+  return { y: nd.getYear(), mIdx: nd.getMonth(), d: nd.getDate() };
+}
+
+/** AD range (YYYY-MM-DD) of a BS month: { start, end } */
+export function bsMonthAdRange(y, mIdx) {
+  const start = new NepaliDate(y, mIdx, 1).toJsDate();
+  const nextM = mIdx === 11 ? new NepaliDate(y + 1, 0, 1).toJsDate() : new NepaliDate(y, mIdx + 1, 1).toJsDate();
+  return { start: adInputStr(start), end: adInputStr(new Date(nextM.getTime() - 86400000)) };
+}
+
+/** AD range of current NPT week (Sun–Sat): { start, end } */
+export function nptWeekAdRange() {
+  const now = toNptWall(new Date());
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
+  return { start: adInputStr(start), end: adInputStr(new Date(start.getTime() + 6 * 86400000)) };
+}
+
 export { NEPAL_MONTH_NAMES, NEPALI_WEEKDAYS };
