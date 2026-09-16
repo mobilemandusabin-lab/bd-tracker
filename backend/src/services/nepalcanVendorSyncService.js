@@ -56,7 +56,18 @@ const getTotalCount = (response) => {
   return 0;
 };
 
-// ponytail: exact-after-normalize match, convert all matches per user choice
+// ponytail: one vendor = one record. Rank candidates email > phone > name;
+// ties or multi-way splits are skipped + logged for human review, never auto-merged
+const rankCandidate = (c, { email, phone, name }) => {
+  const ne = normEmail(email);
+  if (ne && normEmail(c.email) === ne) return 3;
+  const np = normPhone(phone);
+  if (np && normPhone(c.phone) === np) return 2;
+  const nn = normName(name);
+  if (nn && normName(c.business_name) === nn) return 1;
+  return 0;
+};
+
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const normEmail = (email) => {
@@ -100,8 +111,9 @@ const buildMatchConditions = ({ name, email, phone }) => {
 
 const applyVendorDataToLead = async (doc, leadData, newNepalcanStatus) => {
   const previousNepalcanStatus = doc.last_nepalcan_status;
-  // ponytail: preserve Active Seller status, refresh basics only
-  if (doc.lead_status === 'Active Seller' && newNepalcanStatus === 'Activated') {
+  // ponytail: Active Seller is never demoted by sync — refresh API-truth basics only.
+  // assigned_user, assignment_status, creator_id, notes + Activity history (by _id) survive either branch
+  if (doc.lead_status === 'Active Seller' && newNepalcanStatus !== 'Active Seller') {
     doc.business_name = leadData.business_name;
     doc.contact_person = leadData.contact_person;
     doc.email = leadData.email;
@@ -113,6 +125,9 @@ const applyVendorDataToLead = async (doc, leadData, newNepalcanStatus) => {
     doc.onboarding_stage = leadData.onboarding_stage;
     doc.activation_status = leadData.activation_status;
     doc.nepalcanId = leadData.nepalcanId;
+    doc.vendorCanId = leadData.vendorCanId;
+    doc.vendorSlug = leadData.vendorSlug;
+    doc.rawData = leadData.rawData;
     doc.type = 'vendor';
     doc.last_nepalcan_status = newNepalcanStatus;
     await doc.save();
@@ -122,7 +137,7 @@ const applyVendorDataToLead = async (doc, leadData, newNepalcanStatus) => {
   // assignment_status, creator_id, notes + Activity history (by _id) survive
   Object.assign(doc, leadData);
   doc.last_nepalcan_status = newNepalcanStatus;
-  if (previousNepalcanStatus && newNepalcanStatus === 'Activated' && previousNepalcanStatus !== 'Activated') {
+  if (newNepalcanStatus === 'Activated' && previousNepalcanStatus !== 'Activated') {
     if (!doc.converted_at) doc.converted_at = new Date();
   }
   await doc.save();
@@ -299,6 +314,8 @@ const syncNepalcanVendors = async (token = null, userId = null) => {
         lead_source: 'Nepalcan',
         expected_product_count: productCountFromAPI,
         nepalcanId: _id,
+        vendorCanId: canId?.canId || null,
+        vendorSlug: slug || null,
         type: 'vendor',
         is_verified: isVerified,
         verification_status: isVerified ? 'verified' : 'pending',
@@ -389,22 +406,30 @@ const syncNepalcanVendors = async (token = null, userId = null) => {
             }
           }
           if (candidates.length > 0) {
-            for (const candidate of candidates) {
-              try {
-                const newNepalcanStatus = leadData.lead_status;
-                const { previousNepalcanStatus } = await applyVendorDataToLead(candidate, leadData, newNepalcanStatus);
-                await logStatusChange(candidate, previousNepalcanStatus, newNepalcanStatus, userId);
-                matchedConverted++;
-                updated++;
-                synced++;
-                console.log(`[Sync Vendor] Converted lead ${candidate.business_name} → vendor via match (api: ${name})`);
-              } catch (convErr) {
-                if (convErr.code === 11000) {
-                  console.warn(`[Sync Vendor] Convert skipped (duplicate nepalcanId) for ${candidate.business_name}`);
-                  continue;
-                }
-                throw convErr;
+            // ponytail: single winner only — best rank wins, ties skipped for human review
+            const ranked = candidates
+              .map((c) => ({ c, r: rankCandidate(c, { email, phone, name }) }))
+              .filter((x) => x.r > 0)
+              .sort((a, b) => b.r - a.r);
+            if (ranked.length === 0 || (ranked.length > 1 && ranked[0].r === ranked[1].r)) {
+              console.warn(`[Sync Vendor] Ambiguous match for ${name} (${candidates.length} candidates) — skipped, needs human review`);
+              continue;
+            }
+            const candidate = ranked[0].c;
+            try {
+              const newNepalcanStatus = leadData.lead_status;
+              const { previousNepalcanStatus } = await applyVendorDataToLead(candidate, leadData, newNepalcanStatus);
+              await logStatusChange(candidate, previousNepalcanStatus, newNepalcanStatus, userId);
+              matchedConverted++;
+              updated++;
+              synced++;
+              console.log(`[Sync Vendor] Converted lead ${candidate.business_name} → vendor via match (api: ${name})`);
+            } catch (convErr) {
+              if (convErr.code === 11000) {
+                console.warn(`[Sync Vendor] Convert skipped (duplicate nepalcanId) for ${candidate.business_name}`);
+                continue;
               }
+              throw convErr;
             }
             continue;
           }
@@ -561,5 +586,7 @@ module.exports = {
   normEmail,
   normPhone,
   normName,
+  rankCandidate,
+  applyVendorDataToLead,
   buildMatchConditions
 };

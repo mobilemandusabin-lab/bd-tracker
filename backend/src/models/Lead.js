@@ -120,6 +120,19 @@ const leadSchema = new mongoose.Schema({
     unique: true,
     sparse: true
   },
+  // ponytail: own id is _id; these are the API's vendor identifiers (were fetched then dropped)
+  vendorCanId: {
+    type: String,
+    default: null
+  },
+  vendorSlug: {
+    type: String,
+    default: null
+  },
+  rawData: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
+  },
   last_nepalcan_status: {
     type: String,
     default: null

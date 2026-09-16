@@ -181,9 +181,7 @@ const buildOrderUpdate = (orderData, trackingData, existingOrder) => {
     const resolved = resolveStatus(existingOrder.orderStatus, newStatus, statusSource);
     newStatus = resolved.status;
     statusSource = resolved.source;
-  }
-
-  let timeline = [];
+  }  let timeline = [];
   if (hasTracking) {
     timeline = extractStatusTimeline(trackingData.marketplaceProcesses);
   }
@@ -199,7 +197,13 @@ const buildOrderUpdate = (orderData, trackingData, existingOrder) => {
 
   if (existingOrder) {
     const statusChanged = existingOrder.orderStatus !== newStatus;
-    const setFields = { orderStatus: newStatus, statusSource, apiUpdatedAt, lastSyncedAt: now };
+    // ponytail: API is truth for contact fields too — renames/payment changes must not freeze at insert
+    const setFields = { orderStatus: newStatus, statusSource, apiUpdatedAt, lastSyncedAt: now,
+      customer: orderData.customer || existingOrder.customer,
+      vendor: orderData.vendor ?? existingOrder.vendor,
+      paymentStatus: orderData.paymentStatus ?? existingOrder.paymentStatus,
+      paymentMethod: orderData.paymentMethod ?? existingOrder.paymentMethod,
+      source: orderData.source ?? existingOrder.source };
 
     if (statusChanged) {
       setFields.statusHistory = timeline;

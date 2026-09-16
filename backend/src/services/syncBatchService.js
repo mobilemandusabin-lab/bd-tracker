@@ -131,6 +131,9 @@ const buildLeadData = (v) => {
     onboarding_stage: v.isVerified ? 'seller_activated' : 'documents_pending',
     activation_status: v.isVerified ? 'active' : 'inactive',
     lead_status: v.isVerified ? 'Activated' : 'Document Pending',
+    vendorCanId: v.canId?.canId || v.canId || null,
+    vendorSlug: v.slug || null,
+    rawData: { canId: v.canId?.canId || v.canId || null, slug: v.slug || null, createdAt: v.createdAt || null, updatedAt: v.updatedAt || null, address: v.address || null },
     updated_at: new Date()
   };
 };
@@ -147,8 +150,33 @@ const processVendorsPage = async (job, token, userId) => {
   const existingLeads = await Lead.find({ nepalcanId: { $in: vendors.map(v => v._id) } })
     .select('_id nepalcanId lead_status last_nepalcan_status converted_at').lean();
   const exMap = new Map(existingLeads.map(e => [String(e.nepalcanId), e]));
+  // ponytail: fuzzy pool so batch path converts instead of duplicating null-nepalcanId leads
+  const { normEmail, normPhone, normName, rankCandidate } = require('./nepalcanVendorSyncService');
+  const unmatched = vendors.filter(v => !exMap.has(String(v._id)));
+  let fuzzyPool = [];
+  if (unmatched.length) {
+    const ors = [];
+    for (const v of unmatched) {
+      const nn = normName(v.name);
+      if (nn) ors.push({ business_name: { $regex: `^${nn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' } });
+      const ne = normEmail(v.email);
+      if (ne) ors.push({ email: ne });
+      const np = normPhone(v.phone);
+      if (np) ors.push({ phone: np });
+    }
+    if (ors.length) {
+      fuzzyPool = await Lead.find({
+        $and: [
+          { $or: [{ nepalcanId: { $exists: false } }, { nepalcanId: null }] },
+          { $or: [{ type: 'lead' }, { type: { $exists: false } }] },
+          { $or: ors }
+        ]
+      }).select('_id business_name email phone lead_status last_nepalcan_status converted_at').lean();
+    }
+  }
   const bulkOps = [], activities = [];
-  let successful = 0, failed = 0;
+  let successful = 0, failed = 0, converted = 0;
+  const claimedNids = new Set();
   for (const v of vendors) {
     try {
       const leadData = buildLeadData(v);
@@ -156,14 +184,36 @@ const processVendorsPage = async (job, token, userId) => {
       if (ex) {
         const prev = ex.last_nepalcan_status;
         // ponytail: Active Seller guard replicated without .save() hooks
-        const set = (ex.lead_status === 'Active Seller' && leadData.lead_status === 'Activated')
-          ? { business_name: leadData.business_name, contact_person: leadData.contact_person, email: leadData.email, phone: leadData.phone, location: leadData.location, expected_product_count: leadData.expected_product_count, is_verified: leadData.is_verified, verification_status: leadData.verification_status, onboarding_stage: leadData.onboarding_stage, activation_status: leadData.activation_status, nepalcanId: leadData.nepalcanId, type: 'vendor', last_nepalcan_status: leadData.lead_status, updated_at: now }
+        const set = (ex.lead_status === 'Active Seller' && leadData.lead_status !== 'Active Seller')
+          ? { business_name: leadData.business_name, contact_person: leadData.contact_person, email: leadData.email, phone: leadData.phone, location: leadData.location, expected_product_count: leadData.expected_product_count, is_verified: leadData.is_verified, verification_status: leadData.verification_status, onboarding_stage: leadData.onboarding_stage, activation_status: leadData.activation_status, nepalcanId: leadData.nepalcanId, vendorCanId: leadData.vendorCanId, vendorSlug: leadData.vendorSlug, rawData: leadData.rawData, type: 'vendor', last_nepalcan_status: leadData.lead_status, updated_at: now }
           : { ...leadData, last_nepalcan_status: leadData.lead_status, updated_at: now,
-              ...(prev && leadData.lead_status === 'Activated' && prev !== 'Activated' && !ex.converted_at ? { converted_at: now } : {}) };
+              ...(leadData.lead_status === 'Activated' && prev !== 'Activated' && !ex.converted_at ? { converted_at: now } : {}) };
         bulkOps.push({ updateOne: { filter: { _id: ex._id }, update: { $set: set } } });
         if (syncUserId && prev && prev !== leadData.lead_status)
           activities.push({ lead_id: ex._id, user_id: syncUserId, activity_type: 'status_change', description: `Pipeline changed (sync): ${prev} → ${leadData.lead_status}`, status: 'completed' });
       } else {
+        // ponytail: same-_id convert before upsert-new — never a second account
+        const ranked = fuzzyPool
+          .filter(c => !claimedNids.has(String(c._id)))
+          .map(c => ({ c, r: rankCandidate(c, v) }))
+          .filter(x => x.r > 0)
+          .sort((a, b) => b.r - a.r);
+        if (ranked.length && !(ranked.length > 1 && ranked[0].r === ranked[1].r)) {
+          const c = ranked[0].c;
+          claimedNids.add(String(c._id));
+          const prev = c.last_nepalcan_status;
+          const set = (c.lead_status === 'Active Seller' && leadData.lead_status !== 'Active Seller')
+            ? { business_name: leadData.business_name, contact_person: leadData.contact_person, email: leadData.email, phone: leadData.phone, location: leadData.location, expected_product_count: leadData.expected_product_count, is_verified: leadData.is_verified, verification_status: leadData.verification_status, onboarding_stage: leadData.onboarding_stage, activation_status: leadData.activation_status, nepalcanId: leadData.nepalcanId, vendorCanId: leadData.vendorCanId, vendorSlug: leadData.vendorSlug, rawData: leadData.rawData, type: 'vendor', last_nepalcan_status: leadData.lead_status, updated_at: now }
+            : { ...leadData, last_nepalcan_status: leadData.lead_status, updated_at: now,
+                ...(leadData.lead_status === 'Activated' && prev !== 'Activated' && !c.converted_at ? { converted_at: now } : {}) };
+          bulkOps.push({ updateOne: { filter: { _id: c._id }, update: { $set: set } } });
+          if (syncUserId && prev && prev !== leadData.lead_status)
+            activities.push({ lead_id: c._id, user_id: syncUserId, activity_type: 'status_change', description: `Pipeline changed (sync): ${prev} → ${leadData.lead_status}`, status: 'completed' });
+          converted++;
+          successful++;
+          continue;
+        }
+        if (ranked.length > 1) console.warn(`[Vendor Batch] Ambiguous match for ${v.name} — skipped, needs human review`);
         bulkOps.push({ updateOne: { filter: { nepalcanId: v._id }, update: { $set: { ...leadData, last_nepalcan_status: leadData.lead_status, updated_at: now, ...(leadData.lead_status === 'Activated' ? { converted_at: now } : {}) } }, upsert: true } });
       }
       successful++;
