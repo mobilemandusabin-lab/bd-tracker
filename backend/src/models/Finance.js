@@ -64,6 +64,11 @@ const financeSchema = new mongoose.Schema({
   delivery_cost_recognized: { type: Number, default: 0 },
   profit: { type: Number, default: 0 },
 
+  // ── Return flag (order returned after finance sync — keep row, exclude from totals) ──
+  // ponytail: flag not delete, audit trail stays
+  is_returned: { type: Boolean, default: false },
+  returned_at: { type: Date, default: null },
+  return_note: { type: String, default: null },
   // ── Metadata ──────────────────────────────────────────────────
   payment_status: {
     type: String,
@@ -80,6 +85,7 @@ const financeSchema = new mongoose.Schema({
 financeSchema.index({ delivery_date: -1 });
 financeSchema.index({ vendor_name: 1 });
 financeSchema.index({ payment_status: 1 });
+financeSchema.index({ is_returned: 1 });
 
 // Calculate all computed fields
 financeSchema.methods.calculateFinancials = function() {

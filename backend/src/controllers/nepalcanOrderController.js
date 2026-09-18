@@ -388,16 +388,20 @@ exports.getNepalcanAnalytics = async (req, res) => {
       statusFlow,
       deliveryZones
     ] = await Promise.all([
-      // 1. Revenue Trend (daily, last 30 days)
+      // 1. Revenue Trend (daily, last 30 days) — revenue=gross, netRevenue=Delivered only
       NepalcanOrder.aggregate([
         { $match: { createdAt: { $gte: thirtyDaysAgo } } },
         { $group: {
           _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
           revenue: { $sum: '$totalAmount' },
-          orders: { $sum: 1 }
+          netRevenue: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, '$totalAmount', 0] } },
+          returnedRevenue: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Returned'] }, '$totalAmount', 0] } },
+          orders: { $sum: 1 },
+          deliveredOrders: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, 1, 0] } },
+          returnedOrders: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Returned'] }, 1, 0] } }
         }},
         { $sort: { _id: 1 } },
-        { $project: { date: '$_id', revenue: 1, orders: 1, _id: 0 } }
+        { $project: { date: '$_id', revenue: 1, netRevenue: 1, returnedRevenue: 1, orders: 1, deliveredOrders: 1, returnedOrders: 1, _id: 0 } }
       ]),
 
       // 2. Vendor Performance (top 15 by revenue)
@@ -406,6 +410,7 @@ exports.getNepalcanAnalytics = async (req, res) => {
           _id: '$vendor',
           totalOrders: { $sum: 1 },
           totalRevenue: { $sum: '$totalAmount' },
+          deliveredRevenue: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, '$totalAmount', 0] } },
           deliveredCount: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, 1, 0] } },
           returnedCount: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Returned'] }, 1, 0] } },
           avgAmount: { $avg: '$totalAmount' }
@@ -414,7 +419,7 @@ exports.getNepalcanAnalytics = async (req, res) => {
         { $limit: 15 },
         { $project: {
           vendor: { $ifNull: ['$_id', 'Unknown'] },
-          totalOrders: 1, totalRevenue: 1, deliveredCount: 1, returnedCount: 1,
+          totalOrders: 1, totalRevenue: 1, deliveredRevenue: 1, deliveredCount: 1, returnedCount: 1,
           avgAmount: { $round: ['$avgAmount', 0] },
           returnRate: {
             $cond: [
@@ -452,18 +457,20 @@ exports.getNepalcanAnalytics = async (req, res) => {
         { $project: { vendor: { $ifNull: ['$_id', 'Unknown'] }, returnCount: 1, totalReturnedAmount: 1, _id: 0 } }
       ]),
 
-      // 6. Current month stats
+      // 6. Current month stats — revenue=gross, netRevenue=Delivered only
       NepalcanOrder.aggregate([
         { $match: { createdAt: { $gte: startOfMonth } } },
         { $group: {
           _id: null,
           orderCount: { $sum: 1 },
           revenue: { $sum: '$totalAmount' },
+          netRevenue: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, '$totalAmount', 0] } },
+          returnedRevenue: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Returned'] }, '$totalAmount', 0] } },
           deliveredCount: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, 1, 0] } },
           returnedCount: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Returned'] }, 1, 0] } },
           customers: { $addToSet: '$customer' }
         }},
-        { $project: { orderCount: 1, revenue: 1, deliveredCount: 1, returnedCount: 1, uniqueCustomers: { $size: '$customers' }, _id: 0 } }
+        { $project: { orderCount: 1, revenue: 1, netRevenue: 1, returnedRevenue: 1, deliveredCount: 1, returnedCount: 1, uniqueCustomers: { $size: '$customers' }, _id: 0 } }
       ]),
 
       // 7. Last month stats
@@ -473,11 +480,13 @@ exports.getNepalcanAnalytics = async (req, res) => {
           _id: null,
           orderCount: { $sum: 1 },
           revenue: { $sum: '$totalAmount' },
+          netRevenue: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, '$totalAmount', 0] } },
+          returnedRevenue: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Returned'] }, '$totalAmount', 0] } },
           deliveredCount: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, 1, 0] } },
           returnedCount: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Returned'] }, 1, 0] } },
           customers: { $addToSet: '$customer' }
         }},
-        { $project: { orderCount: 1, revenue: 1, deliveredCount: 1, returnedCount: 1, uniqueCustomers: { $size: '$customers' }, _id: 0 } }
+        { $project: { orderCount: 1, revenue: 1, netRevenue: 1, returnedRevenue: 1, deliveredCount: 1, returnedCount: 1, uniqueCustomers: { $size: '$customers' }, _id: 0 } }
       ]),
 
       // 8. Day-of-Week pattern
@@ -485,7 +494,8 @@ exports.getNepalcanAnalytics = async (req, res) => {
         { $group: {
           _id: { $dayOfWeek: '$createdAt' },
           orders: { $sum: 1 },
-          revenue: { $sum: '$totalAmount' }
+          revenue: { $sum: '$totalAmount' },
+          netRevenue: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, '$totalAmount', 0] } }
         }},
         { $sort: { _id: 1 } }
       ]),
@@ -495,10 +505,11 @@ exports.getNepalcanAnalytics = async (req, res) => {
         { $group: {
           _id: { $ifNull: ['$paymentMethod', 'Unknown'] },
           count: { $sum: 1 },
-          revenue: { $sum: '$totalAmount' }
+          revenue: { $sum: '$totalAmount' },
+          netRevenue: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, '$totalAmount', 0] } }
         }},
         { $sort: { count: -1 } },
-        { $project: { method: '$_id', count: 1, revenue: 1, _id: 0 } }
+        { $project: { method: '$_id', count: 1, revenue: 1, netRevenue: 1, _id: 0 } }
       ]),
 
       // 10. Vendor Processing Time Performance
@@ -539,7 +550,8 @@ exports.getNepalcanAnalytics = async (req, res) => {
         { $group: {
           _id: { $hour: '$createdAt' },
           orders: { $sum: 1 },
-          revenue: { $sum: '$totalAmount' }
+          revenue: { $sum: '$totalAmount' },
+          netRevenue: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, '$totalAmount', 0] } }
         }},
         { $sort: { _id: 1 } }
       ]),
@@ -550,7 +562,8 @@ exports.getNepalcanAnalytics = async (req, res) => {
         { $group: {
           _id: { vendor: '$vendor', year: { $year: '$createdAt' }, month: { $month: '$createdAt' } },
           orders: { $sum: 1 },
-          revenue: { $sum: '$totalAmount' }
+          revenue: { $sum: '$totalAmount' },
+          netRevenue: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, '$totalAmount', 0] } }
         }},
         { $sort: { '_id.year': 1, '_id.month': 1 } },
         { $project: {
@@ -559,6 +572,7 @@ exports.getNepalcanAnalytics = async (req, res) => {
           month: '$_id.month',
           orders: 1,
           revenue: 1,
+          netRevenue: 1,
           _id: 0
         }}
       ]),
@@ -598,11 +612,12 @@ exports.getNepalcanAnalytics = async (req, res) => {
         { $group: {
           _id: { $ifNull: ['$rawData.shippingAddress.city', '$rawData.shippingAddress.district', 'Unknown'] },
           orders: { $sum: 1 },
-          revenue: { $sum: '$totalAmount' }
+          revenue: { $sum: '$totalAmount' },
+          netRevenue: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, '$totalAmount', 0] } }
         }},
         { $sort: { orders: -1 } },
         { $limit: 15 },
-        { $project: { zone: '$_id', orders: 1, revenue: 1, _id: 0 } }
+        { $project: { zone: '$_id', orders: 1, revenue: 1, netRevenue: 1, _id: 0 } }
       ])
     ]);
 
@@ -617,7 +632,7 @@ exports.getNepalcanAnalytics = async (req, res) => {
     const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const dayOfWeekData = dayLabels.map((label, i) => {
       const entry = dayOfWeek.find(d => d._id === i + 1);
-      return { day: label, orders: entry?.orders || 0, revenue: entry?.revenue || 0 };
+      return { day: label, orders: entry?.orders || 0, revenue: entry?.revenue || 0, netRevenue: entry?.netRevenue || 0 };
     });
 
     // Process vendor processing time data
@@ -707,14 +722,14 @@ exports.getNepalcanAnalytics = async (req, res) => {
     // Format hourly pattern
     const hourlyData = Array.from({ length: 24 }, (_, i) => {
       const entry = hourlyPattern.find(h => h._id === i);
-      return { hour: i, label: `${String(i).padStart(2, '0')}:00`, orders: entry?.orders || 0, revenue: entry?.revenue || 0 };
+      return { hour: i, label: `${String(i).padStart(2, '0')}:00`, orders: entry?.orders || 0, revenue: entry?.revenue || 0, netRevenue: entry?.netRevenue || 0 };
     });
 
     // Format vendor growth trend
     const vendorGrowth = {};
     vendorGrowthTrend.forEach(entry => {
       if (!vendorGrowth[entry.vendor]) vendorGrowth[entry.vendor] = [];
-      vendorGrowth[entry.vendor].push({ year: entry.year, month: entry.month, orders: entry.orders, revenue: entry.revenue });
+      vendorGrowth[entry.vendor].push({ year: entry.year, month: entry.month, orders: entry.orders, revenue: entry.revenue, netRevenue: entry.netRevenue || 0 });
     });
     // Get top 5 vendors by total orders in the period
     const topVendorNames = Object.entries(vendorGrowth)
@@ -741,7 +756,8 @@ exports.getNepalcanAnalytics = async (req, res) => {
         returnRate: v.returnRate,
         avgProcessingHours: pt?.avgProcessingHours || null,
         totalOrders: v.totalOrders,
-        totalRevenue: v.totalRevenue
+        totalRevenue: v.totalRevenue,
+        deliveredRevenue: v.deliveredRevenue || 0
       };
     }).filter(d => d.avgProcessingHours !== null);
 
@@ -1053,6 +1069,26 @@ exports.updateNepalcanOrder = async (req, res) => {
       } catch (err) {
         console.error('[Order Update] Revenue recalc failed:', err.message);
       }
+    }
+
+    // ponytail: normalize return variants — 5 true returns flag finance, initiated/declined heal to Delivered
+    try {
+      const { normalizeReturnStatus } = require('../services/nepalcanOrderSyncService');
+      const Finance = require('../models/Finance');
+      const normNew = body.orderStatus ? normalizeReturnStatus(body.orderStatus, body.orderStatus) : null;
+      if (normNew === 'Returned' && order.orderStatus !== 'Returned') {
+        await Finance.updateOne(
+          { order_id: updated.orderId },
+          { $set: { is_returned: true, returned_at: new Date(), return_note: 'Order marked Returned (manual update)' } }
+        );
+      } else if (normNew && normNew !== 'Returned' && order.orderStatus === 'Returned') {
+        await Finance.updateOne(
+          { order_id: updated.orderId },
+          { $set: { is_returned: false }, $unset: { returned_at: '', return_note: '' } }
+        );
+      }
+    } catch (flagErr) {
+      console.error('[Order Update] Finance return flag failed:', flagErr.message);
     }
 
     res.json({ status: 'success', data: updated });

@@ -531,8 +531,8 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
               <MetricCard icon={Package} label="Orders" value={dailyData.summary.orders}
                 subValue={`${dailyData.days.length} days in range`} />
-              <MetricCard icon={DollarSign} label="Revenue" value={formatRs(dailyData.summary.revenue)}
-                subValue={`Delivered: ${formatRs(dailyData.summary.deliveredRevenue)}`} />
+              <MetricCard icon={DollarSign} label="Gross Revenue" value={formatRs(dailyData.summary.revenue)}
+                subValue={`Net: ${formatRs(dailyData.summary.deliveredRevenue)}`} />
               <MetricCard icon={BarChart3} label="AOV" value={formatRs(dailyData.summary.orders ? Math.round(dailyData.summary.revenue / dailyData.summary.orders) : 0)}
                 subValue={`Delivered: ${formatRs(dailyData.summary.deliveredOrders ? Math.round(dailyData.summary.deliveredRevenue / dailyData.summary.deliveredOrders) : 0)}`} />
               <MetricCard icon={Truck} label="Delivered" value={dailyData.summary.deliveredOrders}
@@ -557,7 +557,8 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
                   <YAxis yAxisId="orders" orientation="right" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={40} />
                   <Tooltip content={<RichTooltip />} />
                   <Legend verticalAlign="top" height={36} formatter={(v) => <span className="text-xs font-bold text-slate-600">{v}</span>} />
-                  <Area yAxisId="revenue" type="monotone" dataKey="revenue" name="Revenue" stroke="#DC2626" strokeWidth={2.5} fill="url(#dailyRevGrad)" />
+                  <Area yAxisId="revenue" type="monotone" dataKey="revenue" name="Gross Revenue" stroke="#FCA5A5" strokeWidth={2} strokeDasharray="5 4" fill="none" />
+                  <Area yAxisId="revenue" type="monotone" dataKey="deliveredRevenue" name="Net Revenue" stroke="#059669" strokeWidth={2.5} fill="url(#dailyRevGrad)" />
                   <Area yAxisId="orders" type="monotone" dataKey="orders" name="Orders" stroke="#F59E0B" strokeWidth={2} fill="none" />
                 </AreaChart>
               </ResponsiveContainer>
@@ -657,7 +658,9 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
                 <Tooltip content={<RichTooltip />} />
                 <Legend verticalAlign="top" height={36}
                   formatter={(value) => <span className="text-xs font-bold text-slate-600">{value}</span>} />
-                <Bar yAxisId="revenue" dataKey="deliveredRevenue" name="Revenue" fill="url(#revenueBarGrad)" radius={[6, 6, 0, 0]} barSize={24}
+                <Bar yAxisId="revenue" dataKey="totalRevenue" name="Gross Revenue" fill="#FCA5A5" radius={[6, 6, 0, 0]} barSize={24}
+                  cursor="pointer" onClick={(d) => handleBarClick(d)} />
+                <Bar yAxisId="revenue" dataKey="deliveredRevenue" name="Net Revenue" fill="url(#revenueBarGrad)" radius={[6, 6, 0, 0]} barSize={24}
                   cursor="pointer" onClick={(d) => handleBarClick(d)} />
                 <Bar yAxisId="orders" dataKey="totalOrders" name="Orders" fill="url(#ordersBarGrad)" radius={[6, 6, 0, 0]} barSize={24}
                   cursor="pointer" onClick={(d) => handleBarClick(d)} />
@@ -677,9 +680,9 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
             trend={compare ? pctChange(current.totalOrders, compare.totalOrders) : null}
             trendLabel={compare ? `vs ${monthLabel(compare)}` : null}
             onClick={() => openDrilldown(`${monthLabel(current)} - All Orders`, 'Every order placed this month', Package, getMonthRange(current))} />
-          <MetricCard icon={DollarSign} label="Revenue" value={formatRs(current.deliveredRevenue)}
-            subValue={`AOV: ${formatRs(current.avgOrderValue)}`}
-            tooltip={`Delivered revenue in ${monthLabel(current)}`}
+          <MetricCard icon={DollarSign} label="Net Revenue" value={formatRs(current.deliveredRevenue)}
+            subValue={`Gross: ${formatRs(current.totalRevenue)} · AOV: ${formatRs(current.avgOrderValue)}`}
+            tooltip={`Net (delivered) revenue in ${monthLabel(current)}; gross ${formatRs(current.totalRevenue)}`}
             trend={compare ? pctChange(current.deliveredRevenue, compare.deliveredRevenue) : null}
             trendLabel={compare ? `vs ${formatRs(compare.deliveredRevenue)}` : null}
             onClick={() => openDrilldown(`${monthLabel(current)} - Delivered Revenue`, 'Delivered orders this month', DollarSign, { ...getMonthRange(current), status: 'Delivered' })} />
@@ -714,7 +717,8 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
               <tbody className="divide-y divide-slate-50">
                 {[
                   { label: 'Total Orders', key: 'totalOrders', icon: Package },
-                  { label: 'Revenue', key: 'deliveredRevenue', icon: DollarSign, isRs: true },
+                  { label: 'Gross Revenue', key: 'totalRevenue', icon: DollarSign, isRs: true },
+                  { label: 'Net Revenue', key: 'deliveredRevenue', icon: DollarSign, isRs: true },
                   { label: 'Delivered', key: 'deliveredOrders', icon: Truck },
                   { label: 'Returns', key: 'returnedOrders', icon: RotateCcw, invert: true },
                   { label: 'Cancelled', key: 'cancelledOrders', icon: X, invert: true },
@@ -807,8 +811,10 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
                   <XAxis dataKey="shortLabel" tick={{ fontSize: 10, fontWeight: 600 }} axisLine={false} tickLine={false} />
                   <YAxis tickFormatter={(v) => v.toLocaleString()} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={80} />
                   <Tooltip content={<RichTooltip />} />
-                  <Area type="monotone" dataKey="deliveredRevenue" name="Revenue" stroke="#DC2626" strokeWidth={2.5} fill="url(#revAreaGrad)"
-                    dot={{ fill: '#DC2626', r: 3, strokeWidth: 0 }} activeDot={{ fill: '#DC2626', r: 5, strokeWidth: 2, stroke: '#fff' }}
+                  <Area type="monotone" dataKey="totalRevenue" name="Gross Revenue" stroke="#FCA5A5" strokeWidth={2} strokeDasharray="5 4" fill="none"
+                    cursor="pointer" onClick={(d) => handleBarClick(d)} />
+                  <Area type="monotone" dataKey="deliveredRevenue" name="Net Revenue" stroke="#059669" strokeWidth={2.5} fill="url(#revAreaGrad)"
+                    dot={{ fill: '#059669', r: 3, strokeWidth: 0 }} activeDot={{ fill: '#059669', r: 5, strokeWidth: 2, stroke: '#fff' }}
                     cursor="pointer" onClick={(d) => handleBarClick(d)} />
                 </AreaChart>
               </ResponsiveContainer>
@@ -855,7 +861,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
                     </td>
                     <td className="px-4 py-3"><span className="text-sm font-bold text-slate-900 group-hover:text-red-600 transition-colors truncate block max-w-[200px]" title={v.vendor}>{v.vendor}</span></td>
                     <td className="px-4 py-3 text-sm font-bold text-slate-700">{v.totalOrders}</td>
-                    <td className="px-4 py-3 text-sm font-extrabold text-slate-900">{formatRs(v.totalRevenue)}</td>
+                    <td className="px-4 py-3"><span className="text-sm font-extrabold text-slate-900 block">{formatRs(v.totalRevenue)}</span><span className="text-[10px] font-bold text-emerald-600">net {formatRs(v.deliveredRevenue || 0)}</span></td>
                     <td className="px-4 py-3 text-sm font-bold text-emerald-600">{v.deliveredCount}</td>
                     <td className="px-4 py-3"><span className={`text-sm font-bold ${v.returnedCount > 0 ? 'text-red-600' : 'text-slate-300'}`}>{v.returnedCount}</span></td>
                     <td className="px-4 py-3"><span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold ${v.returnRate > 15 ? 'text-red-700 bg-red-50 ring-1 ring-red-200' : v.returnRate > 10 ? 'text-amber-700 bg-amber-50 ring-1 ring-amber-200' : 'text-emerald-700 bg-emerald-50 ring-1 ring-emerald-200'}`}>{v.returnRate}%</span></td>

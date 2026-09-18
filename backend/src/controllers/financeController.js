@@ -15,10 +15,16 @@ exports.getAllFinance = async (req, res) => {
       date_from,
       date_to,
       sort_by = 'delivery_date',
-      sort_order = 'desc'
+      sort_order = 'desc',
+      includeReturned,
+      is_returned
     } = req.query;
 
     const query = {};
+    // ponytail: returned finance rows hidden by default, flag not delete
+    if (is_returned === 'true') query.is_returned = true;
+    else if (is_returned === 'false') query.is_returned = { $ne: true };
+    else if (includeReturned !== 'true') query.is_returned = { $ne: true };
 
     if (search) {
       query.$or = [
@@ -56,8 +62,9 @@ exports.getAllFinance = async (req, res) => {
 // GET /finance/summary — aggregate totals
 exports.getSummary = async (req, res) => {
   try {
-    const { date_from, date_to, delivery_type, vendor_name } = req.query;
+    const { date_from, date_to, delivery_type, vendor_name, includeReturned } = req.query;
     const match = {};
+    if (includeReturned !== 'true') match.is_returned = { $ne: true };
     if (delivery_type) match.delivery_type = delivery_type;
     if (vendor_name) match.vendor_name = { $regex: vendor_name, $options: 'i' };
     if (date_from || date_to) {
@@ -284,6 +291,23 @@ exports.syncFromNepalcan = async (req, res) => {
       } catch (err) {
         results.errors.push({ order_id: order.orderId, error: err.message });
       }
+    }
+
+    // ponytail: flag finance rows whose order has since returned — keep row, exclude from totals
+    try {
+      const returnedOrders = await NepalcanOrder.find({ orderStatus: 'Returned' }).select('orderId').lean();
+      const returnedIds = returnedOrders.map(o => o.orderId).filter(Boolean);
+      let flagged = 0;
+      if (returnedIds.length) {
+        const r = await Finance.updateMany(
+          { order_id: { $in: returnedIds }, is_returned: { $ne: true } },
+          { $set: { is_returned: true, returned_at: new Date(), return_note: 'Order returned after delivery' } }
+        );
+        flagged = r.modifiedCount || 0;
+      }
+      results.flaggedReturned = flagged;
+    } catch (flagErr) {
+      results.errors.push({ order_id: '*', error: `Return flag failed: ${flagErr.message}` });
     }
 
     res.status(200).json({ status: 'success', data: results });

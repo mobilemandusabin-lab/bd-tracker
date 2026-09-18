@@ -19,13 +19,14 @@ const FinancePage = () => {
   const [filters, setFilters] = useState({ delivery_type: '', payment_status: '', date_from: '', date_to: '' });
   const [showFilters, setShowFilters] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [showReturned, setShowReturned] = useState(false);
 
   const headers = { Authorization: `Bearer ${token}` };
 
   const fetchRecords = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page, limit: 50, search, ...filters });
+      const params = new URLSearchParams({ page, limit: 50, search, ...filters, ...(showReturned ? { includeReturned: 'true' } : {}) });
       for (const [k, v] of params.entries()) { if (!v) params.delete(k); }
       const res = await axios.get(`${API_URL}/finance?${params}`, { headers });
       setRecords(res.data.data.records);
@@ -33,16 +34,16 @@ const FinancePage = () => {
       setTotal(res.data.data.total);
     } catch (err) { toast.error('Failed to load finance data'); }
     finally { setLoading(false); }
-  }, [page, search, filters, token]);
+  }, [page, search, filters, showReturned, token]);
 
   const fetchSummary = useCallback(async () => {
     try {
-      const params = new URLSearchParams(filters);
+      const params = new URLSearchParams({ ...filters, ...(showReturned ? { includeReturned: 'true' } : {}) });
       for (const [k, v] of params.entries()) { if (!v) params.delete(k); }
       const res = await axios.get(`${API_URL}/finance/summary?${params}`, { headers });
       setSummary(res.data.data.summary);
     } catch (err) { console.error(err); }
-  }, [filters, token]);
+  }, [filters, showReturned, token]);
 
   useEffect(() => { fetchRecords(); fetchSummary(); }, [fetchRecords, fetchSummary]);
 
@@ -51,8 +52,8 @@ const FinancePage = () => {
     const loadingToast = toast.loading('Syncing delivered orders...');
     try {
       const res = await axios.post(`${API_URL}/finance/sync`, {}, { headers });
-      const { synced, skipped, errors } = res.data.data;
-      toast.success(`Synced ${synced} orders${skipped ? `, ${skipped} skipped` : ''}`, { id: loadingToast });
+      const { synced, skipped, errors, flaggedReturned } = res.data.data;
+      toast.success(`Synced ${synced} orders${skipped ? `, ${skipped} skipped` : ''}${flaggedReturned ? `, ${flaggedReturned} returns flagged` : ''}`, { id: loadingToast });
       if (errors.length > 0) console.warn('Sync errors:', errors);
       fetchRecords(); fetchSummary();
     } catch (err) {
@@ -96,6 +97,10 @@ const FinancePage = () => {
           </button>
           <button onClick={() => { fetchRecords(); fetchSummary(); }} className="flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 transition-all">
             <RefreshCw size={14} /> Refresh
+          </button>
+          <button onClick={() => setShowReturned(v => !v)}
+            className={cn("px-4 py-2.5 rounded-xl text-xs font-bold border transition-all", showReturned ? "bg-violet-50 border-violet-200 text-violet-700" : "bg-white border-slate-200 text-slate-500")}>
+            {showReturned ? 'Hide Returned' : 'Show Returned'}
           </button>
         </div>
       </div>
@@ -220,8 +225,8 @@ const FinancePage = () => {
               ) : records.map((r) => {
                 const totalFromCustomer = (r.product_price || 0) + (r.delivery_charge_contribution || 0);
                 return (
-                  <tr key={r._id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
-                    <td className="px-3 py-2.5 text-xs font-bold text-slate-900 whitespace-nowrap">{r.order_id}</td>
+                  <tr key={r._id} className={cn("border-b border-slate-50 hover:bg-slate-50/50 transition-colors", r.is_returned && "bg-violet-50/40")}>
+                    <td className="px-3 py-2.5 text-xs font-bold text-slate-900 whitespace-nowrap">{r.order_id}{r.is_returned && <span className="ml-1.5 px-1.5 py-0.5 bg-violet-100 text-violet-700 rounded-full text-[9px] font-extrabold uppercase">Returned</span>}</td>
                     <td className="px-3 py-2.5 text-xs text-slate-600 whitespace-nowrap">{r.delivery_date ? formatNepaliDate(r.delivery_date) : '—'}</td>
                     <td className="px-3 py-2.5 text-xs text-slate-600 max-w-[200px] truncate border-r border-slate-200">{r.product_name}</td>
                     <td className="px-3 py-2.5 text-xs text-slate-400">—</td>

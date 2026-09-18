@@ -16,16 +16,30 @@ const TRACKING_STATUS_MAP = {
   'processing': 'Processing',
 };
 
+// ponytail: explicit return set — initiated/declined are keepers (still Delivered), not returns
+const RETURNED_PROCESSES = new Set(['returned', 'return processing', 'return delivered', 'return in progress', 'return dispatched']);
+const RETURN_KEEPER_PROCESSES = new Set(['return initiated', 'return declined']);
+const normProcess = (s) => typeof s === 'string' ? s.trim().toLowerCase() : '';
+const isReturnProcess = (s) => RETURNED_PROCESSES.has(normProcess(s));
+const isReturnKeeper = (s) => RETURN_KEEPER_PROCESSES.has(normProcess(s));
+// ponytail: collapse commerce/tracking variants to enum-safe status; keepers stay Delivered
+const normalizeReturnStatus = (raw, fallback = 'Pending') => {
+  if (isReturnProcess(raw)) return 'Returned';
+  if (isReturnKeeper(raw)) return 'Delivered';
+  return fallback;
+};
+
 const deriveStatusFromTracking = (marketplaceProcesses) => {
   if (!marketplaceProcesses || !Array.isArray(marketplaceProcesses)) return null;
-  const hasReturned = marketplaceProcesses.some(p => p.process && p.process.toLowerCase() === 'returned');
+  const hasReturned = marketplaceProcesses.some(p => p.process && isReturnProcess(p.process));
   if (hasReturned) return 'Returned';
   const statuses = marketplaceProcesses.map(p => p.process?.toLowerCase()).filter(Boolean);
+  const statusOf = (s) => isReturnKeeper(s) ? 'Delivered' : (TRACKING_STATUS_MAP[s] || 'Pending');
   const highest = statuses.reduce((best, s) => {
-    const rank = STATUS_RANK.indexOf(TRACKING_STATUS_MAP[s] || 'Pending');
-    return rank > STATUS_RANK.indexOf(TRACKING_STATUS_MAP[best] || 'Pending') ? s : best;
+    const rank = STATUS_RANK.indexOf(statusOf(s));
+    return rank > STATUS_RANK.indexOf(statusOf(best)) ? s : best;
   }, 'pending');
-  return TRACKING_STATUS_MAP[highest] || null;
+  return statusOf(highest) || null;
 };
 
 const extractStatusTimeline = (marketplaceProcesses) => {
@@ -39,7 +53,16 @@ const extractStatusTimeline = (marketplaceProcesses) => {
     { process: 'returned', status: 'Returned' },
   ];
   for (const proc of marketplaceProcesses) {
-    const match = statuses.find(s => s.process === (proc.process || '').toLowerCase());
+    const raw = (proc.process || '').toLowerCase();
+    if (isReturnProcess(raw)) {
+      timeline.push({ status: 'Returned', timestamp: new Date(proc.createdAt || Date.now()) });
+      continue;
+    }
+    if (isReturnKeeper(raw)) {
+      timeline.push({ status: 'Delivered', timestamp: new Date(proc.createdAt || Date.now()) });
+      continue;
+    }
+    const match = statuses.find(s => s.process === raw);
     if (match) {
       timeline.push({ status: match.status, timestamp: new Date(proc.createdAt || Date.now()) });
     }
@@ -51,6 +74,8 @@ const resolveStatus = (dbStatus, newStatus, statusSource) => {
   if (!newStatus) return { status: dbStatus || 'Pending', source: 'commerce_api' };
   if (!dbStatus) return { status: newStatus, source: statusSource || 'commerce_api' };
   if (statusSource === 'logistics_api') return { status: newStatus, source: 'logistics_api' };
+  // ponytail: backfill heal — broad 'return' match falsely Returned initiated/declined, allow commerce demote to Delivered
+  if (dbStatus === 'Returned' && newStatus === 'Delivered') return { status: 'Delivered', source: statusSource || 'commerce_api' };
   const dbRank = STATUS_RANK.indexOf(dbStatus);
   const newRank = STATUS_RANK.indexOf(newStatus);
   if (newRank > dbRank) return { status: newStatus, source: statusSource || 'commerce_api' };
@@ -167,7 +192,9 @@ const buildOrderUpdate = (orderData, trackingData, existingOrder) => {
   const hasTracking = trackingData?.marketplaceProcesses?.length > 0;
 
   const trackingStatus = hasTracking ? deriveStatusFromTracking(trackingData.marketplaceProcesses) : null;
-  const commerceStatus = orderData.orderStatus || 'Pending';
+  // ponytail: commerce return variants collapse to enum-safe status; initiated/declined stay Delivered
+  const rawCommerce = orderData.orderStatus || 'Pending';
+  const commerceStatus = normalizeReturnStatus(rawCommerce, rawCommerce);
   let newStatus, statusSource;
   if (trackingStatus) {
     newStatus = trackingStatus;
@@ -358,6 +385,8 @@ const syncNepalcanOrders = async (token = null) => {
 
     // Build bulk operations
     const upsertOps = [];
+    const flippedToReturned = [];
+    const healedToDelivered = [];
 
     for (const orderData of newOrderData) {
       const orderId = orderData.orderId || orderData._id;
@@ -368,6 +397,7 @@ const syncNepalcanOrders = async (token = null) => {
       const update = buildOrderUpdate(orderData, trackingData, null);
       update.update.$setOnInsert.vendor_lead_id = vendorLeadId;
       upsertOps.push({ updateOne: { ...update, upsert: true } });
+      if (update.update.$setOnInsert.orderStatus === 'Returned') flippedToReturned.push(orderId);
       newCount++;
     }
 
@@ -383,12 +413,40 @@ const syncNepalcanOrders = async (token = null) => {
         update.update.$set.vendor_lead_id = vendorLeadId;
       }
       upsertOps.push({ updateOne: update });
+      if (update.update.$set?.orderStatus === 'Returned' && existing?.orderStatus !== 'Returned') flippedToReturned.push(orderId);
+      if (update.update.$set?.orderStatus === 'Delivered' && existing?.orderStatus === 'Returned') healedToDelivered.push(orderId);
       updatedCount++;
     }
 
     // Execute writes
     if (upsertOps.length > 0) {
       await NepalcanOrder.bulkWrite(upsertOps, { ordered: false });
+    }
+
+    // ponytail: flag finance rows for newly-returned orders — keep row, exclude from totals
+    if (flippedToReturned.length > 0) {
+      try {
+        const Finance = require('../models/Finance');
+        await Finance.updateMany(
+          { order_id: { $in: flippedToReturned }, is_returned: { $ne: true } },
+          { $set: { is_returned: true, returned_at: new Date(), return_note: 'Order synced as Returned' } }
+        );
+      } catch (flagErr) {
+        console.error('[Nepalcan Sync] Finance return flag failed:', flagErr.message);
+      }
+    }
+
+    // ponytail: backfill heal — clear return flag on false Returned demoted to Delivered
+    if (healedToDelivered.length > 0) {
+      try {
+        const Finance = require('../models/Finance');
+        await Finance.updateMany(
+          { order_id: { $in: healedToDelivered }, is_returned: true },
+          { $set: { is_returned: false }, $unset: { returned_at: '', return_note: '' } }
+        );
+      } catch (healErr) {
+        console.error('[Nepalcan Sync] Finance return heal failed:', healErr.message);
+      }
     }
 
     console.log(`[Nepalcan Sync] Written ${upsertOps.length} orders to DB`);
@@ -590,6 +648,33 @@ const enrichOrdersWithTracking = async () => {
     if (bulkOps.length > 0) {
       await NepalcanOrder.bulkWrite(bulkOps, { ordered: false });
     }
+    // ponytail: flag finance rows for orders that just flipped to Returned; heal falses demoted to Delivered
+    try {
+      const flipped = activeOrders.filter(o => {
+        const td = trackingMap.get(o.orderId);
+        return td?.marketplaceProcesses && deriveStatusFromTracking(td.marketplaceProcesses) === 'Returned' && o.orderStatus !== 'Returned';
+      }).map(o => o.orderId);
+      if (flipped.length) {
+        const Finance = require('../models/Finance');
+        await Finance.updateMany(
+          { order_id: { $in: flipped }, is_returned: { $ne: true } },
+          { $set: { is_returned: true, returned_at: new Date(), return_note: 'Order tracked as Returned' } }
+        );
+      }
+      const healed = activeOrders.filter(o => {
+        const td = trackingMap.get(o.orderId);
+        return td?.marketplaceProcesses && deriveStatusFromTracking(td.marketplaceProcesses) === 'Delivered' && o.orderStatus === 'Returned';
+      }).map(o => o.orderId);
+      if (healed.length) {
+        const Finance = require('../models/Finance');
+        await Finance.updateMany(
+          { order_id: { $in: healed }, is_returned: true },
+          { $set: { is_returned: false }, $unset: { returned_at: '', return_note: '' } }
+        );
+      }
+    } catch (flagErr) {
+      console.error('[Tracking Enrichment] Finance return flag failed:', flagErr.message);
+    }
     console.log(`[Tracking Enrichment] Updated ${updated} orders`);
     return updated;
   } catch (error) {
@@ -614,6 +699,9 @@ module.exports = {
   getRecentSyncLogs,
   deriveStatusFromTracking,
   extractStatusTimeline,
+  isReturnProcess,
+  isReturnKeeper,
+  normalizeReturnStatus,
   resolveStatus,
   batchFetchTracking,
   retryWithBackoff
