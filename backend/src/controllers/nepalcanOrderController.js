@@ -22,6 +22,17 @@ const NPT_OFFSET_MS = 5.75 * 3600000;
 const nptDayStart = (ymd) => new Date(`${ymd}T00:00:00+05:45`);
 const nptDayEnd = (ymd) => new Date(`${ymd}T23:59:59.999+05:45`);
 const toNptDateStr = (d) => new Date(d.getTime() + NPT_OFFSET_MS).toISOString().split('T')[0];
+// ponytail: BS buckets — NepaliDate reads server tz, shift to NPT wall first
+const NepaliDate = require('nepali-date-converter').default;
+const toNptWall = (d) => new Date(new Date(d).toLocaleString('en-US', { timeZone: NPT }));
+const bsKeyOf = (d) => { const nd = new NepaliDate(toNptWall(d)); return { y: nd.getYear(), m: nd.getMonth() + 1 }; };
+const bsMonthAdRange = (y, mIdx0) => {
+  const ai = (dt) => new Date(dt.getTime() + NPT_OFFSET_MS).toISOString().split('T')[0];
+  const s = new NepaliDate(y, mIdx0, 1).toJsDate();
+  const nm = mIdx0 === 11 ? new NepaliDate(y + 1, 0, 1).toJsDate() : new NepaliDate(y, mIdx0 + 1, 1).toJsDate();
+  return { start: ai(s), end: ai(new Date(nm.getTime() - 86400000)) };
+};
+const bsMonthBounds = (y, mIdx0) => { const { start, end } = bsMonthAdRange(y, mIdx0); return { start: nptDayStart(start), end: nptDayEnd(end) }; };
 
 // Sync Nepalcan orders — one resumable batch per call (ponytail: reuses SyncJob,
 // the old blocking syncNepalcanOrders never survives Hobby 10s). Hit repeatedly
@@ -363,8 +374,15 @@ exports.getNepalcanAnalytics = async (req, res) => {
     const thirtyDaysAgo = new Date(now);
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    // ponytail: BS months — current BS month to date vs previous full BS month
+    const bsNow = new NepaliDate(toNptWall(now));
+    const bsYear = bsNow.getYear(), bsMonthIdx = bsNow.getMonth();
+    const curBounds = bsMonthBounds(bsYear, bsMonthIdx);
+    const prevIdx = bsMonthIdx === 0 ? 11 : bsMonthIdx - 1;
+    const prevYear = bsMonthIdx === 0 ? bsYear - 1 : bsYear;
+    const prevBounds = bsMonthBounds(prevYear, prevIdx);
+    const startOfMonth = curBounds.start;
+    const startOfLastMonth = prevBounds.start;
 
     const processingThreshold = new Date(now);
     processingThreshold.setDate(processingThreshold.getDate() - 3);
@@ -388,11 +406,11 @@ exports.getNepalcanAnalytics = async (req, res) => {
       statusFlow,
       deliveryZones
     ] = await Promise.all([
-      // 1. Revenue Trend (daily, last 30 days) — revenue=gross, netRevenue=Delivered only
+      // 1. Revenue Trend (daily NPT, last 30 days) — revenue=gross, netRevenue=Delivered only
       NepalcanOrder.aggregate([
         { $match: { createdAt: { $gte: thirtyDaysAgo } } },
         { $group: {
-          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: NPT } },
           revenue: { $sum: '$totalAmount' },
           netRevenue: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, '$totalAmount', 0] } },
           returnedRevenue: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Returned'] }, '$totalAmount', 0] } },
@@ -556,26 +574,9 @@ exports.getNepalcanAnalytics = async (req, res) => {
         { $sort: { _id: 1 } }
       ]),
 
-      // 13. Vendor Growth Trend (monthly per vendor, last 6 months)
-      NepalcanOrder.aggregate([
-        { $match: { createdAt: { $gte: new Date(now.getFullYear(), now.getMonth() - 5, 1) } } },
-        { $group: {
-          _id: { vendor: '$vendor', year: { $year: '$createdAt' }, month: { $month: '$createdAt' } },
-          orders: { $sum: 1 },
-          revenue: { $sum: '$totalAmount' },
-          netRevenue: { $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, '$totalAmount', 0] } }
-        }},
-        { $sort: { '_id.year': 1, '_id.month': 1 } },
-        { $project: {
-          vendor: '$_id.vendor',
-          year: '$_id.year',
-          month: '$_id.month',
-          orders: 1,
-          revenue: 1,
-          netRevenue: 1,
-          _id: 0
-        }}
-      ]),
+      // 13. Vendor Growth Trend (per vendor per BS month, last 6 BS months) — JS bucket, ~1-2k rows
+      NepalcanOrder.find({ createdAt: { $gte: bsMonthBounds(bsMonthIdx < 5 ? bsYear - 1 : bsYear, (bsMonthIdx + 12 - 5) % 12).start } })
+        .select('vendor createdAt totalAmount orderStatus').lean(),
 
       // 14. Status Flow (count transitions from statusHistory)
       NepalcanOrder.aggregate([
@@ -725,21 +726,30 @@ exports.getNepalcanAnalytics = async (req, res) => {
       return { hour: i, label: `${String(i).padStart(2, '0')}:00`, orders: entry?.orders || 0, revenue: entry?.revenue || 0, netRevenue: entry?.netRevenue || 0 };
     });
 
-    // Format vendor growth trend
+    // Format vendor growth trend — bucket raw rows into BS months
     const vendorGrowth = {};
-    vendorGrowthTrend.forEach(entry => {
-      if (!vendorGrowth[entry.vendor]) vendorGrowth[entry.vendor] = [];
-      vendorGrowth[entry.vendor].push({ year: entry.year, month: entry.month, orders: entry.orders, revenue: entry.revenue, netRevenue: entry.netRevenue || 0 });
+    vendorGrowthTrend.forEach(o => {
+      const { y, m } = bsKeyOf(o.createdAt);
+      const key = `${o.vendor || 'Unknown'}|${y}|${m}`;
+      if (!vendorGrowth[key]) vendorGrowth[key] = { vendor: o.vendor || 'Unknown', year: y, month: m, orders: 0, revenue: 0, netRevenue: 0 };
+      const b = vendorGrowth[key];
+      b.orders += 1; b.revenue += o.totalAmount || 0;
+      if (o.orderStatus === 'Delivered') b.netRevenue += o.totalAmount || 0;
     });
-    // Get top 5 vendors by total orders in the period
-    const topVendorNames = Object.entries(vendorGrowth)
+    const vendorGrowthByName = {};
+    Object.values(vendorGrowth).forEach(entry => {
+      if (!vendorGrowthByName[entry.vendor]) vendorGrowthByName[entry.vendor] = [];
+      vendorGrowthByName[entry.vendor].push(entry);
+    });
+    Object.values(vendorGrowthByName).forEach(arr => arr.sort((a, b) => a.year - b.year || a.month - b.month));
+    const topVendorNames = Object.entries(vendorGrowthByName)
       .map(([vendor, months]) => ({ vendor, total: months.reduce((s, m) => s + m.orders, 0) }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 5)
       .map(v => v.vendor);
     const vendorGrowthData = topVendorNames.map(vendor => ({
       vendor,
-      months: vendorGrowth[vendor] || []
+      months: vendorGrowthByName[vendor] || []
     }));
 
     // Customer LTV
@@ -799,84 +809,53 @@ exports.getNepalcanAnalytics = async (req, res) => {
   }
 };
 
-// Get monthly aggregated data for all months
+// Monthly aggregates bucketed by BS month (Bhadra 2083 = Aug 17–Sep 16 AD) — JS bucket, few k rows
 exports.getMonthlyData = async (req, res) => {
   try {
-    const monthlyData = await NepalcanOrder.aggregate([
-      {
-        $group: {
-          _id: {
-            year: { $year: { date: '$createdAt', timezone: NPT } },
-            month: { $month: { date: '$createdAt', timezone: NPT } }
-          },
-          totalOrders: { $sum: 1 },
-          totalRevenue: { $sum: '$totalAmount' },
-          avgOrderValue: { $avg: '$totalAmount' },
-          deliveredOrders: {
-            $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, 1, 0] }
-          },
-          deliveredRevenue: {
-            $sum: { $cond: [{ $eq: ['$orderStatus', 'Delivered'] }, '$totalAmount', 0] }
-          },
-          returnedOrders: {
-            $sum: { $cond: [{ $eq: ['$orderStatus', 'Returned'] }, 1, 0] }
-          },
-          returnedRevenue: {
-            $sum: { $cond: [{ $eq: ['$orderStatus', 'Returned'] }, '$totalAmount', 0] }
-          },
-          cancelledOrders: {
-            $sum: { $cond: [{ $eq: ['$orderStatus', 'Cancelled'] }, 1, 0] }
-          },
-          pendingOrders: {
-            $sum: { $cond: [{ $eq: ['$orderStatus', 'Pending'] }, 1, 0] }
-          },
-          processingOrders: {
-            $sum: { $cond: [{ $eq: ['$orderStatus', 'Processing'] }, 1, 0] }
-          },
-          shippedOrders: {
-            $sum: { $cond: [{ $eq: ['$orderStatus', 'Shipped'] }, 1, 0] }
-          },
-          uniqueVendors: { $addToSet: '$vendor' },
-          uniqueCustomers: { $addToSet: '$customer' },
-          uniquePaymentMethods: { $addToSet: { $ifNull: ['$paymentMethod', 'Unknown'] } }
-        }
-      },
-      { $sort: { '_id.year': -1, '_id.month': -1 } },
-      {
-        $project: {
-          _id: 0,
-          year: '$_id.year',
-          month: '$_id.month',
-          totalOrders: 1,
-          totalRevenue: 1,
-          avgOrderValue: { $round: ['$avgOrderValue', 0] },
-          deliveredOrders: 1,
-          deliveredRevenue: 1,
-          returnedOrders: 1,
-          returnedRevenue: 1,
-          cancelledOrders: 1,
-          pendingOrders: 1,
-          processingOrders: 1,
-          shippedOrders: 1,
-          uniqueVendors: { $size: '$uniqueVendors' },
-          uniqueCustomers: { $size: '$uniqueCustomers' },
-          returnRate: {
-            $cond: [
-              { $gt: ['$totalOrders', 0] },
-              { $round: [{ $multiply: [{ $divide: ['$returnedOrders', '$totalOrders'] }, 100] }, 1] },
-              0
-            ]
-          },
-          deliveryRate: {
-            $cond: [
-              { $gt: ['$totalOrders', 0] },
-              { $round: [{ $multiply: [{ $divide: ['$deliveredOrders', '$totalOrders'] }, 100] }, 1] },
-              0
-            ]
-          }
-        }
-      }
-    ]);
+    const rows = await NepalcanOrder.find({})
+      .select('createdAt totalAmount orderStatus vendor customer paymentMethod').lean();
+    const map = new Map();
+    const get = (y, m) => {
+      const k = `${y}-${m}`;
+      if (!map.has(k)) map.set(k, { year: y, month: m, totalOrders: 0, totalRevenue: 0,
+        deliveredOrders: 0, deliveredRevenue: 0, returnedOrders: 0, returnedRevenue: 0,
+        cancelledOrders: 0, cancelledRevenue: 0, pendingOrders: 0, processingOrders: 0, shippedOrders: 0,
+        vendors: new Set(), customers: new Set(), payMethods: new Set() });
+      return map.get(k);
+    };
+    for (const o of rows) {
+      if (!o.createdAt) continue;
+      const { y, m } = bsKeyOf(o.createdAt);
+      const b = get(y, m);
+      const amt = o.totalAmount || 0;
+      b.totalOrders += 1; b.totalRevenue += amt;
+      if (o.orderStatus === 'Delivered') { b.deliveredOrders += 1; b.deliveredRevenue += amt; }
+      else if (o.orderStatus === 'Returned') { b.returnedOrders += 1; b.returnedRevenue += amt; }
+      else if (o.orderStatus === 'Cancelled') { b.cancelledOrders += 1; b.cancelledRevenue += amt; }
+      else if (o.orderStatus === 'Pending') b.pendingOrders += 1;
+      else if (o.orderStatus === 'Processing') b.processingOrders += 1;
+      else if (o.orderStatus === 'Shipped') b.shippedOrders += 1;
+      if (o.vendor) b.vendors.add(o.vendor);
+      if (o.customer) b.customers.add(o.customer);
+      b.payMethods.add(o.paymentMethod || 'Unknown');
+    }
+    const monthlyData = [...map.values()]
+      .sort((a, b) => b.year - a.year || b.month - a.month)
+      .map(b => {
+        const activeOrders = b.totalOrders - b.cancelledOrders;
+        const activeRevenue = b.totalRevenue - b.cancelledRevenue;
+        return { year: b.year, month: b.month, totalOrders: b.totalOrders,
+          totalRevenue: Math.round(b.totalRevenue * 100) / 100,
+          // ponytail: AOV ex-cancelled so it reconciles with daily tab
+          avgOrderValue: activeOrders ? Math.round(activeRevenue / activeOrders) : 0,
+          deliveredOrders: b.deliveredOrders, deliveredRevenue: Math.round(b.deliveredRevenue * 100) / 100,
+          returnedOrders: b.returnedOrders, returnedRevenue: Math.round(b.returnedRevenue * 100) / 100,
+          cancelledOrders: b.cancelledOrders, cancelledRevenue: Math.round(b.cancelledRevenue * 100) / 100,
+          pendingOrders: b.pendingOrders, processingOrders: b.processingOrders, shippedOrders: b.shippedOrders,
+          uniqueVendors: b.vendors.size, uniqueCustomers: b.customers.size,
+          returnRate: b.totalOrders ? Math.round((b.returnedOrders / b.totalOrders) * 1000) / 10 : 0,
+          deliveryRate: b.totalOrders ? Math.round((b.deliveredOrders / b.totalOrders) * 1000) / 10 : 0 };
+      });
 
     res.json({ months: monthlyData });
   } catch (error) {
@@ -902,7 +881,7 @@ exports.getDailySalesData = async (req, res) => {
     const match = { createdAt: { $gte: start, $lte: end }, orderStatus: { $ne: 'Cancelled' } };
     if (vendor) match.vendor = new RegExp(`^${vendor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
 
-    const [byDay, byVendor, hourlyRows, fallbackCount] = await Promise.all([
+    const [byDay, byVendor, hourlyRows, fallbackCount, cancelledByDay] = await Promise.all([
       NepalcanOrder.aggregate([
         { $match: match },
         { $group: {
@@ -945,14 +924,25 @@ exports.getDailySalesData = async (req, res) => {
       // ponytail: rows whose createdAt is sync-time fallback (API had no timestamp) poison the timeline
       NepalcanOrder.countDocuments({ ...match,
         $or: [{ 'rawData.createdAt': { $exists: false } }, { 'rawData.createdAt': null }] }),
+      // ponytail: daily excludes Cancelled — parallel count so tabs reconcile
+      NepalcanOrder.aggregate([
+        { $match: { createdAt: match.createdAt, orderStatus: 'Cancelled' } },
+        { $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: NPT } },
+          orders: { $sum: 1 },
+          revenue: { $sum: '$totalAmount' },
+        } },
+      ]),
     ]);
 
     const byDayMap = new Map(byDay.map(d => [d._id, d]));
+    const cancelledMap = new Map(cancelledByDay.map(d => [d._id, d]));
     const days = [];
     for (let t = new Date(start); t <= end; t = new Date(t.getTime() + 86400000)) {
       const key = toNptDateStr(t);
       if (days.length && days[days.length - 1].date === key) continue;
       const d = byDayMap.get(key) || {};
+      const c = cancelledMap.get(key) || {};
       const orders = d.orders || 0;
       days.push({
         date: key,
@@ -962,6 +952,8 @@ exports.getDailySalesData = async (req, res) => {
         deliveredOrders: d.deliveredOrders || 0,
         deliveredRevenue: d.deliveredRevenue || 0,
         returnedOrders: d.returnedOrders || 0,
+        cancelledOrders: c.orders || 0,
+        cancelledRevenue: c.revenue || 0,
         shippedOrders: d.shippedOrders || 0,
         pendingOrders: d.pendingOrders || 0,
         processingOrders: d.processingOrders || 0,
@@ -977,7 +969,9 @@ exports.getDailySalesData = async (req, res) => {
       deliveredOrders: s.deliveredOrders + d.deliveredOrders,
       deliveredRevenue: s.deliveredRevenue + d.deliveredRevenue,
       returnedOrders: s.returnedOrders + d.returnedOrders,
-    }), { orders: 0, revenue: 0, deliveredOrders: 0, deliveredRevenue: 0, returnedOrders: 0 });
+      cancelledOrders: s.cancelledOrders + d.cancelledOrders,
+      cancelledRevenue: s.cancelledRevenue + d.cancelledRevenue,
+    }), { orders: 0, revenue: 0, deliveredOrders: 0, deliveredRevenue: 0, returnedOrders: 0, cancelledOrders: 0, cancelledRevenue: 0 });
 
     res.json({ days, hourly, topVendors: byVendor, summary, fallbackCount,
       range: { startDate: toNptDateStr(start), endDate: toNptDateStr(end) } });

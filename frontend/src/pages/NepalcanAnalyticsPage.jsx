@@ -16,7 +16,7 @@ import {
 import { API_URL } from '../config/api';
 import {
   formatNepaliDate, formatNepaliDateShort, formatNepaliDateTime,
-  formatNepaliMonthYear, bsLabelForInput, NEPALI_WEEKDAYS,
+  bsLabelForInput, NEPALI_WEEKDAYS, NEPAL_MONTH_NAMES,
   adInputStr, bsTodayParts, bsMonthAdRange, nptWeekAdRange
 } from '../utils/nepaliDate';
 const NEPALI_DOW = { Sun: NEPALI_WEEKDAYS[0], Mon: NEPALI_WEEKDAYS[1], Tue: NEPALI_WEEKDAYS[2], Wed: NEPALI_WEEKDAYS[3], Thu: NEPALI_WEEKDAYS[4], Fri: NEPALI_WEEKDAYS[5], Sat: NEPALI_WEEKDAYS[6] };
@@ -28,7 +28,7 @@ const STATUS_COLORS = { Pending: '#fbbf24', Processing: '#3b82f6', Shipped: '#f5
 const formatRs = (amount) => `Rs. ${(amount || 0).toLocaleString()}`;
 const formatDate = (dateStr) => formatNepaliDateShort(`${dateStr}T00:00:00+05:45`);
 const formatDateLong = (dateStr) => formatNepaliDate(`${dateStr}T00:00:00+05:45`);
-const monthLabel = (m) => formatNepaliMonthYear(m.year, m.month);
+const monthLabel = (m) => `${NEPAL_MONTH_NAMES[(m.month - 1 + 12) % 12]} ${m.year}`;
 const pctChange = (current, prev) => {
   if (!prev || prev === 0) return current > 0 ? 100 : 0;
   return Math.round(((current - prev) / prev) * 100);
@@ -136,17 +136,26 @@ const DrilldownModal = ({ isOpen, onClose, title, subtitle, icon: Icon, filters,
     const fetchOrders = async () => {
       setLoading(true);
       try {
-        const params = new URLSearchParams();
-        if (filters.status) params.append('status', filters.status);
-        if (filters.startDate) params.append('startDate', filters.startDate);
-        if (filters.endDate) params.append('endDate', filters.endDate);
-        params.append('limit', '500');
+        // ponytail: page through — BS months exceed 500 orders, silent truncation broke card totals
+        let page = 1, totalPages = 1;
+        const all = [];
+        do {
+          const params = new URLSearchParams();
+          if (filters.status) params.append('status', filters.status);
+          if (filters.startDate) params.append('startDate', filters.startDate);
+          if (filters.endDate) params.append('endDate', filters.endDate);
+          params.append('limit', '500');
+          params.append('page', String(page));
 
-        const res = await axios.get(`${API_URL}/nepalcan-orders/orders?${params}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+          const res = await axios.get(`${API_URL}/nepalcan-orders/orders?${params}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          all.push(...(res.data.orders || []));
+          totalPages = res.data.pagination?.totalPages || 1;
+          page += 1;
+        } while (page <= totalPages);
 
-        let filtered = res.data.orders || [];
+        let filtered = all;
         if (filters.vendor) filtered = filtered.filter(o => (o.vendor || '').toLowerCase() === filters.vendor.toLowerCase());
         if (filters.paymentMethod) filtered = filtered.filter(o => (o.paymentMethod || 'Unknown') === filters.paymentMethod);
         if (filters.statusIn) filtered = filtered.filter(o => filters.statusIn.includes(o.orderStatus));
@@ -386,7 +395,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
   const trendData = useMemo(() => [...monthlyData].reverse().map(m => ({
     ...m,
     label: monthLabel(m),
-    shortLabel: formatNepaliMonthYear(m.year, m.month)
+    shortLabel: `${NEPAL_MONTH_NAMES[(m.month - 1 + 12) % 12].slice(0, 3)} ${String(m.year).slice(2)}`
   })), [monthlyData]);
 
   const handleBarClick = (data) => {
@@ -400,10 +409,10 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
     setDrilldown({ title, subtitle, icon, filters });
   };
 
+  // ponytail: m is a BS month bucket — drilldown range is its AD span
   const getMonthRange = (m) => {
     if (!m) return {};
-    const start = `${m.year}-${String(m.month).padStart(2, '0')}-01`;
-    const end = new Date(m.year, m.month, 0).toISOString().split('T')[0];
+    const { start, end } = bsMonthAdRange(m.year, m.month - 1);
     return { startDate: start, endDate: end };
   };
 
@@ -530,7 +539,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
           {dailyData.summary && (
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
               <MetricCard icon={Package} label="Orders" value={dailyData.summary.orders}
-                subValue={`${dailyData.days.length} days in range`} />
+                subValue={`${dailyData.days.length} days in range${dailyData.summary.cancelledOrders ? ` · +${dailyData.summary.cancelledOrders} cancelled` : ''}`} />
               <MetricCard icon={DollarSign} label="Gross Revenue" value={formatRs(dailyData.summary.revenue)}
                 subValue={`Net: ${formatRs(dailyData.summary.deliveredRevenue)}`} />
               <MetricCard icon={BarChart3} label="AOV" value={formatRs(dailyData.summary.orders ? Math.round(dailyData.summary.revenue / dailyData.summary.orders) : 0)}
@@ -675,8 +684,8 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
       {activeTab === 'monthly' && current && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <MetricCard icon={Package} label="Total Orders" value={current.totalOrders}
-            subValue={`${current.pendingOrders} pending \u00B7 ${current.processingOrders} processing`}
-            tooltip={`Orders placed in ${monthLabel(current)}`}
+            subValue={`${current.pendingOrders} pending · ${current.processingOrders} processing · ${current.cancelledOrders} cancelled`}
+            tooltip={`Orders placed in ${monthLabel(current)} (incl ${current.cancelledOrders} cancelled)`}
             trend={compare ? pctChange(current.totalOrders, compare.totalOrders) : null}
             trendLabel={compare ? `vs ${monthLabel(compare)}` : null}
             onClick={() => openDrilldown(`${monthLabel(current)} - All Orders`, 'Every order placed this month', Package, getMonthRange(current))} />
