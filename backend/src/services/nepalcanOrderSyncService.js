@@ -30,15 +30,17 @@ const normalizeReturnStatus = (raw, fallback = 'Pending') => {
 };
 
 const deriveStatusFromTracking = (marketplaceProcesses) => {
-  if (!marketplaceProcesses || !Array.isArray(marketplaceProcesses)) return null;
+  if (!marketplaceProcesses || !Array.isArray(marketplaceProcesses) || marketplaceProcesses.length === 0) return null;
   const hasReturned = marketplaceProcesses.some(p => p.process && isReturnProcess(p.process));
   if (hasReturned) return 'Returned';
   const statuses = marketplaceProcesses.map(p => p.process?.toLowerCase()).filter(Boolean);
-  const statusOf = (s) => isReturnKeeper(s) ? 'Delivered' : (TRACKING_STATUS_MAP[s] || 'Pending');
-  const highest = statuses.reduce((best, s) => {
+  const statusOf = (s) => isReturnKeeper(s) ? 'Delivered' : TRACKING_STATUS_MAP[s];
+  const known = statuses.filter(s => statusOf(s));
+  if (known.length === 0) return null;
+  const highest = known.reduce((best, s) => {
     const rank = STATUS_RANK.indexOf(statusOf(s));
     return rank > STATUS_RANK.indexOf(statusOf(best)) ? s : best;
-  }, 'pending');
+  }, known[0]);
   return statusOf(highest) || null;
 };
 
@@ -73,7 +75,7 @@ const extractStatusTimeline = (marketplaceProcesses) => {
 const resolveStatus = (dbStatus, newStatus, statusSource) => {
   if (!newStatus) return { status: dbStatus || 'Pending', source: 'commerce_api' };
   if (!dbStatus) return { status: newStatus, source: statusSource || 'commerce_api' };
-  if (statusSource === 'logistics_api') return { status: newStatus, source: 'logistics_api' };
+  // ponytail: rank rule for both sources — stale tracking must not demote Delivered to Shipped
   // ponytail: backfill heal — broad 'return' match falsely Returned initiated/declined, allow commerce demote to Delivered
   if (dbStatus === 'Returned' && newStatus === 'Delivered') return { status: 'Delivered', source: statusSource || 'commerce_api' };
   const dbRank = STATUS_RANK.indexOf(dbStatus);
@@ -155,7 +157,9 @@ const fetchApiOrders = async (authToken) => {
     ordersList = responseData.data;
   }
 
-  const totalPages = Math.min(10, Math.ceil((responseData?.data?.total || 1000) / 500));
+  // ponytail: API returns { data: [...], totalItems } — total lives top-level, not data.total
+  const totalCount = responseData?.totalItems ?? responseData?.data?.total ?? 1000;
+  const totalPages = Math.min(10, Math.ceil(totalCount / 500));
   if (totalPages >= 2) {
     const pagePromises = [];
     for (let p = 2; p <= totalPages; p++) {
@@ -177,10 +181,12 @@ const fetchApiOrders = async (authToken) => {
         nextOrders = nextPageData.data.orders;
       } else if (nextPageData?.orders && Array.isArray(nextPageData.orders)) {
         nextOrders = nextPageData.orders;
+      } else if (Array.isArray(nextPageData?.data)) {
+        nextOrders = nextPageData.data;
       }
       if (nextOrders.length === 0) continue;
       for (const o of nextOrders) ordersList.push(o);
-      if (ordersList.length >= (responseData?.data?.total || 1000)) break;
+      if (ordersList.length >= totalCount) break;
     }
   }
 
@@ -195,8 +201,9 @@ const buildOrderUpdate = (orderData, trackingData, existingOrder) => {
   // ponytail: commerce return variants collapse to enum-safe status; initiated/declined stay Delivered
   const rawCommerce = orderData.orderStatus || 'Pending';
   const commerceStatus = normalizeReturnStatus(rawCommerce, rawCommerce);
+  // ponytail: take higher rank of commerce vs tracking — stale tracking must not bury commerce Delivered
   let newStatus, statusSource;
-  if (trackingStatus) {
+  if (trackingStatus && STATUS_RANK.indexOf(trackingStatus) >= STATUS_RANK.indexOf(commerceStatus)) {
     newStatus = trackingStatus;
     statusSource = 'logistics_api';
   } else {
@@ -225,7 +232,8 @@ const buildOrderUpdate = (orderData, trackingData, existingOrder) => {
   if (existingOrder) {
     const statusChanged = existingOrder.orderStatus !== newStatus;
     // ponytail: API is truth for contact fields too — renames/payment changes must not freeze at insert
-    const setFields = { orderStatus: newStatus, statusSource, apiUpdatedAt, lastSyncedAt: now,
+    // ponytail: keep stored statusSource when status unchanged — no-info sync must not flip provenance
+    const setFields = { orderStatus: newStatus, apiUpdatedAt, lastSyncedAt: now,
       customer: orderData.customer || existingOrder.customer,
       vendor: orderData.vendor ?? existingOrder.vendor,
       paymentStatus: orderData.paymentStatus ?? existingOrder.paymentStatus,
@@ -234,6 +242,7 @@ const buildOrderUpdate = (orderData, trackingData, existingOrder) => {
 
     if (statusChanged) {
       setFields.statusHistory = timeline;
+      setFields.statusSource = statusSource;
     }
 
     if (hasTracking && trackingData) {
@@ -349,7 +358,13 @@ const syncNepalcanOrders = async (token = null) => {
       const storedTimestamp = stored && typeof stored.getTime === 'function' ? stored.getTime() : 0;
 
       if (apiTimestamp > 0 && storedTimestamp > 0 && apiTimestamp === storedTimestamp) {
-        skippedCount++;
+        // ponytail: timestamps equal ≠ status equal — tracking can still promote (e.g. to Delivered);
+        // skip only terminal rows whose status can no longer advance
+        if (['Delivered', 'Cancelled', 'Returned'].includes(existing.orderStatus)) {
+          skippedCount++;
+        } else {
+          changedOrderData.push(orderData);
+        }
       } else {
         changedOrderData.push(orderData);
       }
@@ -610,8 +625,10 @@ const enrichOrdersWithTracking = async () => {
     const bulkOps = [];
     for (const order of activeOrders) {
       const trackingData = trackingMap.get(order.orderId);
-      if (!trackingData?.marketplaceProcesses) continue;
+      // ponytail: empty/unknown tracking yields null — must not demote Delivered to Pending
+      if (!trackingData?.marketplaceProcesses?.length) continue;
       const newStatus = deriveStatusFromTracking(trackingData.marketplaceProcesses);
+      if (!newStatus) continue;
       const resolved = resolveStatus(order.orderStatus, newStatus, 'logistics_api');
       const timeline = extractStatusTimeline(trackingData.marketplaceProcesses);
       if (!order.rawData) order.rawData = {};

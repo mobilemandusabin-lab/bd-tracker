@@ -70,7 +70,8 @@ const processOrdersPage = async (job, token) => {
       const ex = existingMap.get(orderId);
       const apiTs = orderData.updatedAt ? new Date(orderData.updatedAt).getTime() : 0;
       const storedTs = ex?.apiUpdatedAt ? new Date(ex.apiUpdatedAt).getTime() : 0;
-      if (ex && apiTs > 0 && storedTs > 0 && apiTs === storedTs) { successful++; continue; } // unchanged skip
+      // ponytail: equal timestamps skip only terminal rows — tracking can still promote the rest to Delivered
+      if (ex && apiTs > 0 && storedTs > 0 && apiTs === storedTs && ['Delivered', 'Cancelled', 'Returned'].includes(ex.orderStatus)) { successful++; continue; } // unchanged skip
       const u = buildOrderUpdate(orderData, trackingMap.get(orderId), ex || null);
       const vl = orderData.vendor ? (vlMap.get(String(orderData.vendor).toLowerCase()) || vlMap.get(orderData.vendor)) : null;
       if (u.isNew) { if (vl) u.update.$setOnInsert.vendor_lead_id = vl; ops.push({ updateOne: { ...u, upsert: true } }); }
@@ -79,8 +80,9 @@ const processOrdersPage = async (job, token) => {
     } catch (e) { failed++; pushError(job, orderData.orderId || orderData._id, e.message); }
   }
   if (ops.length) await NepalcanOrder.bulkWrite(ops, { ordered: false });
-  const isLast = ordersList.length < ORDERS_LIMIT;
-  return { done: isLast, totalApi, successful, failed, count: ordersList.length };
+  // ponytail: totalApi known — done when page covers it, not only on short page (exact multiples stall)
+  const isLast = ordersList.length < ORDERS_LIMIT || (totalApi && page * ORDERS_LIMIT >= totalApi);
+  return { done: !!isLast, totalApi, successful, failed, count: ordersList.length };
 };
 
 // --- TRACKING: small slice after last_processed_id ---
@@ -97,8 +99,10 @@ const processTrackingBatch = async (job) => {
   for (const order of batch) {
     try {
       const td = trackingMap.get(order.orderId);
-      if (!td?.marketplaceProcesses) { successful++; continue; }
+      // ponytail: empty/unknown tracking yields null — must not demote Delivered to Pending
+      if (!td?.marketplaceProcesses?.length) { successful++; continue; }
       const ns = deriveStatusFromTracking(td.marketplaceProcesses);
+      if (!ns) { successful++; continue; }
       const resolved = resolveStatus(order.orderStatus, ns, 'logistics_api');
       const set = { 'rawData.trackingProcesses': td.marketplaceProcesses, trackingData: td, lastSyncedAt: new Date() };
       if (resolved.status !== order.orderStatus) {
@@ -221,7 +225,8 @@ const processVendorsPage = async (job, token, userId) => {
   }
   if (bulkOps.length) await Lead.bulkWrite(bulkOps, { ordered: false });
   if (activities.length) { const A = require('../models/Activity'); await A.insertMany(activities, { ordered: false }); }
-  return { done: vendors.length < VENDORS_LIMIT, totalApi, successful, failed, count: vendors.length };
+  // ponytail: totalApi known — done when page covers it, not only on short page
+  return { done: !!(vendors.length < VENDORS_LIMIT || (totalApi && page * VENDORS_LIMIT >= totalApi)), totalApi, successful, failed, count: vendors.length };
 };
 
 // --- BRANCHES: slice of 25 vendors after last_processed_id (small dataset, still bounded) ---
