@@ -3,7 +3,7 @@ const axios = require('axios');
 const NepalcanOrder = require('../models/NepalcanOrder');
 const Lead = require('../models/Lead');
 const {
-  batchFetchTracking, buildOrderUpdate, retryWithBackoff
+  batchFetchTracking, buildOrderUpdate, retryWithBackoff, deriveFromLogisticsFields
 } = require('./nepalcanOrderSyncService');
 const { loginToNepalcan, getDefaultSyncUser } = require('./nepalcanAuthService');
 const {
@@ -100,8 +100,8 @@ const processTrackingBatch = async (job) => {
     try {
       const td = trackingMap.get(order.orderId);
       // ponytail: empty/unknown tracking yields null — must not demote Delivered to Pending
-      if (!td?.marketplaceProcesses?.length) { successful++; continue; }
-      const ns = deriveStatusFromTracking(td.marketplaceProcesses);
+      if (!td?.marketplaceProcesses?.length && !deriveFromLogisticsFields(td)) { successful++; continue; }
+      const ns = deriveStatusFromTracking(td?.marketplaceProcesses, td);
       if (!ns) { successful++; continue; }
       const resolved = resolveStatus(order.orderStatus, ns, 'logistics_api');
       const set = { 'rawData.trackingProcesses': td.marketplaceProcesses, trackingData: td, lastSyncedAt: new Date() };
