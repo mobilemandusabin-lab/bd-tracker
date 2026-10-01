@@ -7,7 +7,7 @@ import {
   BarChart3, Calendar, X, Clock, DollarSign, History, ExternalLink, Search, Pencil, Save
 } from 'lucide-react';
 import { formatDuration } from '../utils/formatDuration';
-import { formatNepaliDate, formatNepaliDateShort, formatNepaliDateTime } from '../utils/nepaliDate';
+import { formatNepaliDate, formatNepaliDateShort, formatNepaliDateTime, bsLabelForInput } from '../utils/nepaliDate';
 import { cn } from '../utils/cn';
 import NepalcanOrderAudit from '../components/NepalcanOrderAudit';
 import NepalcanOrderDetails from '../components/NepalcanOrderDetails';
@@ -51,6 +51,11 @@ const NepalcanSalesPage = () => {
   const [editError, setEditError] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [ordersTotal, setOrdersTotal] = useState(null);
+  const [procStart, setProcStart] = useState('');
+  const [procEnd, setProcEnd] = useState('');
+  // ponytail: frozen snapshot — drafts edit freely, appliedRange drives label
+  const [appliedRange, setAppliedRange] = useState({ start: '', end: '' });
+  const [statsLoading, setStatsLoading] = useState(false);
 
   const [syncMsg, setSyncMsg] = useState(null);
   // ponytail: one click = a few resumable batches (each <10s), then refresh from DB
@@ -81,13 +86,32 @@ const NepalcanSalesPage = () => {
     } catch (err) { console.error('Failed to fetch sync history:', err.message); }
   };
 
-  const fetchStats = async () => {
+  const fetchStats = async (start = procStart, end = procEnd) => {
+    setStatsLoading(true);
     try {
       const backendToken = localStorage.getItem('token');
       const headers = backendToken ? { 'Authorization': `Bearer ${backendToken}` } : {};
-      const res = await axios.get(`${API_URL}/nepalcan-orders/stats`, { headers });
+      const params = new URLSearchParams();
+      if (start) params.append('startDate', start);
+      if (end) params.append('endDate', end);
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      const res = await axios.get(`${API_URL}/nepalcan-orders/stats${qs}`, { headers });
       setNepalcanStats(res.data);
     } catch (err) { console.error('Failed to fetch stats:', err.message); }
+    finally { setStatsLoading(false); }
+  };
+
+  const applyProcFilter = () => {
+    if (procStart && procEnd && procEnd < procStart) return;
+    setAppliedRange({ start: procStart, end: procEnd });
+    fetchStats(procStart, procEnd);
+  };
+
+  const clearProcFilter = () => {
+    setProcStart('');
+    setProcEnd('');
+    setAppliedRange({ start: '', end: '' });
+    fetchStats('', '');
   };
 
   const fetchSyncLog = async () => {
@@ -330,10 +354,40 @@ const NepalcanSalesPage = () => {
           {/* Processing Times */}
           {nepalcanStats && (
             <div className="bg-white p-5 rounded-2xl border border-slate-100">
-              <h3 className="text-sm font-extrabold text-slate-900 mb-4 flex items-center gap-2">
+              <h3 className="text-sm font-extrabold text-slate-900 mb-3 flex items-center gap-2">
                 <Clock size={16} className="text-red-600" /> Processing Times
-                <span className="ml-auto text-[10px] text-slate-400 font-bold">Based on {nepalcanStats.ordersAnalyzed || 0} orders</span>
+                <span className="ml-auto text-[10px] text-slate-400 font-bold">
+                  {appliedRange.start || appliedRange.end
+                    ? `Filtered: ${appliedRange.start || '…'} → ${appliedRange.end || '…'} | Based on ${nepalcanStats.ordersAnalyzed || 0} orders`
+                    : `All-time | Based on ${nepalcanStats.ordersAnalyzed || 0} orders`}
+                </span>
               </h3>
+              <div className="flex flex-wrap items-end gap-2 mb-4">
+                <div>
+                  <input type="date" value={procStart} max={procEnd || undefined}
+                    onChange={e => setProcStart(e.target.value)}
+                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:ring-2 focus:ring-red-100 focus:border-red-300 outline-none" />
+                  {procStart && <p className="text-[10px] font-bold text-slate-400 mt-0.5">{bsLabelForInput(procStart)}</p>}
+                </div>
+                <span className="text-xs font-bold text-slate-400 pb-2">→</span>
+                <div>
+                  <input type="date" value={procEnd} min={procStart || undefined}
+                    onChange={e => setProcEnd(e.target.value)}
+                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:ring-2 focus:ring-red-100 focus:border-red-300 outline-none" />
+                  {procEnd && <p className="text-[10px] font-bold text-slate-400 mt-0.5">{bsLabelForInput(procEnd)}</p>}
+                </div>
+                <button onClick={applyProcFilter} disabled={statsLoading || (!procStart && !procEnd) || (procStart && procEnd && procEnd < procStart)}
+                  className="px-4 py-2 bg-red-600 rounded-xl text-[10px] font-bold uppercase tracking-wider text-white hover:bg-red-700 transition-all disabled:opacity-50">
+                  {statsLoading ? 'Applying…' : 'Apply'}
+                </button>
+                {(procStart || procEnd || appliedRange.start || appliedRange.end) && (
+                  <button onClick={clearProcFilter} disabled={statsLoading}
+                    className="px-3 py-2 bg-slate-100 rounded-xl text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:text-red-600 transition-all disabled:opacity-50">Clear</button>
+                )}
+              </div>
+              {procStart && procEnd && procEnd < procStart && (
+                <p className="text-[11px] font-bold text-red-600 mb-3">End date must be on or after start date.</p>
+              )}
               <div className="grid grid-cols-3 gap-3 mb-3">
                 {[
                   { label: 'Pending → Processing', value: nepalcanStats.averages?.pendingToProcessing, tooltip: 'Average time from order creation (Pending) to when vendor starts preparing (Processing). Calculated across all orders with both status entries in history.' },

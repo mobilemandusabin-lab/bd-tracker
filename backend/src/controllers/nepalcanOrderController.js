@@ -108,8 +108,10 @@ exports.getNepalcanOrders = async (req, res) => {
 };
 
 // Get order statistics and processing times
+// ponytail: ?startDate&endDate filter orders by createdAt (NPT day clamp); empty = all-time
 exports.getNepalcanStats = async (req, res) => {
   try {
+    const { startDate, endDate } = req.query;
     // Get basic stats
     const totalOrders = await NepalcanOrder.countDocuments();
     const statusCounts = await NepalcanOrder.aggregate([
@@ -121,9 +123,12 @@ exports.getNepalcanStats = async (req, res) => {
     ]);
 
     // Calculate average processing times from orders since 2026-04-24 with valid status history
+    const createdAt = { $gte: new Date('2026-04-24') };
+    if (startDate) createdAt.$gte = /^\d{4}-\d{2}-\d{2}$/.test(startDate) ? nptDayStart(startDate) : new Date(startDate);
+    if (endDate) createdAt.$lte = /^\d{4}-\d{2}-\d{2}$/.test(endDate) ? nptDayEnd(endDate) : new Date(endDate);
     const allOrders = await NepalcanOrder.find({
       'statusHistory.1': { $exists: true },  // at least 2 status entries
-      createdAt: { $gte: new Date('2026-04-24') }
+      createdAt
     }).select('statusHistory orderStatus').lean();
 
     let totals = {};
