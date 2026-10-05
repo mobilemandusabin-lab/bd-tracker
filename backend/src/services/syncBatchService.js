@@ -9,6 +9,9 @@ const { loginToNepalcan, getDefaultSyncUser } = require('./nepalcanAuthService')
 const {
   extractVendors, getTotalCount, fetchVendorServiceBranches
 } = require('./nepalcanVendorSyncService');
+const {
+  ORDERS_API_URL, extractOrders, getOrderSyncWindow, getOrdersTotal, normalizeOrderRecord
+} = require('./nepalcanOrderWindow');
 
 const API_BASE = 'https://commerce.thecanbrand.com/api';
 const MAX_RETRIES = parseInt(process.env.SYNC_MAX_RETRIES) || 3;
@@ -31,24 +34,26 @@ const pushError = (job, recordId, message) => {
 
 // --- ORDERS: exactly ONE API page (default 50), checkpoint = current_page ---
 const fetchOrdersPage = async (token, page, limit = ORDERS_LIMIT) =>
-  retryWithBackoff(() => axios.get(`${API_BASE}/vendor/orders/super-admin/list`, {
-    params: { tab: 'marketplace', page, limit, unattendedOrders: '', status: 'Active' },
+  retryWithBackoff(() => {
+    const { fromDate, toDate } = getOrderSyncWindow();
+    return axios.get(ORDERS_API_URL, {
+    // Commerce's marketplace-admin endpoint uses perPage and a date window.
+    // This prevents routine syncs from rewriting orders older than 19 days.
+    params: { fromDate, toDate, page, perPage: limit },
     headers: authHeaders(token), timeout: 20000
-  }).then(r => r.data), MAX_RETRIES);
-
-const parseOrdersList = (data) =>
-  data?.data?.orders || data?.orders || (Array.isArray(data?.data) ? data.data : []) || [];
+  }).then(r => r.data);
+  }, MAX_RETRIES);
 
 const processOrdersPage = async (job, token) => {
   const page = job.current_page || 1;
   const data = await fetchOrdersPage(token, page);
-  const ordersList = parseOrdersList(data);
-  const totalApi = data?.totalItems ?? data?.total ?? data?.data?.total ?? ordersList.length;
+  const ordersList = extractOrders(data).map(normalizeOrderRecord);
+  const totalApi = getOrdersTotal(data, ordersList.length);
   if (ordersList.length === 0) return { done: true, totalApi, successful: 0, failed: 0, count: 0 };
 
   const ids = ordersList.map(o => o.orderId || o._id).filter(Boolean);
   const existing = await NepalcanOrder.find({ orderId: { $in: ids } })
-    .select('orderId apiUpdatedAt orderStatus totalAmount shippingAmount priceHistory').lean();
+    .select('orderId apiUpdatedAt orderStatus totalAmount shippingAmount priceHistory statusHistory trackingData processingAt shippedAt deliveredAt cancelledAt returnedAt customer vendor paymentStatus paymentMethod source rawData').lean();
   const existingMap = new Map(existing.map(o => [o.orderId, o]));
 
   const vendorNames = [...new Set(ordersList.map(o => o.vendor).filter(Boolean))];
@@ -87,12 +92,17 @@ const processOrdersPage = async (job, token) => {
 
 // --- TRACKING: small slice after last_processed_id ---
 const processTrackingBatch = async (job) => {
-  const filter = { orderStatus: { $in: ['Pending', 'Processing', 'Shipped', 'Delivered'] } };
+  const { from, to } = getOrderSyncWindow();
+  const filter = {
+    orderStatus: { $in: ['Pending', 'Processing', 'Shipped', 'Delivered', 'Returned'] },
+    createdAt: { $gte: from, $lte: to }
+  };
   if (job.last_processed_id) filter._id = { $gt: job.last_processed_id };
   const batch = await NepalcanOrder.find(filter).sort({ _id: 1 }).limit(TRACKING_LIMIT)
-    .select('_id orderId orderStatus statusHistory rawData').lean();
+    .select('_id orderId orderStatus statusHistory rawData trackingData processingAt shippedAt deliveredAt cancelledAt returnedAt').lean();
   if (!batch.length) return { done: true, successful: 0, failed: 0, count: 0 };
   const { deriveStatusFromTracking, extractStatusTimeline, resolveStatus } = require('./nepalcanOrderSyncService');
+  const { lifecycleFields, mergeStatusHistory } = require('../utils/orderLifecycle');
   const trackingMap = await batchFetchTracking(batch.map(o => o.orderId), TRACKING_CONCURRENCY);
   const ops = [];
   let successful = 0, failed = 0;
@@ -100,15 +110,21 @@ const processTrackingBatch = async (job) => {
     try {
       const td = trackingMap.get(order.orderId);
       // ponytail: empty/unknown tracking yields null — must not demote Delivered to Pending
-      if (!td?.marketplaceProcesses?.length && !deriveFromLogisticsFields(td)) { successful++; continue; }
+      if (!td?.marketplaceProcesses?.length && !td?.processHistory?.length && !td?.deliveryDate && !deriveFromLogisticsFields(td)) { successful++; continue; }
       const ns = deriveStatusFromTracking(td?.marketplaceProcesses, td);
       if (!ns) { successful++; continue; }
       const resolved = resolveStatus(order.orderStatus, ns, 'logistics_api');
       const set = { 'rawData.trackingProcesses': td.marketplaceProcesses, trackingData: td, lastSyncedAt: new Date() };
       if (resolved.status !== order.orderStatus) {
         set.orderStatus = resolved.status; set.statusSource = resolved.source;
-        const tl = extractStatusTimeline(td.marketplaceProcesses);
-        if (tl.length) set.statusHistory = tl;
+        const tl = extractStatusTimeline(td);
+        if (tl.length) {
+          set.statusHistory = mergeStatusHistory(order.statusHistory || [], tl);
+          const lifecycle = lifecycleFields({ ...order, statusHistory: set.statusHistory, trackingData: td });
+          for (const field of ['processingAt', 'shippedAt', 'deliveredAt', 'cancelledAt', 'returnedAt']) {
+            if (lifecycle[field]) set[field] = lifecycle[field];
+          }
+        }
       }
       ops.push({ updateOne: { filter: { _id: order._id }, update: { $set: set } } });
       successful++;

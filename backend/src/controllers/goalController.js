@@ -3,6 +3,7 @@ const User = require('../models/User');
 const Lead = require('../models/Lead');
 const Activity = require('../models/Activity');
 const NepalcanOrder = require('../models/NepalcanOrder');
+const { statusDateExpression } = require('../utils/orderLifecycle');
 
 exports.createGoal = async (req, res) => {
   try {
@@ -87,7 +88,8 @@ exports.getAllGoals = async (req, res) => {
           break;
         case 'revenue':
           const revData = await NepalcanOrder.aggregate([
-            { $match: { orderStatus: 'Delivered', createdAt: goalDateFilter } },
+            { $set: { _deliveredAt: statusDateExpression('Delivered') } },
+            { $match: { orderStatus: 'Delivered', _deliveredAt: goalDateFilter } },
             { $lookup: { from: 'leads', localField: 'vendor_lead_id', foreignField: '_id', as: 'lead' } },
             { $unwind: { path: '$lead', preserveNullAndEmptyArrays: false } },
             { $match: { 'lead.assigned_user': goalUserId } },

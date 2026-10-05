@@ -4,11 +4,21 @@ const statusHistorySchema = new mongoose.Schema({
   status: {
     type: String,
     required: true,
-    enum: ['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled', 'Returned']
+    enum: ['Pending', 'Hold', 'Processing', 'Shipped', 'Delivered', 'Cancelled', 'Returned']
   },
   timestamp: {
     type: Date,
     default: Date.now
+  },
+  source: {
+    type: String,
+    enum: ['commerce_api', 'logistics_api', 'manual', 'observed', 'legacy'],
+    default: 'legacy'
+  },
+  accuracy: {
+    type: String,
+    enum: ['exact', 'estimated', 'unknown'],
+    default: 'estimated'
   }
 });
 
@@ -47,7 +57,7 @@ const nepalcanOrderSchema = new mongoose.Schema({
   },
   orderStatus: {
     type: String,
-    enum: ['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled', 'Returned'],
+    enum: ['Pending', 'Hold', 'Processing', 'Shipped', 'Delivered', 'Cancelled', 'Returned'],
     default: 'Pending'
   },
   paymentStatus: {
@@ -68,6 +78,13 @@ const nepalcanOrderSchema = new mongoose.Schema({
   createdAt: {
     type: Date
   },
+  // Lifecycle dates are deliberately separate from createdAt. Revenue and
+  // status-event reporting must use these dates, not the order placement date.
+  processingAt: { type: Date, default: null },
+  shippedAt: { type: Date, default: null },
+  deliveredAt: { type: Date, default: null },
+  cancelledAt: { type: Date, default: null },
+  returnedAt: { type: Date, default: null },
   // Nepalcan API's last-modified timestamp — used for delta sync
   apiUpdatedAt: {
     type: Date
@@ -155,6 +172,8 @@ nepalcanOrderSchema.methods.getTotalFulfillmentTime = function() {
 nepalcanOrderSchema.index({ orderStatus: 1, createdAt: -1 });
 nepalcanOrderSchema.index({ vendor_lead_id: 1 });
 nepalcanOrderSchema.index({ createdAt: -1 });
+nepalcanOrderSchema.index({ deliveredAt: -1 });
+nepalcanOrderSchema.index({ returnedAt: -1 });
 nepalcanOrderSchema.index({ vendor: 1 });
 nepalcanOrderSchema.index({ customer: 1 });
 

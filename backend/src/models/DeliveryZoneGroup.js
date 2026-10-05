@@ -13,6 +13,4 @@ const deliveryZoneGroupSchema = new mongoose.Schema({
   syncedAt: { type: Date, default: Date.now }
 }, { timestamps: true });
 
-deliveryZoneGroupSchema.index({ nepalcanId: 1 }, { unique: true });
-
 module.exports = mongoose.model('DeliveryZoneGroup', deliveryZoneGroupSchema);

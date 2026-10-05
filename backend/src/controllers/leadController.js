@@ -1,5 +1,6 @@
 const Lead = require('../models/Lead');
 const NepalcanOrder = require('../models/NepalcanOrder');
+const { statusDateExpression } = require('../utils/orderLifecycle');
 const User = require('../models/User');
 const PipelineStage = require('../models/PipelineStage');
 const appEventEmitter = require('../services/eventService');
@@ -502,7 +503,7 @@ exports.getActiveSellers = async (req, res) => {
         vendorName: { $first: '$vendor' },
         orderCount: { $sum: 1 }, 
         totalAmount: { $sum: '$totalAmount' }, 
-        lastOrderDate: { $max: '$updatedAt' } 
+        lastOrderDate: { $max: statusDateExpression('Delivered') }
       } },
       { $sort: { orderCount: -1 } },
       { $limit: 1000 }

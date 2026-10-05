@@ -3,11 +3,14 @@ const NepalcanSyncLog = require('../models/NepalcanSyncLog');
 const Lead = require('../models/Lead');
 const axios = require('axios');
 const { loginToNepalcan, getDefaultSyncUser } = require('./nepalcanAuthService');
+const { lifecycleFields, mergeStatusHistory, statusDateExpression, trackingEvents } = require('../utils/orderLifecycle');
+const {
+  ORDERS_API_URL, extractOrders, getOrderSyncWindow, getOrdersTotal, normalizeOrderRecord
+} = require('./nepalcanOrderWindow');
 
-const API_BASE = 'https://commerce.thecanbrand.com/api';
 const LOGISTICS_API = 'https://can-logistic-prod-84pie.ondigitalocean.app/api/public/marketplace-tracker';
 
-const STATUS_RANK = ['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled', 'Returned'];
+const STATUS_RANK = ['Pending', 'Hold', 'Processing', 'Shipped', 'Delivered', 'Cancelled', 'Returned'];
 const TRACKING_STATUS_MAP = {
   'returned': 'Returned',
   'delivered': 'Delivered',
@@ -44,6 +47,12 @@ const deriveStatusFromTracking = (marketplaceProcesses, trackingData) => {
       if (statusOf(highest)) return statusOf(highest);
     }
   }
+  const timelineStatuses = trackingEvents(trackingData).map(event => event.status);
+  if (timelineStatuses.length > 0) {
+    return timelineStatuses.reduce((best, status) =>
+      STATUS_RANK.indexOf(status) > STATUS_RANK.indexOf(best) ? status : best
+    );
+  }
   // ponytail: procs almost always empty — fall back to logistics header fields, same response
   return deriveFromLogisticsFields(trackingData);
 };
@@ -72,32 +81,8 @@ const deriveFromLogisticsFields = (td) => {
   return out.reduce((a, b) => (STATUS_RANK.indexOf(b) > STATUS_RANK.indexOf(a) ? b : a));
 };
 
-const extractStatusTimeline = (marketplaceProcesses) => {
-  if (!marketplaceProcesses || !Array.isArray(marketplaceProcesses)) return [];
-  const timeline = [];
-  const statuses = [
-    { process: 'processing', status: 'Processing' },
-    { process: 'shipped', status: 'Shipped' },
-    { process: 'delivered', status: 'Delivered' },
-    { process: 'delivery failed', status: 'Delivered' },
-    { process: 'returned', status: 'Returned' },
-  ];
-  for (const proc of marketplaceProcesses) {
-    const raw = (proc.process || '').toLowerCase();
-    if (isReturnProcess(raw)) {
-      timeline.push({ status: 'Returned', timestamp: new Date(proc.createdAt || Date.now()) });
-      continue;
-    }
-    if (isReturnKeeper(raw)) {
-      timeline.push({ status: 'Delivered', timestamp: new Date(proc.createdAt || Date.now()) });
-      continue;
-    }
-    const match = statuses.find(s => s.process === raw);
-    if (match) {
-      timeline.push({ status: match.status, timestamp: new Date(proc.createdAt || Date.now()) });
-    }
-  }
-  return timeline.sort((a, b) => a.timestamp - b.timestamp);
+const extractStatusTimeline = (trackingData) => {
+  return trackingEvents(trackingData);
 };
 
 const resolveStatus = (dbStatus, newStatus, statusSource) => {
@@ -164,66 +149,53 @@ const fetchApiOrders = async (authToken) => {
     headers['Authorization'] = `Bearer ${authToken}`;
   }
 
-  const response = await retryWithBackoff(() => axios.get(
-    `${API_BASE}/vendor/orders/super-admin/list`,
-    {
-      params: { tab: 'marketplace', page: 1, limit: 500, unattendedOrders: '', status: 'Active' },
+  const { fromDate, toDate } = getOrderSyncWindow();
+  const perPage = 50;
+  const ordersList = [];
+  let page = 1;
+  let totalCount = 0;
+  let firstResponse = null;
+
+  // Fetch the date-filtered endpoint page by page.  There is intentionally no
+  // all-time fallback: orders older than the status-sync window must not have
+  // their status rewritten during routine sync.
+  while (page <= 1000) {
+    const response = await retryWithBackoff(() => axios.get(ORDERS_API_URL, {
+      params: { fromDate, toDate, page, perPage },
       headers, timeout: 30000
-    }
-  ));
-
-  const responseData = response.data;
-  let ordersList = [];
-
-  if (responseData?.data?.orders && Array.isArray(responseData.data.orders)) {
-    ordersList = responseData.data.orders;
-  } else if (responseData?.orders && Array.isArray(responseData.orders)) {
-    ordersList = responseData.orders;
-  } else if (Array.isArray(responseData)) {
-    ordersList = responseData;
-  } else if (responseData?.data && Array.isArray(responseData.data)) {
-    ordersList = responseData.data;
+    }));
+    if (!firstResponse) firstResponse = response;
+    const nextOrders = extractOrders(response.data).map(normalizeOrderRecord);
+    if (nextOrders.length === 0) break;
+    ordersList.push(...nextOrders);
+    totalCount = getOrdersTotal(response.data, totalCount || ordersList.length);
+    if (nextOrders.length < perPage || (totalCount && ordersList.length >= totalCount)) break;
+    page += 1;
   }
 
-  // ponytail: API returns { data: [...], totalItems } — total lives top-level, not data.total
-  const totalCount = responseData?.totalItems ?? responseData?.data?.total ?? 1000;
-  const totalPages = Math.min(10, Math.ceil(totalCount / 500));
-  if (totalPages >= 2) {
-    const pagePromises = [];
-    for (let p = 2; p <= totalPages; p++) {
-      pagePromises.push(
-        retryWithBackoff(() => axios.get(`${API_BASE}/vendor/orders/super-admin/list`, {
-          params: { tab: 'marketplace', page: p, limit: 500, unattendedOrders: '', status: 'Active' },
-          headers, timeout: 30000
-        }).then(r => r.data)).catch(err => {
-          console.error(`[Nepalcan Sync] Error fetching page ${p}:`, err.message);
-          return null;
-        })
-      );
+  return {
+    ordersList,
+    apiResponse: {
+      status: firstResponse?.status,
+      statusText: firstResponse?.statusText,
+      dataCount: ordersList.length,
+      totalCount,
+      fromDate,
+      toDate,
+      pages: page
     }
-    const pageResults = await Promise.all(pagePromises);
-    for (const nextPageData of pageResults) {
-      if (!nextPageData) continue;
-      let nextOrders = [];
-      if (nextPageData?.data?.orders && Array.isArray(nextPageData.data.orders)) {
-        nextOrders = nextPageData.data.orders;
-      } else if (nextPageData?.orders && Array.isArray(nextPageData.orders)) {
-        nextOrders = nextPageData.orders;
-      } else if (Array.isArray(nextPageData?.data)) {
-        nextOrders = nextPageData.data;
-      }
-      if (nextOrders.length === 0) continue;
-      for (const o of nextOrders) ordersList.push(o);
-      if (ordersList.length >= totalCount) break;
-    }
-  }
-
-  return { ordersList, apiResponse: { status: response.status, statusText: response.statusText, dataCount: ordersList.length } };
+  };
 };
 
 const buildOrderUpdate = (orderData, trackingData, existingOrder) => {
   const orderId = orderData.orderId || orderData._id;
-  const hasTracking = trackingData?.marketplaceProcesses?.length > 0;
+  const hasTracking = Boolean(trackingData && (
+    trackingData.marketplaceProcesses?.length > 0 ||
+    trackingData.processHistory?.length > 0 ||
+    trackingData.deliveryDate ||
+    trackingData.externalDeliveryStatus ||
+    trackingData.externalDeliveryEvent
+  ));
 
   const trackingStatus = hasTracking ? deriveStatusFromTracking(trackingData.marketplaceProcesses, trackingData) : deriveFromLogisticsFields(trackingData);
   // ponytail: commerce return variants collapse to enum-safe status; initiated/declined stay Delivered
@@ -243,22 +215,27 @@ const buildOrderUpdate = (orderData, trackingData, existingOrder) => {
     const resolved = resolveStatus(existingOrder.orderStatus, newStatus, statusSource);
     newStatus = resolved.status;
     statusSource = resolved.source;
-  }  let timeline = [];
-  if (hasTracking) {
-    timeline = extractStatusTimeline(trackingData.marketplaceProcesses);
   }
-  if (timeline.length === 0 && orderData.createdAt) {
-    timeline.push({ status: 'Pending', timestamp: new Date(orderData.createdAt) });
-    timeline.push({ status: newStatus, timestamp: new Date(orderData.updatedAt || Date.now()) });
-  } else if (timeline.length === 0) {
-    timeline.push({ status: newStatus, timestamp: new Date() });
-  }
-
   const apiUpdatedAt = orderData.updatedAt ? new Date(orderData.updatedAt) : new Date();
   const now = new Date();
+  const statusChanged = !existingOrder || existingOrder.orderStatus !== newStatus;
+  const observedTimeline = [];
+  if (orderData.createdAt) {
+    observedTimeline.push({ status: 'Pending', timestamp: new Date(orderData.createdAt), source: 'commerce_api', accuracy: 'exact' });
+  }
+  if (hasTracking) observedTimeline.push(...extractStatusTimeline(trackingData));
+  if (statusChanged && !observedTimeline.some(event => event.status === newStatus)) {
+    observedTimeline.push({
+      status: newStatus,
+      timestamp: orderData.updatedAt ? new Date(orderData.updatedAt) : now,
+      source: orderData.updatedAt ? 'commerce_api' : 'observed',
+      accuracy: 'estimated'
+    });
+  }
+  const timeline = mergeStatusHistory(existingOrder?.statusHistory || [], observedTimeline);
+  const lifecycle = lifecycleFields({ ...existingOrder, statusHistory: timeline, trackingData });
 
   if (existingOrder) {
-    const statusChanged = existingOrder.orderStatus !== newStatus;
     // ponytail: API is truth for contact fields too — renames/payment changes must not freeze at insert
     // ponytail: keep stored statusSource when status unchanged — no-info sync must not flip provenance
     const setFields = { orderStatus: newStatus, apiUpdatedAt, lastSyncedAt: now,
@@ -266,11 +243,16 @@ const buildOrderUpdate = (orderData, trackingData, existingOrder) => {
       vendor: orderData.vendor ?? existingOrder.vendor,
       paymentStatus: orderData.paymentStatus ?? existingOrder.paymentStatus,
       paymentMethod: orderData.paymentMethod ?? existingOrder.paymentMethod,
-      source: orderData.source ?? existingOrder.source };
+      source: orderData.source ?? existingOrder.source,
+      totalAmount: orderData.totalAmount ?? existingOrder.totalAmount,
+      shippingAmount: orderData.shippingAmount ?? existingOrder.shippingAmount };
 
-    if (statusChanged) {
+    if (statusChanged || hasTracking) {
       setFields.statusHistory = timeline;
       setFields.statusSource = statusSource;
+    }
+    for (const field of ['processingAt', 'shippedAt', 'deliveredAt', 'cancelledAt', 'returnedAt']) {
+      if (lifecycle[field]) setFields[field] = lifecycle[field];
     }
 
     if (hasTracking && trackingData) {
@@ -313,11 +295,18 @@ const buildOrderUpdate = (orderData, trackingData, existingOrder) => {
     orderStatus: newStatus,
     statusSource,
     paymentStatus: orderData.paymentStatus,
+    paymentMethod: orderData.paymentMethod,
+    source: orderData.source,
     totalAmount: orderData.totalAmount || 0,
     shippingAmount: orderData.shippingAmount || 0,
     createdAt: orderData.createdAt ? new Date(orderData.createdAt) : new Date(),
     apiUpdatedAt,
     statusHistory: timeline,
+    processingAt: lifecycle.processingAt,
+    shippedAt: lifecycle.shippedAt,
+    deliveredAt: lifecycle.deliveredAt,
+    cancelledAt: lifecycle.cancelledAt,
+    returnedAt: lifecycle.returnedAt,
     rawData: orderData,
     priceHistory: [],
     lastSyncedAt: now
@@ -509,7 +498,7 @@ const syncNepalcanOrders = async (token = null) => {
           _id: '$vendor_lead_id',
           deliveredCount: { $sum: 1 },
           totalAmount: { $sum: '$totalAmount' },
-          lastOrderDate: { $max: '$updatedAt' }
+          lastOrderDate: { $max: statusDateExpression('Delivered') }
         } }
       ]);
 
@@ -569,7 +558,7 @@ const syncNepalcanOrders = async (token = null) => {
             _id: '$vendor_lead_id',
             deliveredCount: { $sum: 1 },
             totalAmount: { $sum: '$totalAmount' },
-            lastOrderDate: { $max: '$updatedAt' }
+            lastOrderDate: { $max: statusDateExpression('Delivered') }
           } }
         ]);
 
@@ -644,8 +633,13 @@ const syncNepalcanOrders = async (token = null) => {
 
 const enrichOrdersWithTracking = async () => {
   try {
+    const { from, to } = getOrderSyncWindow();
     const activeOrders = await NepalcanOrder.find({
-      orderStatus: { $in: ['Pending', 'Processing', 'Shipped', 'Delivered'] }
+      // Returned orders can still have a valid delivery event (delivered,
+      // then returned). Keep them in enrichment so deliveredAt is retained
+      // for delivery-event and month-end reporting.
+      orderStatus: { $in: ['Pending', 'Processing', 'Shipped', 'Delivered', 'Returned'] },
+      createdAt: { $gte: from, $lte: to }
     });
     if (activeOrders.length === 0) {
       console.log('[Tracking Enrichment] No active orders to check');
@@ -659,11 +653,11 @@ const enrichOrdersWithTracking = async () => {
     for (const order of activeOrders) {
       const trackingData = trackingMap.get(order.orderId);
       // ponytail: empty/unknown tracking yields null — must not demote Delivered to Pending
-      if (!trackingData?.marketplaceProcesses?.length && !deriveFromLogisticsFields(trackingData)) continue;
+      if (!trackingData?.marketplaceProcesses?.length && !trackingData?.processHistory?.length && !trackingData?.deliveryDate && !deriveFromLogisticsFields(trackingData)) continue;
       const newStatus = deriveStatusFromTracking(trackingData?.marketplaceProcesses, trackingData);
       if (!newStatus) continue;
       const resolved = resolveStatus(order.orderStatus, newStatus, 'logistics_api');
-      const timeline = extractStatusTimeline(trackingData.marketplaceProcesses);
+      const timeline = extractStatusTimeline(trackingData);
       if (!order.rawData) order.rawData = {};
       if (Array.isArray(trackingData.marketplaceProcesses)) order.rawData.trackingProcesses = trackingData.marketplaceProcesses;
       const now = new Date();
@@ -677,12 +671,27 @@ const enrichOrdersWithTracking = async () => {
       const setFields = {
         rawData: order.rawData,
         trackingData,
-        lastSyncedAt: now
+        lastSyncedAt: now,
+        ...(trackingData.totalAmount !== undefined ? { totalAmount: Number(trackingData.totalAmount) } : {}),
+        ...(trackingData.shippingAmount !== undefined ? { shippingAmount: Number(trackingData.shippingAmount) } : {})
       };
+      // Refresh lifecycle dates even when the current status is unchanged.
+      // Older rows can contain an estimated sync timestamp (for example the
+      // August backfill date) while the provider now exposes an exact
+      // deliveryDate in trackingData.  Previously this branch only rebuilt
+      // dates after a status transition, leaving those stale estimates in
+      // place forever.
+      const mergedTimeline = timeline.length
+        ? mergeStatusHistory(order.statusHistory || [], timeline)
+        : (order.statusHistory || []);
+      const lifecycle = lifecycleFields({ ...order.toObject(), statusHistory: mergedTimeline, trackingData });
+      if (timeline.length > 0) setFields.statusHistory = mergedTimeline;
+      for (const field of ['processingAt', 'shippedAt', 'deliveredAt', 'cancelledAt', 'returnedAt']) {
+        if (lifecycle[field]) setFields[field] = lifecycle[field];
+      }
       if (resolved.status !== order.orderStatus) {
         setFields.orderStatus = resolved.status;
         setFields.statusSource = resolved.source;
-        setFields.statusHistory = timeline.length > 0 ? timeline : order.statusHistory;
       }
       bulkOps.push({
         updateOne: {

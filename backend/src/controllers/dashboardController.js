@@ -7,6 +7,7 @@ const NepalcanSyncLog = require('../models/NepalcanSyncLog');
 const Goal = require('../models/Goal');
 const User = require('../models/User');
 const { toNepaliDateObject } = require('../utils/nepaliDate');
+const { statusDateExpression } = require('../utils/orderLifecycle');
 
 exports.getStats = async (req, res) => {
   try {
@@ -690,11 +691,12 @@ exports.getBDDrillDown = async (req, res) => {
         }
       },
       { $unwind: '$lead' },
+      { $set: { _deliveredAt: statusDateExpression('Delivered') } },
       {
         $match: {
           'lead.assigned_user': bdId,
           orderStatus: 'Delivered',
-          createdAt: { $gte: start, $lte: end }
+          _deliveredAt: { $gte: start, $lte: end }
         }
       },
       {
@@ -704,10 +706,10 @@ exports.getBDDrillDown = async (req, res) => {
           vendor: 1,
           totalAmount: 1,
           createdAt: 1,
-          deliveredAt: '$updatedAt'
+          deliveredAt: '$_deliveredAt'
         }
       },
-      { $sort: { createdAt: -1 } }
+      { $sort: { deliveredAt: -1 } }
     ]);
 
     // Get vendors for this BD
@@ -1039,20 +1041,22 @@ exports.getAnalytics = async (req, res) => {
 
       // 3. NepalcanOrder $facet — merges revenue, summary, cohorts into 1 (no $lookup queries)
       NepalcanOrder.aggregate([
-        { $match: { createdAt: dateFilter } },
         { $facet: {
           revenueTrend: [
-            { $match: { orderStatus: 'Delivered' } },
-            { $group: { _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } }, revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 } } },
+            { $set: { _deliveredAt: statusDateExpression('Delivered') } },
+            { $match: { orderStatus: 'Delivered', _deliveredAt: dateFilter } },
+            { $group: { _id: { year: { $year: '$_deliveredAt' }, month: { $month: '$_deliveredAt' } }, revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 } } },
             { $sort: { '_id.year': 1, '_id.month': 1 } }
           ],
           totalRevenue: [
-            { $match: { orderStatus: 'Delivered' } },
+            { $set: { _deliveredAt: statusDateExpression('Delivered') } },
+            { $match: { orderStatus: 'Delivered', _deliveredAt: dateFilter } },
             { $group: { _id: null, total: { $sum: '$totalAmount' }, count: { $sum: 1 } } }
           ],
           customerFirstOrder: [
-            { $match: { orderStatus: 'Delivered' } },
-            { $group: { _id: '$customer', firstOrder: { $min: '$createdAt' }, orderCount: { $sum: 1 }, totalSpent: { $sum: '$totalAmount' } } },
+            { $set: { _deliveredAt: statusDateExpression('Delivered') } },
+            { $match: { orderStatus: 'Delivered', _deliveredAt: dateFilter } },
+            { $group: { _id: '$customer', firstOrder: { $min: '$_deliveredAt' }, orderCount: { $sum: 1 }, totalSpent: { $sum: '$totalAmount' } } },
             { $match: { orderCount: { $gt: 0 } } },
             { $project: { firstOrderMonth: { $dateToString: { format: '%Y-%m', date: '$firstOrder' } }, orderCount: 1, totalSpent: 1, isRepeat: { $cond: [{ $gt: ['$orderCount', 1] }, true, false] } } },
             { $group: { _id: '$firstOrderMonth', totalCustomers: { $sum: 1 }, repeatCustomers: { $sum: { $cond: ['$isRepeat', 1, 0] } }, avgOrders: { $avg: '$orderCount' }, avgSpent: { $avg: '$totalSpent' } } },
@@ -1064,7 +1068,8 @@ exports.getAnalytics = async (req, res) => {
 
       // 4. Revenue by source (separate due to $lookup)
       NepalcanOrder.aggregate([
-        { $match: { orderStatus: 'Delivered', createdAt: dateFilter } },
+        { $set: { _deliveredAt: statusDateExpression('Delivered') } },
+        { $match: { orderStatus: 'Delivered', _deliveredAt: dateFilter } },
         { $lookup: { from: 'leads', localField: 'vendor_lead_id', foreignField: '_id', as: 'lead' } },
         { $unwind: { path: '$lead', preserveNullAndEmptyArrays: false } },
         { $group: { _id: '$lead.lead_source', revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 } } },
@@ -1073,7 +1078,8 @@ exports.getAnalytics = async (req, res) => {
 
       // 5. BD Revenue (separate due to $lookup)
       NepalcanOrder.aggregate([
-        { $match: { orderStatus: 'Delivered', createdAt: dateFilter } },
+        { $set: { _deliveredAt: statusDateExpression('Delivered') } },
+        { $match: { orderStatus: 'Delivered', _deliveredAt: dateFilter } },
         { $lookup: { from: 'leads', localField: 'vendor_lead_id', foreignField: '_id', as: 'lead' } },
         { $unwind: { path: '$lead', preserveNullAndEmptyArrays: false } },
         { $match: { 'lead.assigned_user': { $exists: true, $ne: null } } },
@@ -1296,7 +1302,8 @@ async function computeGoalProgress(goals, now) {
       const gStart = g.start_date || new Date(0);
       const gEnd = g.end_date ? new Date(Math.min(new Date(g.end_date).getTime(), now.getTime())) : now;
       facetStages[`g${i}`] = [
-        { $match: { orderStatus: 'Delivered', createdAt: { $gte: gStart, $lte: gEnd } } },
+        { $set: { _deliveredAt: statusDateExpression('Delivered') } },
+        { $match: { orderStatus: 'Delivered', _deliveredAt: { $gte: gStart, $lte: gEnd } } },
         { $lookup: { from: 'leads', localField: 'vendor_lead_id', foreignField: '_id', as: 'lead' } },
         { $unwind: { path: '$lead', preserveNullAndEmptyArrays: false } },
         { $match: { 'lead.assigned_user': userId } },
@@ -1425,7 +1432,8 @@ exports.getBDTiers = async (req, res) => {
 
     // Get revenue per user (through leads → orders)
     const revenuePerUser = await NepalcanOrder.aggregate([
-      { $match: { orderStatus: 'Delivered', createdAt: dateFilter } },
+      { $set: { _deliveredAt: statusDateExpression('Delivered') } },
+      { $match: { orderStatus: 'Delivered', _deliveredAt: dateFilter } },
       { $lookup: { from: 'leads', localField: 'vendor_lead_id', foreignField: '_id', as: 'lead' } },
       { $unwind: { path: '$lead', preserveNullAndEmptyArrays: false } },
       { $match: { 'lead.assigned_user': { $exists: true, $ne: null } } },
@@ -1630,10 +1638,11 @@ const User = require('../models/User');
 
       // 3. Revenue (separate due to $lookup)
       NepalcanOrder.aggregate([
+        { $set: { _deliveredAt: statusDateExpression('Delivered') } },
         { $lookup: { from: 'leads', localField: 'vendor_lead_id', foreignField: '_id', as: 'lead' } },
         { $unwind: { path: '$lead', preserveNullAndEmptyArrays: false } },
-        { $match: { 'lead.assigned_user': userId, orderStatus: 'Delivered', createdAt: dateFilter } },
-        { $group: { _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } }, revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 } } },
+        { $match: { 'lead.assigned_user': userId, orderStatus: 'Delivered', _deliveredAt: dateFilter } },
+        { $group: { _id: { year: { $year: '$_deliveredAt' }, month: { $month: '$_deliveredAt' } }, revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 } } },
         { $sort: { '_id.year': 1, '_id.month': 1 } }
       ]),
 

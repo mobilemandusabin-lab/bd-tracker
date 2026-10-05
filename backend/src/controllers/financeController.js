@@ -1,5 +1,12 @@
 const Finance = require('../models/Finance');
 const NepalcanOrder = require('../models/NepalcanOrder');
+const { lifecycleFields } = require('../utils/orderLifecycle');
+
+const nptDayStart = (ymd) => new Date(`${ymd}T00:00:00+05:45`);
+const nptDayEnd = (ymd) => new Date(`${ymd}T23:59:59.999+05:45`);
+const parseDateBound = (value, end = false) => /^\d{4}-\d{2}-\d{2}$/.test(value)
+  ? (end ? nptDayEnd(value) : nptDayStart(value))
+  : new Date(value);
 const axios = require('axios');
 
 // GET /finance — list with filters, search, pagination
@@ -38,8 +45,8 @@ exports.getAllFinance = async (req, res) => {
     if (payment_status) query.payment_status = payment_status;
     if (date_from || date_to) {
       query.delivery_date = {};
-      if (date_from) query.delivery_date.$gte = new Date(date_from);
-      if (date_to) query.delivery_date.$lte = new Date(date_to);
+      if (date_from) query.delivery_date.$gte = parseDateBound(date_from);
+      if (date_to) query.delivery_date.$lte = parseDateBound(date_to, true);
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -69,8 +76,8 @@ exports.getSummary = async (req, res) => {
     if (vendor_name) match.vendor_name = { $regex: vendor_name, $options: 'i' };
     if (date_from || date_to) {
       match.delivery_date = {};
-      if (date_from) match.delivery_date.$gte = new Date(date_from);
-      if (date_to) match.delivery_date.$lte = new Date(date_to);
+      if (date_from) match.delivery_date.$gte = parseDateBound(date_from);
+      if (date_to) match.delivery_date.$lte = parseDateBound(date_to, true);
     }
 
     const [summary] = await Finance.aggregate([
@@ -260,8 +267,7 @@ exports.syncFromNepalcan = async (req, res) => {
         const costToVendor = breakdown.vendorDropCharge || 0;
 
         // Get delivery date from statusHistory
-        const deliveredEntry = order.statusHistory?.find(h => h.status === 'Delivered');
-        const deliveryDate = deliveredEntry?.timestamp || order.updatedAt;
+        const deliveryDate = lifecycleFields(order).deliveredAt;
 
         const financeData = {
           order_id: order.orderId,

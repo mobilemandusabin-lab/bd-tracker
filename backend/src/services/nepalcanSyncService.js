@@ -1,7 +1,7 @@
 const NepalcanSyncLog = require('../models/NepalcanSyncLog');
 const { loginToNepalcan } = require('./nepalcanAuthService');
 const { syncNepalcanOrders, enrichOrdersWithTracking } = require('./nepalcanOrderSyncService');
-const { syncNepalcanVendors, syncServiceBranches } = require('./nepalcanVendorSyncService');
+const { syncNepalcanVendors } = require('./nepalcanVendorSyncService');
 const { fetchTotalMarketplaceProducts } = require('./nepalcanMarketplaceService');
 
 const syncAllNepalcanData = async (userId = null) => {
@@ -28,10 +28,6 @@ const syncAllNepalcanData = async (userId = null) => {
     console.log('[Full Sync] Starting vendors sync...');
     vendorsResult = await syncNepalcanVendors(loginToken, userId);
     console.log(`[Full Sync] Vendors sync complete: ${vendorsResult.synced} vendors`);
-
-    console.log('[Full Sync] Starting service branches sync...');
-    const branchesResult = await syncServiceBranches(loginToken);
-    console.log(`[Full Sync] Service branches sync complete: ${branchesResult.updated} vendors updated`);
 
     console.log('[Full Sync] Fetching marketplace products count...');
     marketplaceProductsCount = await fetchTotalMarketplaceProducts(loginToken);

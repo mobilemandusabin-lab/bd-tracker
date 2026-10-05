@@ -22,7 +22,7 @@ import {
 const NEPALI_DOW = { Sun: NEPALI_WEEKDAYS[0], Mon: NEPALI_WEEKDAYS[1], Tue: NEPALI_WEEKDAYS[2], Wed: NEPALI_WEEKDAYS[3], Thu: NEPALI_WEEKDAYS[4], Fri: NEPALI_WEEKDAYS[5], Sat: NEPALI_WEEKDAYS[6] };
 
 const RED_GRADIENT = ['#DC2626', '#EF4444', '#F87171', '#FCA5A5', '#FECACA', '#FEE2E2', '#FECDD3', '#FBD38D', '#F6AD55', '#ED8936'];
-const STATUS_COLORS = { Pending: '#fbbf24', Processing: '#3b82f6', Shipped: '#f59e0b', Delivered: '#10b981', Cancelled: '#ef4444', Returned: '#8b5cf6' };
+const STATUS_COLORS = { Pending: '#fbbf24', Hold: '#64748b', Processing: '#3b82f6', Shipped: '#f59e0b', Delivered: '#10b981', Cancelled: '#ef4444', Returned: '#8b5cf6' };
 
 // ─── Helpers (BS dates throughout) ────────────────────────────────
 const formatRs = (amount) => `Rs. ${(amount || 0).toLocaleString()}`;
@@ -67,7 +67,7 @@ const RichTooltip = ({ active, payload, label }) => {
 const SectionCard = ({ title, icon: Icon, children, className = '', onClick, hint, badge }) => (
   <div className={`bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden transition-all hover:shadow-md ${onClick ? 'cursor-pointer' : ''} ${className}`}
     onClick={onClick}>
-    <div className="px-5 py-3.5 border-b border-slate-50 flex items-center justify-between">
+    <div className="px-4 sm:px-5 py-3.5 border-b border-slate-50 flex items-center justify-between gap-2">
       <div className="flex items-center gap-2">
         {Icon && <Icon size={15} className="text-red-600" />}
         <h3 className="text-[13px] font-extrabold text-slate-900">{title}</h3>
@@ -79,7 +79,7 @@ const SectionCard = ({ title, icon: Icon, children, className = '', onClick, hin
         </span>
       )}
     </div>
-    <div className="p-5">{children}</div>
+    <div className="p-4 sm:p-5">{children}</div>
   </div>
 );
 
@@ -144,6 +144,7 @@ const DrilldownModal = ({ isOpen, onClose, title, subtitle, icon: Icon, filters,
           if (filters.status) params.append('status', filters.status);
           if (filters.startDate) params.append('startDate', filters.startDate);
           if (filters.endDate) params.append('endDate', filters.endDate);
+          if (filters.dateBasis) params.append('dateBasis', filters.dateBasis);
           params.append('limit', '500');
           params.append('page', String(page));
 
@@ -205,7 +206,7 @@ const DrilldownModal = ({ isOpen, onClose, title, subtitle, icon: Icon, filters,
             <div className="text-center py-12"><Package size={32} className="text-slate-200 mx-auto mb-2" /><p className="text-xs font-bold text-slate-400">No orders found</p></div>
           ) : (
             <div className="space-y-2">
-              {orders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(order => (
+              {orders.sort((a, b) => new Date(b[filters.dateBasis === 'delivered' ? 'deliveredAt' : filters.dateBasis === 'returned' ? 'returnedAt' : 'createdAt'] || 0) - new Date(a[filters.dateBasis === 'delivered' ? 'deliveredAt' : filters.dateBasis === 'returned' ? 'returnedAt' : 'createdAt'] || 0)).map(order => (
                 <Link key={order.orderId} to={`/nepalcan-sales/${order.orderId}`}
                   className="flex items-center justify-between p-3 bg-slate-50 rounded-xl hover:bg-red-50/30 transition-colors group"
                   onClick={onClose}>
@@ -217,7 +218,14 @@ const DrilldownModal = ({ isOpen, onClose, title, subtitle, icon: Icon, filters,
                         {order.orderStatus}
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-500 truncate">{order.customer || 'Unknown'} &middot; {order.vendor || 'No vendor'} &middot; {order.createdAt ? formatNepaliDateTime(order.createdAt) : ''}</p>
+                    <p className="text-[11px] text-slate-500 truncate">{order.customer || 'Unknown'} &middot; {order.vendor || 'No vendor'}</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      {filters.dateBasis === 'delivered' ? 'Delivered' : filters.dateBasis === 'returned' ? 'Returned' : 'Placed'}: {' '}
+                      {(() => {
+                        const eventDate = filters.dateBasis === 'delivered' ? order.deliveredAt : filters.dateBasis === 'returned' ? order.returnedAt : order.createdAt;
+                        return eventDate ? formatNepaliDateTime(eventDate) : 'Date not recorded';
+                      })()}
+                    </p>
                   </div>
                   <div className="flex items-center gap-3 shrink-0 ml-3">
                     <span className="text-sm font-extrabold text-slate-900">{formatRs(order.totalAmount)}</span>
@@ -244,14 +252,14 @@ const MonthSelector = ({ months, selected, onChange, compareMode, compareWith, o
       {/* Primary month selector */}
       <div className="relative">
         <button onClick={() => setOpen(open === 'primary' ? false : 'primary')}
-          className="flex items-center gap-2 px-4 py-2.5 bg-slate-50 hover:bg-red-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:text-red-600 transition-all">
+          className="flex items-center justify-between gap-2 px-4 py-2.5 bg-slate-50 hover:bg-red-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:text-red-600 transition-all w-full sm:w-auto">
           {selectedMonth ? monthLabel(selectedMonth) : 'Select Month'}
           <ChevronDown size={14} className={`transition-transform text-slate-400 ${open === 'primary' ? 'rotate-180' : ''}`} />
         </button>
         {open === 'primary' && (
           <>
             <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-            <div className="absolute top-full left-0 mt-2 bg-white rounded-xl shadow-xl border border-slate-100 py-2 z-50 min-w-[200px] max-h-[300px] overflow-y-auto">
+            <div className="absolute top-full left-0 mt-2 bg-white rounded-xl shadow-xl border border-slate-100 py-2 z-50 w-[min(88vw,320px)] sm:min-w-[260px] max-h-[300px] overflow-y-auto">
               {months.map((m, i) => (
                 <button key={i} onClick={() => { onChange(m); setOpen(false); }}
                   className={`w-full px-4 py-2.5 text-left text-xs font-bold hover:bg-red-50 transition-colors flex items-center justify-between ${m.year === selected.year && m.month === selected.month ? 'text-red-600 bg-red-50' : 'text-slate-700'}`}>
@@ -275,14 +283,14 @@ const MonthSelector = ({ months, selected, onChange, compareMode, compareWith, o
       {compareMode && (
         <div className="relative">
           <button onClick={() => setOpen(open === 'compare' ? false : 'compare')}
-            className="flex items-center gap-2 px-4 py-2.5 bg-slate-50 hover:bg-red-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:text-red-600 transition-all">
+          className="flex items-center justify-between gap-2 px-4 py-2.5 bg-slate-50 hover:bg-red-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:text-red-600 transition-all w-full sm:w-auto">
             {compareMonth ? monthLabel(compareMonth) : 'Compare with...'}
             <ChevronDown size={14} className={`transition-transform text-slate-400 ${open === 'compare' ? 'rotate-180' : ''}`} />
           </button>
           {open === 'compare' && (
             <>
               <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-              <div className="absolute top-full left-0 mt-2 bg-white rounded-xl shadow-xl border border-slate-100 py-2 z-50 min-w-[200px] max-h-[300px] overflow-y-auto">
+              <div className="absolute top-full left-0 mt-2 bg-white rounded-xl shadow-xl border border-slate-100 py-2 z-50 w-[min(88vw,320px)] sm:min-w-[260px] max-h-[300px] overflow-y-auto">
                 {months.filter(m => !(m.year === selected.year && m.month === selected.month)).map((m, i) => (
                   <button key={i} onClick={() => { onCompareChange(m); setOpen(false); }}
                     className={`w-full px-4 py-2.5 text-left text-xs font-bold hover:bg-red-50 transition-colors flex items-center justify-between ${m.year === compareWith?.year && m.month === compareWith?.month ? 'text-red-600 bg-red-50' : 'text-slate-700'}`}>
@@ -302,6 +310,7 @@ const MonthSelector = ({ months, selected, onChange, compareMode, compareWith, o
 // ─── Main Page ──────────────────────────────────────────────────
 const NepalcanAnalyticsPage = ({ embedded }) => {
   const [monthlyData, setMonthlyData] = useState([]);
+  const [monthlyDateAudit, setMonthlyDateAudit] = useState(null);
   const [analyticsData, setAnalyticsData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -334,9 +343,9 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
       });
       setDailyData({ days: res.data.days || [], hourly: res.data.hourly || [],
         topVendors: res.data.topVendors || [], summary: res.data.summary || null,
-        fallbackCount: res.data.fallbackCount || 0 });
+        fallbackCount: res.data.fallbackCount || 0, dateAudit: res.data.dateAudit || null });
     } catch {
-      setDailyData({ days: [], hourly: [], topVendors: [], summary: null, fallbackCount: 0 });
+      setDailyData({ days: [], hourly: [], topVendors: [], summary: null, fallbackCount: 0, dateAudit: null });
     } finally {
       setDailyLoading(false);
     }
@@ -368,12 +377,18 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
     setLoading(true);
     setError(null);
     try {
-      const [monthlyRes, analyticsRes] = await Promise.all([
-        axios.get(`${API_URL}/nepalcan-orders/monthly`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API_URL}/nepalcan-orders/analytics`, { headers: { Authorization: `Bearer ${token}` } })
-      ]);
+      // These reports are database-heavy. Fetch them in sequence so the
+      // initial dashboard load does not exhaust the Mongo connection pool
+      // with two large aggregations at the same time.
+      const monthlyRes = await axios.get(`${API_URL}/nepalcan-orders/monthly`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const analyticsRes = await axios.get(`${API_URL}/nepalcan-orders/analytics`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
       const months = monthlyRes.data.months || [];
       setMonthlyData(months);
+      setMonthlyDateAudit(monthlyRes.data.dateAudit || null);
       setAnalyticsData(analyticsRes.data);
       if (months.length > 0 && !selectedMonth) {
         setSelectedMonth(months[0]);
@@ -449,7 +464,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
         <div className="relative overflow-hidden bg-gradient-to-br from-red-600 via-red-700 to-red-800 rounded-2xl p-6 lg:p-8">
           <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2" />
           <div className="absolute bottom-0 left-1/2 w-40 h-40 bg-white/5 rounded-full translate-y-1/2" />
-          <div className="relative flex items-end justify-between gap-4">
+          <div className="relative flex flex-col sm:flex-row sm:items-end justify-between gap-4">
             <div>
               <div className="flex items-center gap-2 mb-3">
                 <div className="w-1.5 h-6 bg-white/40 rounded-full" />
@@ -459,7 +474,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
               <p className="text-xs text-red-200/80 mt-1.5">Month-wise trends, vendor performance, and operational insights</p>
             </div>
             <button onClick={fetchData}
-              className="flex items-center gap-2 px-5 py-2.5 bg-white/10 hover:bg-white/20 backdrop-blur-sm border border-white/20 rounded-xl text-xs font-bold text-white transition-all shrink-0">
+              className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white/10 hover:bg-white/20 backdrop-blur-sm border border-white/20 rounded-xl text-xs font-bold text-white transition-all w-full sm:w-auto shrink-0">
               <RefreshCw size={14} /> Refresh
             </button>
           </div>
@@ -467,16 +482,16 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
       )}
 
       {/* ── Month Selector ──────────────────────────────── */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center gap-3 flex-wrap">
-        <div className="flex bg-slate-100 rounded-xl p-1 shrink-0">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
+        <div className="flex bg-slate-100 rounded-xl p-1 w-full sm:w-auto shrink-0">
           {['monthly', 'daily'].map(t => (
             <button key={t} onClick={() => setActiveTab(t)}
-              className={`px-4 py-2 rounded-lg text-xs font-extrabold capitalize transition-all ${activeTab === t ? 'bg-white text-red-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+              className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-extrabold capitalize transition-all ${activeTab === t ? 'bg-white text-red-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
               {t === 'daily' ? 'Daily Sales' : 'Monthly'}
             </button>
           ))}
         </div>
-        <div className="flex-1">
+        {activeTab === 'monthly' && <div className="flex-1 min-w-0">
           <MonthSelector months={monthlyData} selected={selectedMonth || {}} onChange={setSelectedMonth}
             compareMode={compareMode} compareWith={compareWith || {}} onCompareChange={(val) => {
               if (typeof val === 'boolean') {
@@ -486,7 +501,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
                 setCompareWith(val);
               }
             }} />
-        </div>
+        </div>}
         {embedded && (
           <button onClick={fetchData}
             className="p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-slate-500 hover:text-slate-700 transition-all shrink-0"
@@ -496,9 +511,20 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
         )}
       </div>
 
+      <div className="rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 flex items-start gap-3">
+        <AlertCircle size={17} className="text-blue-600 mt-0.5 shrink-0" />
+        <div className="min-w-0">
+          <p className="text-xs font-extrabold text-blue-900">How dates are counted</p>
+          <p className="text-[11px] leading-5 text-blue-700">Orders and gross value use the placed date. Delivered orders and net revenue use the delivery date. Returns use the return date. Status breakdowns show the current state of orders placed in the selected month.</p>
+          {monthlyDateAudit && (monthlyDateAudit.deliveredMissingDate > 0 || monthlyDateAudit.estimatedDeliveryDates > 0) && (
+            <p className="text-[10px] font-bold text-amber-700 mt-1">Legacy date quality: {monthlyDateAudit.deliveredMissingDate} delivered orders are unallocated because no delivery date exists; {monthlyDateAudit.estimatedDeliveryDates} delivery dates are historical estimates.</p>
+          )}
+        </div>
+      </div>
+
       {/* ── Daily Sales by Date (excl Cancelled) ──────────── */}
       {activeTab === 'daily' && (
-        <SectionCard title="Daily Sales Report" icon={BarChart3} badge="NPT days · excl Cancelled">
+        <SectionCard title="Daily Sales Report" icon={BarChart3} badge="NPT · event dates">
           <div className="flex items-center gap-1.5 flex-wrap mb-3">
             {[['today', 'Today'], ['week', 'This Week'], ['month', 'This Month'], ['custom', 'Custom']].map(([key, label]) => (
               <button key={key} onClick={() => applyPreset(key)}
@@ -536,18 +562,23 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
               {dailyData.fallbackCount} order{dailyData.fallbackCount > 1 ? 's' : ''} timed at sync, not API — createdAt missing from API response.
             </p>
           )}
+          {dailyData.dateAudit && (dailyData.dateAudit.deliveredMissingDate > 0 || dailyData.dateAudit.estimatedDeliveryDates > 0) && (
+            <p className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mb-4">
+              Delivery timeline quality: {dailyData.dateAudit.estimatedDeliveryDates} estimated in this range; {dailyData.dateAudit.deliveredMissingDate} delivered orders have no allocatable delivery date.
+            </p>
+          )}
           {dailyData.summary && (
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
-              <MetricCard icon={Package} label="Orders" value={dailyData.summary.orders}
+              <MetricCard icon={Package} label="Orders Placed" value={dailyData.summary.orders}
                 subValue={`${dailyData.days.length} days in range${dailyData.summary.cancelledOrders ? ` · +${dailyData.summary.cancelledOrders} cancelled` : ''}`} />
-              <MetricCard icon={DollarSign} label="Gross Revenue" value={formatRs(dailyData.summary.revenue)}
-                subValue={`Net: ${formatRs(dailyData.summary.deliveredRevenue)}`} />
+              <MetricCard icon={DollarSign} label="Placed Value" value={formatRs(dailyData.summary.revenue)}
+                subValue={`Delivered net: ${formatRs(dailyData.summary.deliveredRevenue)}`} />
               <MetricCard icon={BarChart3} label="AOV" value={formatRs(dailyData.summary.orders ? Math.round(dailyData.summary.revenue / dailyData.summary.orders) : 0)}
                 subValue={`Delivered: ${formatRs(dailyData.summary.deliveredOrders ? Math.round(dailyData.summary.deliveredRevenue / dailyData.summary.deliveredOrders) : 0)}`} />
-              <MetricCard icon={Truck} label="Delivered" value={dailyData.summary.deliveredOrders}
-                subValue={`${dailyData.summary.orders ? Math.round((dailyData.summary.deliveredOrders / dailyData.summary.orders) * 100) : 0}% rate`} />
-              <MetricCard icon={RotateCcw} label="Returns" value={dailyData.summary.returnedOrders}
-                subValue={`${dailyData.summary.orders ? Math.round((dailyData.summary.returnedOrders / dailyData.summary.orders) * 1000) / 10 : 0}% rate`} />
+              <MetricCard icon={Truck} label="Delivery Events" value={dailyData.summary.deliveredOrders}
+                subValue="Counted on delivered date" />
+              <MetricCard icon={RotateCcw} label="Return Events" value={dailyData.summary.returnedOrders}
+                subValue="Counted on returned date" />
             </div>
           )}
           {dailyData.days.length > 0 && (
@@ -566,9 +597,9 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
                   <YAxis yAxisId="orders" orientation="right" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={40} />
                   <Tooltip content={<RichTooltip />} />
                   <Legend verticalAlign="top" height={36} formatter={(v) => <span className="text-xs font-bold text-slate-600">{v}</span>} />
-                  <Area yAxisId="revenue" type="monotone" dataKey="revenue" name="Gross Revenue" stroke="#FCA5A5" strokeWidth={2} strokeDasharray="5 4" fill="none" />
-                  <Area yAxisId="revenue" type="monotone" dataKey="deliveredRevenue" name="Net Revenue" stroke="#059669" strokeWidth={2.5} fill="url(#dailyRevGrad)" />
-                  <Area yAxisId="orders" type="monotone" dataKey="orders" name="Orders" stroke="#F59E0B" strokeWidth={2} fill="none" />
+                  <Area yAxisId="revenue" type="monotone" dataKey="revenue" name="Placed Value" stroke="#FCA5A5" strokeWidth={2} strokeDasharray="5 4" fill="none" />
+                  <Area yAxisId="revenue" type="monotone" dataKey="deliveredRevenue" name="Delivered Net" stroke="#059669" strokeWidth={2.5} fill="url(#dailyRevGrad)" />
+                  <Area yAxisId="orders" type="monotone" dataKey="orders" name="Orders Placed" stroke="#F59E0B" strokeWidth={2} fill="none" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -599,7 +630,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
               <table className="w-full">
                 <thead className="sticky top-0 bg-slate-50">
                   <tr className="border-b border-slate-100">
-                    {['Date', 'Orders', 'Revenue', 'AOV', 'Delivered', 'Returned', 'Customers'].map(h => (
+                    {['Date', 'Placed', 'Placed Value', 'AOV', 'Delivered Events', 'Return Events', 'Customers'].map(h => (
                       <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -625,14 +656,14 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
               <p className="text-[11px] font-extrabold text-slate-500 uppercase tracking-widest mb-2">Top vendors in range</p>
               <div className="space-y-2">
                 {dailyData.topVendors.map((v, i) => (
-                  <button key={v.vendor + i} onClick={() => openDrilldown(v.vendor, `${v.orders} orders · ${formatRs(v.revenue)}`, Store, { vendor: v.vendor, startDate: dailyStart, endDate: dailyEnd, excludeCancelled: true })}
+                  <button key={v.vendor + i} onClick={() => openDrilldown(v.vendor, `${v.orders} placed · ${formatRs(v.revenue)}`, Store, { vendor: v.vendor, startDate: dailyStart, endDate: dailyEnd, dateBasis: 'created', excludeCancelled: true })}
                     className="w-full flex items-center justify-between p-3 bg-slate-50 rounded-xl hover:bg-red-50/40 transition-colors text-left group">
                     <div className="flex items-center gap-3 min-w-0">
                       <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-extrabold shrink-0 ${i === 0 ? 'bg-red-600 text-white' : 'bg-white text-slate-500 border border-slate-200'}`}>{i + 1}</span>
                       <span className="text-xs font-bold text-slate-900 group-hover:text-red-600 truncate">{v.vendor}</span>
                     </div>
                     <div className="flex items-center gap-4 shrink-0">
-                      <span className="text-[11px] text-slate-500 font-medium">{v.orders} orders</span>
+                      <span className="text-[11px] text-slate-500 font-medium">{v.orders} placed · {v.deliveredOrders || 0} delivered</span>
                       <span className="text-xs font-extrabold text-slate-900">{formatRs(v.revenue)}</span>
                       <ChevronRight size={14} className="text-slate-200 group-hover:text-red-400" />
                     </div>
@@ -667,11 +698,11 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
                 <Tooltip content={<RichTooltip />} />
                 <Legend verticalAlign="top" height={36}
                   formatter={(value) => <span className="text-xs font-bold text-slate-600">{value}</span>} />
-                <Bar yAxisId="revenue" dataKey="totalRevenue" name="Gross Revenue" fill="#FCA5A5" radius={[6, 6, 0, 0]} barSize={24}
+                <Bar yAxisId="revenue" dataKey="totalRevenue" name="Placed Value" fill="#FCA5A5" radius={[6, 6, 0, 0]} barSize={24}
                   cursor="pointer" onClick={(d) => handleBarClick(d)} />
-                <Bar yAxisId="revenue" dataKey="deliveredRevenue" name="Net Revenue" fill="url(#revenueBarGrad)" radius={[6, 6, 0, 0]} barSize={24}
+                <Bar yAxisId="revenue" dataKey="deliveredRevenue" name="Delivered Net" fill="url(#revenueBarGrad)" radius={[6, 6, 0, 0]} barSize={24}
                   cursor="pointer" onClick={(d) => handleBarClick(d)} />
-                <Bar yAxisId="orders" dataKey="totalOrders" name="Orders" fill="url(#ordersBarGrad)" radius={[6, 6, 0, 0]} barSize={24}
+                <Bar yAxisId="orders" dataKey="totalOrders" name="Orders Placed" fill="url(#ordersBarGrad)" radius={[6, 6, 0, 0]} barSize={24}
                   cursor="pointer" onClick={(d) => handleBarClick(d)} />
               </BarChart>
             </ResponsiveContainer>
@@ -683,30 +714,43 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
       {/* ── Selected Month Summary ──────────────────────── */}
       {activeTab === 'monthly' && current && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <MetricCard icon={Package} label="Total Orders" value={current.totalOrders}
-            subValue={`${current.pendingOrders} pending · ${current.processingOrders} processing · ${current.cancelledOrders} cancelled`}
-            tooltip={`Orders placed in ${monthLabel(current)} (incl ${current.cancelledOrders} cancelled)`}
+          <MetricCard icon={Package} label="Orders Placed" value={current.totalOrders}
+            subValue={`${current.deliveredOrders} delivered events · ${current.returnedOrders} returned events`}
+            tooltip={`Orders created in ${monthLabel(current)}. Delivery and return figures use the dates those events occurred.`}
             trend={compare ? pctChange(current.totalOrders, compare.totalOrders) : null}
             trendLabel={compare ? `vs ${monthLabel(compare)}` : null}
             onClick={() => openDrilldown(`${monthLabel(current)} - All Orders`, 'Every order placed this month', Package, getMonthRange(current))} />
-          <MetricCard icon={DollarSign} label="Net Revenue" value={formatRs(current.deliveredRevenue)}
-            subValue={`Gross: ${formatRs(current.totalRevenue)} · AOV: ${formatRs(current.avgOrderValue)}`}
-            tooltip={`Net (delivered) revenue in ${monthLabel(current)}; gross ${formatRs(current.totalRevenue)}`}
+          <MetricCard icon={DollarSign} label="Delivered Net" value={formatRs(current.deliveredRevenue)}
+            subValue={`Placed value: ${formatRs(current.totalRevenue)} · AOV: ${formatRs(current.avgOrderValue)}`}
+            tooltip={`Revenue from orders delivered in ${monthLabel(current)}; placed value excludes cancelled orders`}
             trend={compare ? pctChange(current.deliveredRevenue, compare.deliveredRevenue) : null}
             trendLabel={compare ? `vs ${formatRs(compare.deliveredRevenue)}` : null}
-            onClick={() => openDrilldown(`${monthLabel(current)} - Delivered Revenue`, 'Delivered orders this month', DollarSign, { ...getMonthRange(current), status: 'Delivered' })} />
-          <MetricCard icon={Truck} label="Delivered" value={current.deliveredOrders}
-            subValue={`${current.deliveryRate}% delivery rate`}
-            tooltip={`${current.deliveredOrders} of ${current.totalOrders} orders delivered`}
+            onClick={() => openDrilldown(`${monthLabel(current)} - Delivered Revenue`, 'Orders credited on their delivery date', DollarSign, { ...getMonthRange(current), status: 'Delivered', dateBasis: 'delivered' })} />
+          <MetricCard icon={Truck} label="Delivered Events" value={current.deliveredOrders}
+            subValue="Counted on delivered date"
+            tooltip={`${current.deliveredOrders} orders were delivered during this month, regardless of when placed`}
             trend={compare ? pctChange(current.deliveredOrders, compare.deliveredOrders) : null}
             trendLabel={compare ? `vs ${compare.deliveredOrders} last period` : null}
-            onClick={() => openDrilldown(`${monthLabel(current)} - Delivered`, 'Successfully fulfilled orders', Truck, { ...getMonthRange(current), status: 'Delivered' })} />
-          <MetricCard icon={RotateCcw} label="Returns" value={current.returnedOrders}
-            subValue={`${current.returnRate}% return rate \u00B7 ${formatRs(current.returnedRevenue)} lost`}
+            onClick={() => openDrilldown(`${monthLabel(current)} - Delivered Events`, 'Orders with a delivery event in this month', Truck, { ...getMonthRange(current), dateBasis: 'delivered' })} />
+          <MetricCard icon={RotateCcw} label="Returned Events" value={current.returnedOrders}
+            subValue={`${formatRs(current.returnedRevenue)} returned value`}
             tooltip={`${current.returnedOrders} returns lost ${formatRs(current.returnedRevenue)}`}
             trend={compare ? pctChange(current.returnedOrders, compare.returnedOrders) : null}
             trendLabel={compare ? `vs ${compare.returnedOrders} last period` : null}
-            onClick={() => openDrilldown(`${monthLabel(current)} - Returns`, 'Returned orders this month', RotateCcw, { ...getMonthRange(current), status: 'Returned' })} />
+            onClick={() => openDrilldown(`${monthLabel(current)} - Returns`, 'Orders credited on their return date', RotateCcw, { ...getMonthRange(current), status: 'Returned', dateBasis: 'returned' })} />
+        </div>
+      )}
+
+      {activeTab === 'monthly' && current && (
+        <div className="rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-[11px] text-blue-800">
+          <p className="font-extrabold uppercase tracking-widest text-blue-700 mb-1">Status at the end of {monthLabel(current)}</p>
+          <p>
+            {current.monthEndDeliveredOrders || 0} delivered + {current.monthEndReturnedOrders || 0} returned + {current.monthEndCancelledOrders || 0} cancelled + {current.monthEndShippedOrders || 0} shipped + {current.monthEndProcessingOrders || 0} processing + {current.monthEndPendingOrders || 0} pending + {current.monthEndHoldOrders || 0} hold + {current.monthEndUnknownOrders || 0} unknown = <strong>{current.totalOrders || 0} orders placed in {monthLabel(current)}</strong>.
+          </p>
+          <p className="mt-1 text-blue-700/80">
+            Events during {monthLabel(current)}: {current.processingEventOrders || 0} entered processing · {current.shippedEventOrders || 0} shipped · {current.deliveredOrders || 0} delivered · {current.returnedOrders || 0} returned.
+          </p>
+          <p className="mt-1 text-blue-700/80">The snapshot uses the last recorded status on the final Nepali date of the selected month. Orders without a usable timeline remain Unknown instead of being incorrectly forced into Processing.</p>
         </div>
       )}
 
@@ -726,16 +770,14 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
               <tbody className="divide-y divide-slate-50">
                 {[
                   { label: 'Total Orders', key: 'totalOrders', icon: Package },
-                  { label: 'Gross Revenue', key: 'totalRevenue', icon: DollarSign, isRs: true },
-                  { label: 'Net Revenue', key: 'deliveredRevenue', icon: DollarSign, isRs: true },
-                  { label: 'Delivered', key: 'deliveredOrders', icon: Truck },
-                  { label: 'Returns', key: 'returnedOrders', icon: RotateCcw, invert: true },
-                  { label: 'Cancelled', key: 'cancelledOrders', icon: X, invert: true },
+                  { label: 'Placed Value', key: 'totalRevenue', icon: DollarSign, isRs: true },
+                  { label: 'Delivered Net', key: 'deliveredRevenue', icon: DollarSign, isRs: true },
+                  { label: 'Delivery Events', key: 'deliveredOrders', icon: Truck },
+                  { label: 'Return Events', key: 'returnedOrders', icon: RotateCcw, invert: true },
+                  { label: 'Cancelled Cohort', key: 'createdCancelledOrders', icon: X, invert: true },
                   { label: 'Avg Order Value', key: 'avgOrderValue', icon: BarChart3, isRs: true },
                   { label: 'Unique Vendors', key: 'uniqueVendors', icon: Store },
                   { label: 'Unique Customers', key: 'uniqueCustomers', icon: Users },
-                  { label: 'Delivery Rate', key: 'deliveryRate', icon: Truck, suffix: '%' },
-                  { label: 'Return Rate', key: 'returnRate', icon: RotateCcw, suffix: '%', invert: true },
                 ].map(row => {
                   const cur = current[row.key] || 0;
                   const prev = compare[row.key] || 0;
@@ -772,24 +814,25 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
       {activeTab === 'monthly' && current && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Status Distribution */}
-          <SectionCard title={`${monthLabel(current)} - Status Breakdown`} icon={BarChart3}>
+          <SectionCard title={`${monthLabel(current)} - Status at Month End`} icon={BarChart3}>
             <div className="space-y-3">
               {[
-                { label: 'Delivered', count: current.deliveredOrders, color: '#10b981', status: 'Delivered' },
-                { label: 'Shipped', count: current.shippedOrders, color: '#f59e0b', status: 'Shipped' },
-                { label: 'Processing', count: current.processingOrders, color: '#3b82f6', status: 'Processing' },
-                { label: 'Pending', count: current.pendingOrders, color: '#fbbf24', status: 'Pending' },
-                { label: 'Returned', count: current.returnedOrders, color: '#8b5cf6', status: 'Returned' },
-                { label: 'Cancelled', count: current.cancelledOrders, color: '#ef4444', status: 'Cancelled' },
+                { label: 'Delivered', count: current.monthEndDeliveredOrders, color: '#10b981' },
+                { label: 'Shipped', count: current.monthEndShippedOrders, color: '#f59e0b' },
+                { label: 'Processing', count: current.monthEndProcessingOrders, color: '#3b82f6' },
+                { label: 'Hold', count: current.monthEndHoldOrders, color: '#64748b' },
+                { label: 'Pending', count: current.monthEndPendingOrders, color: '#fbbf24' },
+                { label: 'Returned', count: current.monthEndReturnedOrders, color: '#8b5cf6' },
+                { label: 'Cancelled', count: current.monthEndCancelledOrders, color: '#ef4444' },
+                { label: 'Unknown', count: current.monthEndUnknownOrders, color: '#94a3b8' },
               ].filter(s => s.count > 0).map(s => {
                 const pct = current.totalOrders > 0 ? Math.round((s.count / current.totalOrders) * 100) : 0;
                 return (
-                  <button key={s.label} onClick={() => openDrilldown(`${monthLabel(current)} - ${s.label}`, `${s.count} orders (${pct}%)`, Package, { ...getMonthRange(current), status: s.status })}
-                    className="w-full group">
+                  <div key={s.label} className="w-full">
                     <div className="flex items-center justify-between mb-1.5">
                       <div className="flex items-center gap-2">
                         <div className="w-2.5 h-2.5 rounded-full" style={{ background: s.color }} />
-                        <span className="text-xs font-bold text-slate-700 group-hover:text-red-600 transition-colors">{s.label}</span>
+                        <span className="text-xs font-bold text-slate-700">{s.label}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-extrabold text-slate-900">{s.count}</span>
@@ -797,9 +840,9 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
                       </div>
                     </div>
                     <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div className="h-full rounded-full transition-all group-hover:opacity-80" style={{ width: `${pct}%`, background: s.color }} />
+                      <div className="h-full rounded-full" style={{ width: `${pct}%`, background: s.color }} />
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -820,9 +863,9 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
                   <XAxis dataKey="shortLabel" tick={{ fontSize: 10, fontWeight: 600 }} axisLine={false} tickLine={false} />
                   <YAxis tickFormatter={(v) => v.toLocaleString()} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={80} />
                   <Tooltip content={<RichTooltip />} />
-                  <Area type="monotone" dataKey="totalRevenue" name="Gross Revenue" stroke="#FCA5A5" strokeWidth={2} strokeDasharray="5 4" fill="none"
+                  <Area type="monotone" dataKey="totalRevenue" name="Placed Value" stroke="#FCA5A5" strokeWidth={2} strokeDasharray="5 4" fill="none"
                     cursor="pointer" onClick={(d) => handleBarClick(d)} />
-                  <Area type="monotone" dataKey="deliveredRevenue" name="Net Revenue" stroke="#059669" strokeWidth={2.5} fill="url(#revAreaGrad)"
+                  <Area type="monotone" dataKey="deliveredRevenue" name="Delivered Net" stroke="#059669" strokeWidth={2.5} fill="url(#revAreaGrad)"
                     dot={{ fill: '#059669', r: 3, strokeWidth: 0 }} activeDot={{ fill: '#059669', r: 5, strokeWidth: 2, stroke: '#fff' }}
                     cursor="pointer" onClick={(d) => handleBarClick(d)} />
                 </AreaChart>
@@ -853,7 +896,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-slate-100">
-                  {['#', 'Vendor', 'Orders', 'Revenue', 'Delivered', 'Returned', 'Return Rate', 'Avg Amount'].map((label, i) => (
+                  {['#', 'Vendor', 'Orders', 'Revenue', 'Delivery Events', 'Returned', 'Return Rate', 'Avg Amount'].map((label, i) => (
                     <th key={label} className="px-4 py-3 text-left text-[10px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">
                       {label}
                     </th>
@@ -1264,7 +1307,7 @@ const NepalcanAnalyticsPage = ({ embedded }) => {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {analyticsData.ordersAtRisk.slice(0, 6).map(o => {
-                const days = Math.floor((Date.now() - new Date(o.updatedAt)) / 86400000);
+                const days = Math.floor((Date.now() - new Date(o.statusSinceAt)) / 86400000);
                 return (
                   <Link key={o.orderId} to={`/nepalcan-sales/${o.orderId}`}
                     className="flex items-center justify-between p-4 bg-white border border-amber-100 rounded-xl hover:border-red-200 hover:bg-red-50/30 transition-all group"

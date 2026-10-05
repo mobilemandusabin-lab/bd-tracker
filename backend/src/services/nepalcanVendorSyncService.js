@@ -1,6 +1,7 @@
 const Lead = require('../models/Lead');
 const NepalcanSyncLog = require('../models/NepalcanSyncLog');
 const axios = require('axios');
+const { statusDateExpression } = require('../utils/orderLifecycle');
 const { loginToNepalcan, getDefaultSyncUser } = require('./nepalcanAuthService');
 
 const API_BASE = 'https://commerce.thecanbrand.com/api';
@@ -475,10 +476,6 @@ const syncNepalcanVendors = async (token = null, userId = null) => {
     const durationMs = Date.now() - startTime;
     console.log(`[Nepalcan Vendor Sync] COMPLETE - Total: ${synced}, Updated: ${updated}, Created: ${created}`);
 
-    console.log('[Nepalcan Vendor Sync] Syncing service branches...');
-    const branchesResult = await syncServiceBranches(authToken);
-    console.log(`[Nepalcan Vendor Sync] Service branches sync complete: ${branchesResult.updated} vendors updated`);
-
     const NepalcanOrder = require('../models/NepalcanOrder');
     const deliveredOrdersAgg = await NepalcanOrder.aggregate([
       { $match: { orderStatus: 'Delivered', vendor_lead_id: { $ne: null } } },
@@ -486,7 +483,7 @@ const syncNepalcanVendors = async (token = null, userId = null) => {
         _id: '$vendor_lead_id',
         deliveredCount: { $sum: 1 },
         totalAmount: { $sum: '$totalAmount' },
-        lastOrderDate: { $max: '$updatedAt' }
+        lastOrderDate: { $max: statusDateExpression('Delivered') }
       } }
     ]);
 

@@ -16,7 +16,7 @@ const seedExtensionVersion = async () => {
         zip_path: '/extension/download',
         is_latest: true
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
     );
   } catch (err) {
     console.error('[Seed] Extension version upsert failed:', err.message);

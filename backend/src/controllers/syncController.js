@@ -9,7 +9,9 @@ const STALE_AFTER = parseInt(process.env.SYNC_STALE_AFTER) || 300;
 const LEASE_DURATION = parseInt(process.env.SYNC_LEASE_DURATION) || 240;
 const MAX_RETRIES = parseInt(process.env.SYNC_MAX_RETRIES) || 3;
 
-const PHASES = ['orders', 'tracking', 'vendors', 'branches'];
+// Full sync intentionally stops after vendors. Service branches are managed
+// separately and are not part of the routine sales/vendor sync.
+const PHASES = ['orders', 'tracking', 'vendors'];
 const SYNC_TYPES = ['full', 'nepalcan_orders', 'tracking', 'nepalcan_vendors', 'branches'];
 const phaseFor = (syncType, payloadPhase) =>
   syncType === 'full' ? (payloadPhase || 'orders') : (
@@ -29,11 +31,12 @@ const isStale = (job, now) =>
   !job.lease_until || new Date(job.lease_until) < now ||
   (job.last_heartbeat_at && (now - new Date(job.last_heartbeat_at)) / 1000 > STALE_AFTER);
 
-const claimJob = async (workerId, now) => {
+const claimJob = async (workerId, now, syncType = null) => {
   const staleAt = new Date(now.getTime() - STALE_AFTER * 1000);
   return SyncJob.findOneAndUpdate(
     {
       status: { $in: ['pending', 'running', 'paused'] },
+      ...(syncType ? { sync_type: syncType } : {}),
       $or: [
         { lease_until: null }, { lease_until: { $exists: false } },
         { lease_until: { $lt: now } },
@@ -43,7 +46,7 @@ const claimJob = async (workerId, now) => {
     {
       $set: { status: 'running', worker_id: workerId, lease_until: new Date(now.getTime() + LEASE_DURATION * 1000), last_heartbeat_at: now, batch_started_at: now },
     },
-    { new: true, sort: { updatedAt: 1 } }
+    { returnDocument: 'after', sort: { updatedAt: 1 } }
   );
 };
 
@@ -128,7 +131,7 @@ const doBatch = async (job, workerId) => {
     update.completed_at = new Date(); update.completedAt = new Date();
     console.log(`[SYNC] Job ${job._id} completed processed=${processed}`);
   }
-  const saved = await SyncJob.findByIdAndUpdate(job._id, { $set: update }, { new: true }).lean();
+  const saved = await SyncJob.findByIdAndUpdate(job._id, { $set: update }, { returnDocument: 'after' }).lean();
   console.log(`[SYNC] checkpoint saved job=${job._id} phase=${nextPhase} processed=${processed}/${saved.total} +${r.count} (${elapsedMs}ms)`);
   if (jobDone) {
     // ponytail: keep legacy sales history working — one log row per completed job
@@ -164,7 +167,7 @@ exports.ensureAndRunOneBatch = async (syncType = 'full') => {
   }
   const now = new Date();
   const workerId = `e_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-  const job = await claimJob(workerId, now);
+  const job = await claimJob(workerId, now, syncType);
   if (!job) {
     const cur = await SyncJob.findById(active._id).lean();
     return { ...jobShape(cur, false), note: 'busy — next tick resumes' };
@@ -238,7 +241,7 @@ exports.kickSync = async (req, res) => {
     // Reuse process path: claim then run one batch
     const now = new Date();
     const workerId = `k_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-    const job = await claimJob(workerId, now);
+    const job = await claimJob(workerId, now, syncType);
     if (!job) {
       const cur = await SyncJob.findById(active._id).lean();
       return res.status(200).json({ ...jobShape(cur, false), note: 'busy — next tick resumes' });

@@ -167,7 +167,7 @@ const DashboardPage = () => {
   }, [syncing]);
 
   const handleFullSync = async () => {
-    if (!window.confirm('Run full system sync? Orders → tracking → vendors → branches, in resumable batches.')) return;
+    if (!window.confirm('Run full system sync? Last 19 days of orders → tracking → vendors, in resumable batches.')) return;
 
     setSyncing(true);
     setSyncResult(null);

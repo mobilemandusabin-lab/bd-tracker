@@ -17,6 +17,7 @@ const STATUS_COLORS = {
   Cancelled: 'bg-red-100 text-red-700',
   Returned: 'bg-violet-100 text-violet-700',
   Pending: 'bg-slate-100 text-slate-600',
+  Hold: 'bg-slate-200 text-slate-700',
 };
 
 const PROCESS_ICONS = {
@@ -65,9 +66,9 @@ const Section = ({ icon: Icon, title, children, badge }) => (
 );
 
 const InfoRow = ({ label, value, highlight = false }) => (
-  <div className="flex items-start justify-between py-2 border-b border-slate-50 last:border-0">
+  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-1 sm:gap-4 py-2 border-b border-slate-50 last:border-0">
     <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{label}</span>
-    <span className={`text-sm font-bold text-right max-w-[60%] ${highlight ? 'text-red-600' : 'text-slate-900'}`}>{value || '-'}</span>
+    <span className={`text-sm font-bold sm:text-right break-words sm:max-w-[60%] ${highlight ? 'text-red-600' : 'text-slate-900'}`}>{value || '-'}</span>
   </div>
 );
 
@@ -160,7 +161,7 @@ const NepalcanOrderDetails = ({ orderId, onBack }) => {
   const statusClass = STATUS_COLORS[tracking.orderStatus] || 'bg-slate-100 text-slate-600';
 
   // Get latest delivery status from marketplaceProcesses
-  const processes = tracking.marketplaceProcesses || [];
+  const processes = [...(tracking.marketplaceProcesses || [])].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
   const latestProcess = processes.length > 0 ? processes[0] : null;
 
   // Calculate product total — prefer updated DB totalAmount; items are a fallback
@@ -214,7 +215,7 @@ const NepalcanOrderDetails = ({ orderId, onBack }) => {
       </div>
 
       {/* Price Summary Cards */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
           <div className="flex items-center gap-2 mb-2">
             <div className="bg-blue-50 p-2 rounded-lg">
@@ -465,12 +466,17 @@ const NepalcanOrderDetails = ({ orderId, onBack }) => {
             <InfoRow label="Delivery Note" value={tracking.deliveryNote} />
             <InfoRow label="Multi-Vendor" value={tracking.isMultipleVendors ? 'Yes' : 'No'} />
             <InfoRow label="Unattended Count" value={tracking.unAttendedCount} />
-            <InfoRow label="Total Duration" value={formatDuration(
-              tracking.createdAt && tracking.updatedAt
-                ? Math.round((new Date(tracking.updatedAt) - new Date(tracking.createdAt)) / (1000 * 60 * 60))
+            <InfoRow label="Fulfillment Duration" value={formatDuration(
+              tracking.createdAt && tracking.deliveredAt
+                ? Math.round((new Date(tracking.deliveredAt) - new Date(tracking.createdAt)) / (1000 * 60 * 60))
                 : null
             )} highlight />
             <InfoRow label="Created" value={tracking.createdAt ? formatNepaliDateTime(tracking.createdAt) : '-'} />
+            <InfoRow label="Processing" value={tracking.processingAt ? formatNepaliDateTime(tracking.processingAt) : 'Not recorded'} />
+            <InfoRow label="Shipped" value={tracking.shippedAt ? formatNepaliDateTime(tracking.shippedAt) : 'Not recorded'} />
+            <InfoRow label="Delivered" value={tracking.deliveredAt ? formatNepaliDateTime(tracking.deliveredAt) : 'Not recorded'} highlight={tracking.orderStatus === 'Delivered'} />
+            <InfoRow label="Returned" value={tracking.returnedAt ? formatNepaliDateTime(tracking.returnedAt) : 'Not recorded'} />
+            <InfoRow label="Cancelled" value={tracking.cancelledAt ? formatNepaliDateTime(tracking.cancelledAt) : 'Not recorded'} />
             <InfoRow label="Updated" value={tracking.updatedAt ? formatNepaliDateTime(tracking.updatedAt) : '-'} />
           </div>
         </Section>
