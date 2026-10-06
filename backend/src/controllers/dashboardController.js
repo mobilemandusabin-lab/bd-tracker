@@ -1974,7 +1974,7 @@ exports.triggerFullSync = async (req, res) => {
         sync_type: syncType, status: 'pending', total: 0, processed: 0, successful: 0, failed: 0,
         batchSize: parseInt(process.env.SYNC_BATCH_SIZE) || 50,
         current_page: 1, last_processed_id: null, cursor: null,
-        payload: { phase, pages: {}, totals: {}, totalApi: null },
+        payload: { phase, pages: {}, totals: {}, phaseStats: {}, totalApi: null },
         started_at: now, startedAt: now, last_heartbeat_at: now, lastProcessedAt: now,
         created_by: req.user?._id || null, retry_count: 0
       });

@@ -30,6 +30,7 @@ const syncJobSchema = new mongoose.Schema({
     phase: { type: String, enum: ['orders', 'tracking', 'vendors', 'branches', 'done'], default: 'orders' },
     pages: { type: mongoose.Schema.Types.Mixed, default: {} },
     totals: { type: mongoose.Schema.Types.Mixed, default: {} },
+    phaseStats: { type: mongoose.Schema.Types.Mixed, default: {} },
     totalApi: { type: mongoose.Schema.Types.Mixed, default: null }
   },
   started_at: { type: Date, default: null },

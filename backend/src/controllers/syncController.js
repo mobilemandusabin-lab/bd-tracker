@@ -66,6 +66,58 @@ const jobShape = (job, done) => ({
   totals: job.payload?.totals || {}
 });
 
+const syncLogType = (syncType) =>
+  syncType === 'nepalcan_vendors' ? 'vendors' : syncType === 'full' ? 'full' : 'orders';
+
+const phaseSuccessful = (job, phase) => Number(job.payload?.phaseStats?.[phase]?.successful) || 0;
+
+const writeSyncLog = async (job, success, errorMessage = null) => {
+  try {
+    const NepalcanSyncLog = require('../models/NepalcanSyncLog');
+    await NepalcanSyncLog.create({
+      type: syncLogType(job.sync_type),
+      success,
+      ordersSynced: phaseSuccessful(job, 'orders'),
+      vendorsSynced: phaseSuccessful(job, 'vendors'),
+      totalProcessed: job.processed || 0,
+      errorMessage,
+      durationMs: Date.now() - new Date(job.started_at || job.createdAt).getTime()
+    });
+  } catch (error) {
+    console.error('[SYNC] history log failed:', error.message);
+  }
+};
+
+// All entry points use the same failure checkpoint so a thrown batch never
+// leaves a lease stuck. Contract violations are non-retryable; transient
+// failures are released for the next tick and fail after MAX_RETRIES.
+const recordBatchFailure = async (job, error) => {
+  const retryCount = (job.retry_count || 0) + 1;
+  const fatal = Boolean(error.nonRetryable) ||
+    error.code === 'NEPALCAN_ORDER_RESPONSE_INVALID' ||
+    retryCount >= MAX_RETRIES;
+  const message = String(error.message || 'Sync batch failed').slice(0, 1000);
+  const batchErrors = [
+    ...(job.batch_errors || []).slice(-19),
+    { recordId: job.payload?.phase || job.sync_type, message, at: new Date() }
+  ];
+  const update = {
+    retry_count: retryCount,
+    last_heartbeat_at: new Date(),
+    lastProcessedAt: new Date(),
+    lease_until: null,
+    worker_id: null,
+    error_message: message,
+    error: message,
+    batch_errors: batchErrors,
+    ...(fatal ? { status: 'failed', completed_at: new Date(), completedAt: new Date() } : {})
+  };
+  const saved = await SyncJob.findByIdAndUpdate(job._id, { $set: update }, { returnDocument: 'after' }).lean();
+  if (fatal) await writeSyncLog(saved, false, message);
+  console.log(`[SYNC] Job ${job._id} ${fatal ? 'failed' : 'released for resume'} retry=${retryCount}`);
+  return { saved, fatal, retryCount };
+};
+
 // Core: run exactly ONE batch on an already-claimed job. Shared by process + kick.
 const doBatch = async (job, workerId) => {
   const started = Date.now();
@@ -92,15 +144,24 @@ const doBatch = async (job, workerId) => {
   // ponytail: denominator never shrinks; per-phase totals accumulate
   const totals = { ...(job.payload?.totals || {}) };
   if (r.totalApi) totals[phase] = Math.max(totals[phase] || 0, r.totalApi);
+  const phaseStats = { ...(job.payload?.phaseStats || {}) };
+  const previousPhaseStats = phaseStats[phase] || {};
+  phaseStats[phase] = {
+    processed: (previousPhaseStats.processed || 0) + (r.count || 0),
+    successful: (previousPhaseStats.successful || 0) + (r.successful || 0),
+    failed: (previousPhaseStats.failed || 0) + (r.failed || 0)
+  };
   const knownSum = Object.values(totals).reduce((s, v) => s + (Number(v) || 0), 0);
   const total = Math.max(job.total || 0, knownSum, processed);
   const update = {
     processed, successful, failed, total,
     'payload.totals': totals,
+    'payload.phaseStats': phaseStats,
     last_heartbeat_at: new Date(),
     lastProcessedAt: new Date(),
     lease_until: null, // ponytail: release immediately so next tick claims instantly
     worker_id: null,
+    retry_count: 0,
     batch_errors: job.batch_errors || [],
     avg_batch_ms: job.avg_batch_ms ? Math.round((job.avg_batch_ms + elapsedMs) / 2) : elapsedMs,
     error_message: null, error: null
@@ -134,15 +195,9 @@ const doBatch = async (job, workerId) => {
   const saved = await SyncJob.findByIdAndUpdate(job._id, { $set: update }, { returnDocument: 'after' }).lean();
   console.log(`[SYNC] checkpoint saved job=${job._id} phase=${nextPhase} processed=${processed}/${saved.total} +${r.count} (${elapsedMs}ms)`);
   if (jobDone) {
-    // ponytail: keep legacy sales history working — one log row per completed job
-    try {
-      const NepalcanSyncLog = require('../models/NepalcanSyncLog');
-      const logType = job.sync_type === 'nepalcan_vendors' ? 'vendors' : job.sync_type === 'full' ? 'full' : 'orders';
-      await NepalcanSyncLog.create({
-        type: logType, success: true, ordersSynced: saved.successful || 0,
-        totalProcessed: saved.processed || 0, durationMs: Date.now() - new Date(saved.started_at || saved.createdAt).getTime()
-      });
-    } catch (e) { console.error('[SYNC] history log failed:', e.message); }
+    // Keep legacy sales history working, but do not mix tracking/vendor work
+    // into the order count.
+    await writeSyncLog(saved, true);
   }
   return { saved, nextPhase, jobDone };
 };
@@ -159,7 +214,7 @@ exports.ensureAndRunOneBatch = async (syncType = 'full') => {
       sync_type: syncType, status: 'pending', total: 0, processed: 0, successful: 0, failed: 0, skipped: 0,
       batchSize: parseInt(process.env.SYNC_BATCH_SIZE) || 50,
       current_page: 1, last_processed_id: null, cursor: null,
-      payload: { phase: phaseFor(syncType, null), pages: {}, totals: {}, totalApi: null },
+      payload: { phase: phaseFor(syncType, null), pages: {}, totals: {}, phaseStats: {}, totalApi: null },
       started_at: now, startedAt: now, last_heartbeat_at: now, lastProcessedAt: now,
       retry_count: 0
     });
@@ -172,8 +227,13 @@ exports.ensureAndRunOneBatch = async (syncType = 'full') => {
     const cur = await SyncJob.findById(active._id).lean();
     return { ...jobShape(cur, false), note: 'busy — next tick resumes' };
   }
-  const { saved, nextPhase, jobDone } = await doBatch(job, workerId);
-  return { ...jobShape(saved, jobDone), phase: nextPhase };
+  try {
+    const { saved, nextPhase, jobDone } = await doBatch(job, workerId);
+    return { ...jobShape(saved, jobDone), phase: nextPhase };
+  } catch (error) {
+    await recordBatchFailure(job, error);
+    throw error;
+  }
 };
 
 /**
@@ -199,18 +259,7 @@ exports.processBatch = async (req, res) => {
     return res.status(200).json({ ...jobShape(saved, jobDone), phase: nextPhase });
   } catch (err) {
     console.error(`[SYNC] batch failed job=${job._id}: ${err.message}`);
-    // ponytail: disappearance looks like exception too — keep resumable unless retries exhausted
-    const retryCount = (job.retry_count || 0) + 1;
-    const fatal = retryCount >= MAX_RETRIES && /login|config|auth/i.test(err.message);
-    await SyncJob.findByIdAndUpdate(job._id, {
-      $set: {
-        retry_count: retryCount,
-        last_heartbeat_at: new Date(), lastProcessedAt: new Date(),
-        lease_until: null, worker_id: null, // release so next cron can reclaim immediately
-        ...(fatal ? { status: 'failed', error_message: err.message, error: err.message, completed_at: new Date(), completedAt: new Date() } : {})
-      }
-    });
-    console.log(`[SYNC] Job ${job._id} ${fatal ? 'failed' : 'released for resume'} retry=${retryCount}`);
+    const { fatal } = await recordBatchFailure(job, err);
     return res.status(fatal ? 500 : 200).json({ success: !fatal, jobId: job._id, status: fatal ? 'failed' : 'running', error: err.message, resumed: !fatal });
   }
 };
@@ -223,6 +272,7 @@ exports.kickSync = async (req, res) => {
   if (!workerKeyOk(req)) return res.status(401).json({ success: false, error: 'Unauthorized' });
   const syncType = req.query.type || req.body?.sync_type || 'full';
   if (!SYNC_TYPES.includes(syncType)) return res.status(400).json({ success: false, error: `Invalid type. Use: ${SYNC_TYPES.join(', ')}` });
+  let job = null;
   try {
     let active = await SyncJob.findOne({ status: { $in: ['pending', 'running', 'paused'] } }).sort({ updatedAt: -1 });
     if (!active) {
@@ -232,7 +282,7 @@ exports.kickSync = async (req, res) => {
         sync_type: syncType, status: 'pending', total: 0, processed: 0, successful: 0, failed: 0,
         batchSize: parseInt(process.env.SYNC_BATCH_SIZE) || 50,
         current_page: 1, last_processed_id: null, cursor: null,
-        payload: { phase, pages: {}, totals: {}, totalApi: null },
+        payload: { phase, pages: {}, totals: {}, phaseStats: {}, totalApi: null },
         started_at: now, startedAt: now, last_heartbeat_at: now, lastProcessedAt: now,
         retry_count: 0
       });
@@ -241,7 +291,7 @@ exports.kickSync = async (req, res) => {
     // Reuse process path: claim then run one batch
     const now = new Date();
     const workerId = `k_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-    const job = await claimJob(workerId, now, syncType);
+    job = await claimJob(workerId, now, syncType);
     if (!job) {
       const cur = await SyncJob.findById(active._id).lean();
       return res.status(200).json({ ...jobShape(cur, false), note: 'busy — next tick resumes' });
@@ -251,7 +301,14 @@ exports.kickSync = async (req, res) => {
     return res.status(200).json({ ...jobShape(saved, jobDone), phase: nextPhase });
   } catch (err) {
     console.error(`[SYNC] kick failed: ${err.message}`);
-    return res.status(500).json({ success: false, error: err.message });
+    const failure = job ? await recordBatchFailure(job, err) : null;
+    return res.status(failure && !failure.fatal ? 200 : 500).json({
+      success: false,
+      jobId: job?._id,
+      status: failure?.fatal ? 'failed' : job ? 'running' : 'error',
+      error: err.message,
+      resumed: Boolean(failure && !failure.fatal)
+    });
   }
 };
 

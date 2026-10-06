@@ -5,7 +5,7 @@ const axios = require('axios');
 const { loginToNepalcan, getDefaultSyncUser } = require('./nepalcanAuthService');
 const { lifecycleFields, mergeStatusHistory, statusDateExpression, trackingEvents } = require('../utils/orderLifecycle');
 const {
-  ORDERS_API_URL, extractOrders, getOrderSyncWindow, getOrdersTotal, normalizeOrderRecord
+  ORDERS_API_URL, buildOrderRequestParams, isLastOrderPage, parseOrderResponse
 } = require('./nepalcanOrderWindow');
 
 const LOGISTICS_API = 'https://can-logistic-prod-84pie.ondigitalocean.app/api/public/marketplace-tracker';
@@ -149,8 +149,7 @@ const fetchApiOrders = async (authToken) => {
     headers['Authorization'] = `Bearer ${authToken}`;
   }
 
-  const { fromDate, toDate } = getOrderSyncWindow();
-  const perPage = 50;
+  const limit = 50;
   const ordersList = [];
   let page = 1;
   let totalCount = 0;
@@ -161,17 +160,19 @@ const fetchApiOrders = async (authToken) => {
   // their status rewritten during routine sync.
   while (page <= 1000) {
     const response = await retryWithBackoff(() => axios.get(ORDERS_API_URL, {
-      params: { fromDate, toDate, page, perPage },
+      params: buildOrderRequestParams(page, limit),
       headers, timeout: 30000
     }));
     if (!firstResponse) firstResponse = response;
-    const nextOrders = extractOrders(response.data).map(normalizeOrderRecord);
+    const { orders: nextOrders, total } = parseOrderResponse(response);
+    totalCount = total;
     if (nextOrders.length === 0) break;
     ordersList.push(...nextOrders);
-    totalCount = getOrdersTotal(response.data, totalCount || ordersList.length);
-    if (nextOrders.length < perPage || (totalCount && ordersList.length >= totalCount)) break;
+    if (isLastOrderPage({ page, limit, count: nextOrders.length, total: totalCount })) break;
     page += 1;
   }
+
+  const { fromDate, toDate } = buildOrderRequestParams(1, limit);
 
   return {
     ordersList,

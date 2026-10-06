@@ -35,18 +35,61 @@ const getOrderSyncWindow = (now = new Date()) => {
   };
 };
 
-const extractOrders = (payload) => {
-  if (Array.isArray(payload)) return payload;
-  const candidates = [
-    payload?.data?.orders,
-    payload?.data?.items,
-    payload?.orders,
-    payload?.items,
-    payload?.results,
-    payload?.data
-  ];
-  return candidates.find(Array.isArray) || [];
+const buildOrderRequestParams = (page = 1, limit = 50, now = new Date()) => {
+  const { fromDate, toDate } = getOrderSyncWindow(now);
+  return {
+    tab: 'marketplace',
+    page,
+    limit,
+    unattendedOrders: '',
+    status: 'Active',
+    fromDate,
+    toDate
+  };
 };
+
+const invalidOrderResponse = (message) => {
+  const error = new Error(`Invalid Nepalcan orders response: ${message}`);
+  error.code = 'NEPALCAN_ORDER_RESPONSE_INVALID';
+  error.nonRetryable = true;
+  return error;
+};
+
+const getContentType = (headers = {}) => {
+  if (typeof headers.get === 'function') return String(headers.get('content-type') || '');
+  return String(headers['content-type'] || headers['Content-Type'] || '');
+};
+
+// The live Commerce contract is { data: Order[], totalItems: number }.
+// Validate it explicitly because an invalid API path returns the frontend HTML
+// shell with HTTP 200, which must never be mistaken for an empty order page.
+const parseOrderResponse = (response) => {
+  const contentType = getContentType(response?.headers).toLowerCase();
+  if (!contentType.includes('application/json')) {
+    throw invalidOrderResponse(`expected application/json but received ${contentType || 'no content type'}`);
+  }
+
+  const payload = response?.data;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw invalidOrderResponse('expected a JSON object');
+  }
+  if (!Array.isArray(payload.data)) {
+    throw invalidOrderResponse('expected data to be an array');
+  }
+
+  const total = Number(payload.totalItems);
+  if (!Number.isFinite(total) || total < 0) {
+    throw invalidOrderResponse('expected totalItems to be a non-negative number');
+  }
+
+  return {
+    orders: payload.data.map(normalizeOrderRecord),
+    total
+  };
+};
+
+const isLastOrderPage = ({ page, limit, count, total }) =>
+  count < limit || (total > 0 && page * limit >= total);
 
 const normalizeOrderRecord = (record) => {
   if (!record || typeof record !== 'object') return record;
@@ -71,29 +114,17 @@ const normalizeOrderRecord = (record) => {
   return order;
 };
 
-const getOrdersTotal = (payload, fallback = 0) => {
-  const candidates = [
-    payload?.totalItems,
-    payload?.total,
-    payload?.data?.totalItems,
-    payload?.data?.total,
-    payload?.pagination?.total,
-    payload?.meta?.total
-  ];
-  const total = candidates.find((value) => Number.isFinite(Number(value)));
-  return total === undefined ? fallback : Number(total);
-};
-
 const ORDERS_API_URL = process.env.NEPA_CAN_ORDERS_API_URL
-  || 'https://commerce.thecanbrand.com/api/marketplace-admin/marketplace-orders/list';
+  || 'https://commerce.thecanbrand.com/api/vendor/orders/super-admin/list';
 
 module.exports = {
   ORDER_STATUS_SYNC_DAYS,
   ORDERS_API_URL,
-  extractOrders,
+  buildOrderRequestParams,
   getOrderSyncWindow,
-  getOrdersTotal,
+  isLastOrderPage,
   normalizeOrderRecord,
+  parseOrderResponse,
   shiftYmd,
   toYmd
 };

@@ -10,7 +10,8 @@ const {
   extractVendors, getTotalCount, fetchVendorServiceBranches
 } = require('./nepalcanVendorSyncService');
 const {
-  ORDERS_API_URL, extractOrders, getOrderSyncWindow, getOrdersTotal, normalizeOrderRecord
+  ORDERS_API_URL, buildOrderRequestParams, getOrderSyncWindow,
+  isLastOrderPage, parseOrderResponse
 } = require('./nepalcanOrderWindow');
 
 const API_BASE = 'https://commerce.thecanbrand.com/api';
@@ -34,21 +35,15 @@ const pushError = (job, recordId, message) => {
 
 // --- ORDERS: exactly ONE API page (default 50), checkpoint = current_page ---
 const fetchOrdersPage = async (token, page, limit = ORDERS_LIMIT) =>
-  retryWithBackoff(() => {
-    const { fromDate, toDate } = getOrderSyncWindow();
-    return axios.get(ORDERS_API_URL, {
-    // Commerce's marketplace-admin endpoint uses perPage and a date window.
-    // This prevents routine syncs from rewriting orders older than 19 days.
-    params: { fromDate, toDate, page, perPage: limit },
+  retryWithBackoff(() => axios.get(ORDERS_API_URL, {
+    // Commerce uses limit (not perPage) and honors the 19-day date window.
+    params: buildOrderRequestParams(page, limit),
     headers: authHeaders(token), timeout: 20000
-  }).then(r => r.data);
-  }, MAX_RETRIES);
+  }).then(parseOrderResponse), MAX_RETRIES);
 
 const processOrdersPage = async (job, token) => {
   const page = job.current_page || 1;
-  const data = await fetchOrdersPage(token, page);
-  const ordersList = extractOrders(data).map(normalizeOrderRecord);
-  const totalApi = getOrdersTotal(data, ordersList.length);
+  const { orders: ordersList, total: totalApi } = await fetchOrdersPage(token, page);
   if (ordersList.length === 0) return { done: true, totalApi, successful: 0, failed: 0, count: 0 };
 
   const ids = ordersList.map(o => o.orderId || o._id).filter(Boolean);
@@ -86,7 +81,7 @@ const processOrdersPage = async (job, token) => {
   }
   if (ops.length) await NepalcanOrder.bulkWrite(ops, { ordered: false });
   // ponytail: totalApi known — done when page covers it, not only on short page (exact multiples stall)
-  const isLast = ordersList.length < ORDERS_LIMIT || (totalApi && page * ORDERS_LIMIT >= totalApi);
+  const isLast = isLastOrderPage({ page, limit: ORDERS_LIMIT, count: ordersList.length, total: totalApi });
   return { done: !!isLast, totalApi, successful, failed, count: ordersList.length };
 };
 
