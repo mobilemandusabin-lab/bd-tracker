@@ -6,6 +6,7 @@ const {
   batchFetchTracking, buildOrderUpdate, retryWithBackoff, deriveFromLogisticsFields
 } = require('./nepalcanOrderSyncService');
 const { loginToNepalcan, getDefaultSyncUser } = require('./nepalcanAuthService');
+const { fetchOrderDetail, normalizeOrderDetail } = require('./nepalcanOrderDetailService');
 const {
   extractVendors, getTotalCount, fetchVendorServiceBranches
 } = require('./nepalcanVendorSyncService');
@@ -19,8 +20,10 @@ const MAX_RETRIES = parseInt(process.env.SYNC_MAX_RETRIES) || 3;
 // ponytail: tiny batches fit Hobby 10s / Render throttle; override via env
 const ORDERS_LIMIT = parseInt(process.env.SYNC_ORDERS_LIMIT) || 50;
 const TRACKING_LIMIT = parseInt(process.env.SYNC_TRACKING_LIMIT) || 25;
+const DETAILS_LIMIT = parseInt(process.env.SYNC_DETAILS_LIMIT) || 25;
 const VENDORS_LIMIT = parseInt(process.env.SYNC_VENDORS_LIMIT) || 25;
 const TRACKING_CONCURRENCY = parseInt(process.env.SYNC_TRACKING_CONCURRENCY) || 5;
+const DETAILS_CONCURRENCY = parseInt(process.env.SYNC_DETAILS_CONCURRENCY) || 5;
 
 const authHeaders = (token) => ({
   'Content-Type': 'application/json',
@@ -128,6 +131,43 @@ const processTrackingBatch = async (job) => {
   if (ops.length) await NepalcanOrder.bulkWrite(ops, { ordered: false });
   job.last_processed_id = String(batch[batch.length - 1]._id);
   return { done: batch.length < TRACKING_LIMIT, successful, failed, count: batch.length };
+};
+
+// --- DETAILS: small slice after last_processed_id, fills missing Commerce snapshots ---
+const processDetailsBatch = async (job) => {
+  const filter = { nepalcanId: { $exists: true, $ne: null }, detailData: null };
+  if (job.last_processed_id) filter._id = { $gt: job.last_processed_id };
+  const batch = await NepalcanOrder.find(filter).sort({ _id: 1 }).limit(DETAILS_LIMIT)
+    .select('_id orderId nepalcanId').lean();
+  if (!batch.length) return { done: true, successful: 0, failed: 0, count: 0 };
+
+  const ops = [];
+  let successful = 0, failed = 0;
+  for (let i = 0; i < batch.length; i += DETAILS_CONCURRENCY) {
+    const chunk = batch.slice(i, i + DETAILS_CONCURRENCY);
+    const settled = await Promise.allSettled(chunk.map(async (order) => {
+      const raw = await fetchOrderDetail(order.nepalcanId);
+      return { order, detail: normalizeOrderDetail(raw) };
+    }));
+    settled.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        const { order, detail } = result.value;
+        ops.push({
+          updateOne: {
+            filter: { _id: order._id },
+            update: { $set: { detailData: detail, detailFetchedAt: new Date() } }
+          }
+        });
+        successful++;
+      } else {
+        failed++;
+        pushError(job, chunk[index]?.orderId, result.reason?.message);
+      }
+    });
+  }
+  if (ops.length) await NepalcanOrder.bulkWrite(ops, { ordered: false });
+  job.last_processed_id = String(batch[batch.length - 1]._id);
+  return { done: batch.length < DETAILS_LIMIT, successful, failed, count: batch.length };
 };
 
 // --- VENDORS: ONE API page (default 25), bulkWrite + bulk Activity ---
@@ -272,6 +312,6 @@ const processBranchesBatch = async (job, token) => {
 };
 
 module.exports = {
-  processOrdersPage, processTrackingBatch, processVendorsPage, processBranchesBatch,
+  processOrdersPage, processDetailsBatch, processTrackingBatch, processVendorsPage, processBranchesBatch,
   buildLeadData, fetchOrdersPage, fetchVendorsPage
 };

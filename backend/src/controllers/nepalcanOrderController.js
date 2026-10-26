@@ -3,6 +3,10 @@ const NepalcanSyncLog = require('../models/NepalcanSyncLog');
 const Lead = require('../models/Lead');
 const axios = require('axios');
 const {
+  fetchAndSaveOrderDetail,
+  normalizeItems
+} = require('../services/nepalcanOrderDetailService');
+const {
   lifecycleFields,
   mergeStatusHistory,
   normalizeStatusHistory,
@@ -410,27 +414,58 @@ exports.getOrderTracking = async (req, res) => {
       return res.status(404).json({ message: 'Order not found' });
     }
 
-    const base = order.trackingData || {};
+    let detailData = order.detailData;
+    if (!detailData && order.nepalcanId) {
+      try {
+        detailData = await fetchAndSaveOrderDetail(order);
+      } catch (detailError) {
+        console.error(`Get Commerce order detail ${order.orderId}:`, detailError.message);
+      }
+    }
+
+    const base = detailData || order.trackingData || {};
+    const items = normalizeItems(
+      base.items?.length ? base.items : order.rawData?.items || []
+    );
     const response = {
       ...base,
+      items,
       orderId: order.orderId,
-      orderStatus: order.orderStatus,
-      paymentStatus: order.paymentStatus,
-      paymentMethod: order.paymentMethod,
-      source: order.source,
-      totalAmount: order.totalAmount,
-      shippingAmount: order.shippingAmount,
-      createdAt: order.createdAt,
-      updatedAt: order.updatedAt,
-      priceHistory: order.priceHistory || []
+      orderStatus: order.orderStatus || base.orderStatus,
+      paymentStatus: order.paymentStatus ?? base.paymentStatus,
+      paymentMethod: order.paymentMethod ?? base.paymentMethod,
+      source: order.source ?? base.source,
+      totalAmount: order.totalAmount ?? base.totalAmount,
+      shippingAmount: order.shippingAmount ?? base.shippingAmount,
+      createdAt: order.createdAt ?? base.createdAt,
+      updatedAt: order.updatedAt ?? base.updatedAt,
+      priceHistory: order.priceHistory || base.priceHistory || []
     };
     Object.assign(response, lifecycleFields(order.toObject()));
 
-    // Keep trackingData's vendor/customerProfile objects; fall back to DB strings only when missing
-    if (!response.vendor && order.vendor) {
+    // Keep logistics timeline when Commerce details do not include it.
+    if (!response.marketplaceProcesses?.length && order.trackingData?.marketplaceProcesses?.length) {
+      response.marketplaceProcesses = order.trackingData.marketplaceProcesses;
+    }
+    if (!response.processHistory?.length && order.trackingData?.processHistory?.length) {
+      response.processHistory = order.trackingData.processHistory;
+    }
+    if (!response.notes?.length && order.trackingData?.notes?.length) {
+      response.notes = order.trackingData.notes;
+    }
+    if (!response.statusHistory?.length && order.statusHistory?.length) {
+      response.statusHistory = order.statusHistory;
+    }
+
+    // Keep detail vendor/customerProfile objects; fall back to DB strings only when missing
+    if (typeof response.vendor === 'string') {
+      response.vendor = { name: response.vendor };
+    } else if (!response.vendor && order.vendor) {
       response.vendor = { name: order.vendor };
     }
-    if (!response.customerProfile && order.customer) {
+    if (typeof response.customerProfile === 'string') {
+      response.customerProfile = { name: response.customerProfile };
+    } else if (!response.customerProfile && order.customer) {
       response.customerProfile = { name: order.customer };
     }
 

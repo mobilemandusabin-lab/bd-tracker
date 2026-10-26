@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const SyncJob = require('../models/SyncJob');
 const { loginToNepalcan } = require('../services/nepalcanAuthService');
 const {
-  processOrdersPage, processTrackingBatch, processVendorsPage, processBranchesBatch
+  processOrdersPage, processDetailsBatch, processTrackingBatch, processVendorsPage, processBranchesBatch
 } = require('../services/syncBatchService');
 
 const STALE_AFTER = parseInt(process.env.SYNC_STALE_AFTER) || 300;
@@ -11,11 +11,11 @@ const MAX_RETRIES = parseInt(process.env.SYNC_MAX_RETRIES) || 3;
 
 // Full sync intentionally stops after vendors. Service branches are managed
 // separately and are not part of the routine sales/vendor sync.
-const PHASES = ['orders', 'tracking', 'vendors'];
-const SYNC_TYPES = ['full', 'nepalcan_orders', 'tracking', 'nepalcan_vendors', 'branches'];
+const PHASES = ['orders', 'details', 'tracking', 'vendors'];
+const SYNC_TYPES = ['full', 'nepalcan_orders', 'details', 'tracking', 'nepalcan_vendors', 'branches'];
 const phaseFor = (syncType, payloadPhase) =>
   syncType === 'full' ? (payloadPhase || 'orders') : (
-    { nepalcan_orders: 'orders', tracking: 'tracking', nepalcan_vendors: 'vendors', branches: 'branches' }[syncType] || 'orders'
+    { nepalcan_orders: 'orders', details: 'details', tracking: 'tracking', nepalcan_vendors: 'vendors', branches: 'branches' }[syncType] || 'orders'
   );
 
 // ponytail: constant-time key check, no user auth on worker
@@ -133,6 +133,7 @@ const doBatch = async (job, workerId) => {
 
   let r;
   if (phase === 'orders') r = await processOrdersPage(job, token);
+  else if (phase === 'details') r = await processDetailsBatch(job);
   else if (phase === 'tracking') r = await processTrackingBatch(job);
   else if (phase === 'vendors') r = await processVendorsPage(job, token, null);
   else r = await processBranchesBatch(job, token);

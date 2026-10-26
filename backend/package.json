@@ -7,6 +7,11 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "seed": "node src/utils/seedData.js",
+    "backup": "node src/scripts/backupDb.js",
+    "restore": "node src/scripts/restoreDb.js",
+    "retention": "node src/scripts/retention.js",
+    "backfill:order-details": "node src/scripts/backfillOrderDetails.js",
+    "restore:order-details": "node src/scripts/restoreOrderDetailsFromBackup.js",
     "build": "node --check src/controllers/*.js && node --check src/services/*.js && node --check src/middlewares/*.js && node --check src/models/*.js && node --check src/routes/*.js && echo 'Syntax OK'",
     "test": "echo \"Error: no test specified\" && exit 1",
     "postinstall": "echo 'NOTE: To generate PPTX/PDF reports, run: pip install -r ../scripts/requirements.txt'"

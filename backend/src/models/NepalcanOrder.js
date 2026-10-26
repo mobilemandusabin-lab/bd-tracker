@@ -105,6 +105,15 @@ const nepalcanOrderSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.Mixed,
     default: null
   },
+  // Detailed Commerce order snapshot; image objects are stored as URL-only
+  detailData: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
+  },
+  detailFetchedAt: {
+    type: Date,
+    default: null
+  },
   // Order-level amount change history
   priceHistory: [{
     field: { type: String },

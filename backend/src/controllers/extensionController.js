@@ -2,12 +2,26 @@ const mongoose = require('mongoose');
 const ExtensionVersion = require('../models/ExtensionVersion');
 const ExtensionDevice = require('../models/ExtensionDevice');
 const ExtensionEvent = require('../models/ExtensionEvent');
+const ExtensionDailyStat = require('../models/ExtensionDailyStat');
 const Lead = require('../models/Lead');
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const path = require('path');
 const fs = require('fs');
 const archiver = require('archiver');
+const { EXTENSION_RAW_DAYS, daysAgo } = require('../config/retention');
+
+const dateKey = (date) => new Date(date).toISOString().slice(0, 10);
+
+const getRollupRange = (startDate, endDate) => {
+  const cutoff = daysAgo(EXTENSION_RAW_DAYS);
+  const rawStart = startDate > cutoff ? startDate : cutoff;
+  const lastRollupDay = new Date(cutoff);
+  lastRollupDay.setUTCDate(lastRollupDay.getUTCDate() - 1);
+  const statsStart = dateKey(startDate);
+  const statsEnd = dateKey(endDate < cutoff ? endDate : lastRollupDay);
+  return { cutoff, rawStart, statsStart, statsEnd, useRollup: statsStart <= statsEnd };
+};
 
 // POST /extension/login — Extension login (any active user)
 exports.extensionLogin = async (req, res) => {
@@ -606,6 +620,13 @@ exports.getAnalytics = async (req, res) => {
       matchFilter.user_id = new mongoose.Types.ObjectId(user_id);
     }
 
+    const rollupRange = getRollupRange(startDate, endDate);
+    const rawFilter = { ...matchFilter, created_at: { $gte: rollupRange.rawStart, $lte: endDate } };
+    const statsFilter = rollupRange.useRollup
+      ? { date: { $gte: rollupRange.statsStart, $lte: rollupRange.statsEnd } }
+      : null;
+    if (statsFilter && matchFilter.user_id) statsFilter.user_id = matchFilter.user_id;
+
     // Lead model for vendor name lookups
     const Lead = require('../models/Lead');
 
@@ -620,37 +641,38 @@ exports.getAnalytics = async (req, res) => {
       eventsByUser,
       recentEvents,
       latestPending,
-      userSessions
+      userSessions,
+      rollupRows
     ] = await Promise.all([
       ExtensionEvent.aggregate([
-        { $match: matchFilter },
+        { $match: rawFilter },
         { $group: { _id: '$event_type', count: { $sum: BULK_SUM } } }
       ]),
       ExtensionEvent.aggregate([
-        { $match: matchFilter },
+        { $match: rawFilter },
         { $group: { _id: { date: { $dateToString: { format: '%Y-%m-%d', date: '$created_at' } }, event_type: '$event_type' }, count: { $sum: BULK_SUM } } },
         { $sort: { '_id.date': 1 } }
       ]),
       ExtensionEvent.aggregate([
-        { $match: { ...matchFilter, product_name: { $ne: null } } },
+        { $match: { ...rawFilter, product_name: { $ne: null } } },
         { $group: { _id: '$product_name', total: { $sum: BULK_SUM }, listings: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, 1, 0] } }, specs: { $sum: { $cond: [{ $eq: ['$event_type', 'spec_added'] }, 1, 0] } }, updates: { $sum: { $cond: [{ $eq: ['$event_type', 'product_updated'] }, 1, 0] } }, qc_approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, BULK_SUM, 0] } }, qc_rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, BULK_SUM, 0] } } } },
         { $sort: { total: -1 } },
         { $limit: 10 }
       ]),
       ExtensionEvent.aggregate([
-        { $match: { ...matchFilter, vendor_id: { $ne: null } } },
+        { $match: { ...rawFilter, vendor_id: { $ne: null } } },
         { $group: { _id: '$vendor_id', total: { $sum: BULK_SUM }, listings: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, 1, 0] } }, qc_approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, BULK_SUM, 0] } }, qc_rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, BULK_SUM, 0] } }, products: { $addToSet: '$product_name' } } },
         { $addFields: { product_count: { $size: '$products' } } },
         { $sort: { total: -1 } },
         { $limit: 10 }
       ]),
       ExtensionEvent.aggregate([
-        { $match: matchFilter },
+        { $match: rawFilter },
         { $group: { _id: { hour: { $hour: '$created_at' }, dow: { $dayOfWeek: '$created_at' } }, count: { $sum: BULK_SUM } } },
         { $sort: { '_id.dow': 1, '_id.hour': 1 } }
       ]),
       ExtensionEvent.aggregate([
-        { $match: matchFilter },
+        { $match: rawFilter },
         { $group: { _id: { user_id: '$user_id', event_type: '$event_type' }, count: { $sum: BULK_SUM } } },
         { $lookup: { from: 'users', localField: '_id.user_id', foreignField: '_id', as: 'user' } },
         { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
@@ -658,7 +680,7 @@ exports.getAnalytics = async (req, res) => {
         { $sort: { total: -1 } }
       ]),
       ExtensionEvent.aggregate([
-        { $match: matchFilter },
+        { $match: rawFilter },
         { $sort: { created_at: -1 } },
         { $limit: 20 },
         { $lookup: { from: 'users', localField: 'user_id', foreignField: '_id', as: 'user' } },
@@ -672,28 +694,20 @@ exports.getAnalytics = async (req, res) => {
         { $project: { _id: 0, pending_count: 1 } }
       ]),
       ExtensionEvent.aggregate([
-        { $match: matchFilter },
+        { $match: rawFilter },
         { $sort: { user_id: 1, created_at: 1 } },
         { $group: { _id: '$user_id', events: { $push: { type: '$event_type', time: '$created_at' } } } },
         { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'user' } },
         { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } }
-      ])
+      ]),
+      rollupRange.useRollup
+        ? ExtensionDailyStat.find(statsFilter).lean()
+        : Promise.resolve([])
     ]);
 
     const latestPendingCount = (latestPending || [])[0]?.pending_count ?? null;
 
     const dailyPendingCounts = []; // Folded into latestPendingCount
-
-    // Derive qcStats (approved/rejected) from eventsByType — bulk/individual
-    // breakdown is in the summary's metadata but the frontend only needs the
-    // totals for the approval-rate widget.
-    const findCount = (id) => (eventsByType.find(x => x._id === id) || {}).count || 0;
-    const qcStats = {
-      approved: findCount('qc_approved'),
-      rejected: findCount('qc_rejected'),
-      bulk_approved: 0, bulk_rejected: 0,
-      individual_approved: 0, individual_rejected: 0
-    };
 
     // Lookup vendor names from Leads (depends on topVendorsRaw)
     const vendorIds = topVendorsRaw.map(v => v._id).filter(Boolean);
@@ -741,9 +755,63 @@ exports.getAnalytics = async (req, res) => {
       };
     }).sort((a, b) => b.total_events - a.total_events);
 
+    const mergedEventsByType = eventsByType.map((item) => ({ ...item }));
+    const typeMap = new Map(mergedEventsByType.map((item) => [item._id, item]));
+    for (const row of rollupRows) {
+      const existing = typeMap.get(row.event_type);
+      if (existing) existing.count += row.count;
+      else {
+        const item = { _id: row.event_type, count: row.count };
+        mergedEventsByType.push(item);
+        typeMap.set(row.event_type, item);
+      }
+    }
+
+    // Derive qcStats (approved/rejected) from merged event totals.
+    const findCount = (id) => (mergedEventsByType.find(x => x._id === id) || {}).count || 0;
+    const qcStats = {
+      approved: findCount('qc_approved'),
+      rejected: findCount('qc_rejected'),
+      bulk_approved: 0, bulk_rejected: 0,
+      individual_approved: 0, individual_rejected: 0
+    };
+
+    const dailyMap = new Map();
+    for (const ev of dailyEvents) {
+      dailyMap.set(`${ev._id.date}\u0000${ev._id.event_type}`, ev);
+    }
+    for (const row of rollupRows) {
+      const key = `${row.date}\u0000${row.event_type}`;
+      const existing = dailyMap.get(key);
+      if (existing) existing.count += row.count;
+      else dailyMap.set(key, { _id: { date: row.date, event_type: row.event_type }, count: row.count });
+    }
+    const mergedDailyEvents = [...dailyMap.values()].sort((a, b) => a._id.date.localeCompare(b._id.date));
+
+    const rollupUserIds = [...new Set(rollupRows.map((row) => String(row.user_id)))];
+    const rollupUsers = rollupUserIds.length
+      ? await User.find({ _id: { $in: rollupUserIds } }).select('name team').lean()
+      : [];
+    const rollupUserMap = new Map(rollupUsers.map((user) => [String(user._id), user]));
+    const userMap = new Map(eventsByUser.map((user) => [String(user._id), { ...user, events: user.events.map((ev) => ({ ...ev })) }]));
+    for (const row of rollupRows) {
+      const uid = String(row.user_id);
+      let user = userMap.get(uid);
+      if (!user) {
+        const info = rollupUserMap.get(uid);
+        user = { _id: row.user_id, user_name: info?.name || 'Unknown', user_team: info?.team || '', events: [], total: 0 };
+        userMap.set(uid, user);
+      }
+      const existing = user.events.find((ev) => ev.event_type === row.event_type);
+      if (existing) existing.count += row.count;
+      else user.events.push({ event_type: row.event_type, count: row.count });
+      user.total += row.count;
+    }
+    const mergedEventsByUser = [...userMap.values()].sort((a, b) => b.total - a.total);
+
     // Build summary
     const summary = {};
-    for (const item of eventsByType) {
+    for (const item of mergedEventsByType) {
       if (item._id !== 'qc_pending') {
         summary[item._id] = item.count;
       }
@@ -755,7 +823,7 @@ exports.getAnalytics = async (req, res) => {
       pendingMap[pc._id] = pc.latest_pending_count;
     }
     const dailyByDate = {};
-    for (const ev of dailyEvents) {
+    for (const ev of mergedDailyEvents) {
       if (!dailyByDate[ev._id.date]) dailyByDate[ev._id.date] = {};
       dailyByDate[ev._id.date][ev._id.event_type] = ev.count;
     }
@@ -800,16 +868,16 @@ exports.getAnalytics = async (req, res) => {
           spec_added: summary.spec_added || 0,
           total: Object.values(summary).reduce((a, b) => a + b, 0)
         },
-        qcStats: qcStats[0] || { approved: 0, rejected: 0, bulk_approved: 0, bulk_rejected: 0, individual_approved: 0, individual_rejected: 0 },
+        qcStats,
         topProducts,
         topVendors,
         bestWorst,
         hourlyActivity: hourlyActivity.map(h => ({ hour: h._id.hour, dow: h._id.dow, count: h.count })),
         userSessions: userSessionsResult,
         dailyComparison,
-        dailyEvents,
+        dailyEvents: mergedDailyEvents,
         dailyPendingCounts,
-        eventsByUser,
+        eventsByUser: mergedEventsByUser,
         recentEvents
       }
     });
@@ -1328,14 +1396,19 @@ exports.getUserDetail = async (req, res) => {
 
     const userIdObj = new mongoose.Types.ObjectId(userId);
     const matchFilter = { user_id: userIdObj, created_at: { $gte: startDate, $lte: endDate }, product_id: { $ne: 'b' } };
+    const rollupRange = getRollupRange(startDate, endDate);
+    const rawFilter = { ...matchFilter, created_at: { $gte: rollupRange.rawStart, $lte: endDate } };
+    const statsFilter = rollupRange.useRollup
+      ? { user_id: userIdObj, date: { $gte: rollupRange.statsStart, $lte: rollupRange.statsEnd } }
+      : null;
 
     const BULK_SUM = { $ifNull: ['$bulk_count', 1] };
 
     const userInfo = await User.findById(userId).select('name team role').lean();
 
-    const [facetResult, rawEvents] = await Promise.all([
+    const [facetResult, rawEvents, rollupRows] = await Promise.all([
       ExtensionEvent.aggregate([
-        { $match: matchFilter },
+        { $match: rawFilter },
         { $facet: {
           eventsByType: [
             { $group: { _id: '$event_type', count: { $sum: BULK_SUM } } }
@@ -1365,10 +1438,13 @@ exports.getUserDetail = async (req, res) => {
           ]
         } }
       ]),
-      ExtensionEvent.find(matchFilter)
+      ExtensionEvent.find(rawFilter)
         .select('product_name product_id created_at vendor_id qc_status event_type metadata')
         .sort({ created_at: -1 })
-        .lean()
+        .lean(),
+      rollupRange.useRollup
+        ? ExtensionDailyStat.find(statsFilter).lean()
+        : Promise.resolve([])
     ]);
 
     const facetData = Array.isArray(facetResult) ? facetResult[0] || {} : facetResult;
@@ -1376,9 +1452,13 @@ exports.getUserDetail = async (req, res) => {
     const dailyBreakdownRaw = facetData.dailyBreakdown || [];
     const timeline = facetData.rawTimeline || [];
 
+    const typeTotals = {};
+    for (const item of eventsByType) typeTotals[item._id] = item.count;
+    for (const row of rollupRows) typeTotals[row.event_type] = (typeTotals[row.event_type] || 0) + row.count;
+
     const summary = { listing_created: 0, product_created: 0, product_updated: 0, qc_approved: 0, qc_rejected: 0, spec_added: 0, session_ended: 0 };
-    for (const item of eventsByType) {
-      if (summary.hasOwnProperty(item._id)) summary[item._id] = item.count;
+    for (const [eventType, count] of Object.entries(typeTotals)) {
+      if (summary.hasOwnProperty(eventType)) summary[eventType] = count;
     }
     summary.total = Object.values(summary).reduce((a, b) => a + b, 0);
 
@@ -1386,6 +1466,10 @@ exports.getUserDetail = async (req, res) => {
     for (const ev of dailyBreakdownRaw) {
       if (!dailyByDate[ev._id.date]) dailyByDate[ev._id.date] = {};
       dailyByDate[ev._id.date][ev._id.event_type] = ev.count;
+    }
+    for (const row of rollupRows) {
+      if (!dailyByDate[row.date]) dailyByDate[row.date] = {};
+      dailyByDate[row.date][row.event_type] = (dailyByDate[row.date][row.event_type] || 0) + row.count;
     }
     const allDates = Object.keys(dailyByDate).sort();
     const dailyBreakdown = allDates.map(date => ({

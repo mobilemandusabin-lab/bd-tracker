@@ -3,7 +3,7 @@ import { useSelector } from 'react-redux';
 import axios from 'axios';
 import {
   ArrowLeft, Loader2, AlertCircle, User, Store, Package, CreditCard,
-  Truck, Clock, MapPin, Phone, Hash, CircleDollarSign, CheckCircle2,
+  Truck, Clock, MapPin, Phone, Mail, Hash, CircleDollarSign, CheckCircle2,
   PackageCheck, Warehouse, TruckIcon, Navigation
 } from 'lucide-react';
 import { API_URL } from '../config/api';
@@ -68,9 +68,21 @@ const Section = ({ icon: Icon, title, children, badge }) => (
 const InfoRow = ({ label, value, highlight = false }) => (
   <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-1 sm:gap-4 py-2 border-b border-slate-50 last:border-0">
     <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{label}</span>
-    <span className={`text-sm font-bold sm:text-right break-words sm:max-w-[60%] ${highlight ? 'text-red-600' : 'text-slate-900'}`}>{value || '-'}</span>
+    <span className={`text-sm font-bold sm:text-right break-words sm:max-w-[60%] ${highlight ? 'text-red-600' : 'text-slate-900'}`}>{value === 0 ? '0' : value || '-'}</span>
   </div>
 );
+
+const branchLabel = (branch, branchMap, fallbackName) => {
+  if (!branch) return fallbackName || '-';
+  if (typeof branch === 'string') return branchMap[branch] || fallbackName || branch;
+  return branch.name || branch._id || fallbackName || '-';
+};
+
+const addressText = (address) => {
+  if (!address) return '-';
+  if (typeof address === 'string') return address;
+  return address.address || [address.landmark, address.city].filter(Boolean).join(', ') || '-';
+};
 
 const NepalcanOrderDetails = ({ orderId, onBack }) => {
   const { token } = useSelector((state) => state.auth);
@@ -275,6 +287,18 @@ const NepalcanOrderDetails = ({ orderId, onBack }) => {
                     <span className="font-semibold">{tracking.customerProfile.address}</span>
                   </div>
                 )}
+                {tracking.customerProfile.email && (
+                  <div className="flex items-center gap-2 text-sm text-slate-600">
+                    <Mail size={14} className="text-slate-400" />
+                    <span className="font-semibold break-all">{tracking.customerProfile.email}</span>
+                  </div>
+                )}
+                {tracking.alternatePhone && (
+                  <div className="flex items-center gap-2 text-sm text-slate-600">
+                    <Phone size={14} className="text-slate-400" />
+                    <span className="font-semibold">Alt: {tracking.alternatePhone}</span>
+                  </div>
+                )}
               </div>
             </div>
           ) : (
@@ -306,6 +330,12 @@ const NepalcanOrderDetails = ({ orderId, onBack }) => {
                   <div className="flex items-center gap-2 text-sm text-slate-600">
                     <MapPin size={14} className="text-slate-400" />
                     <span className="font-semibold">{tracking.vendor.address}</span>
+                  </div>
+                )}
+                {tracking.vendor.email && (
+                  <div className="flex items-center gap-2 text-sm text-slate-600">
+                    <Mail size={14} className="text-slate-400" />
+                    <span className="font-semibold break-all">{tracking.vendor.email}</span>
                   </div>
                 )}
               </div>
@@ -406,8 +436,11 @@ const NepalcanOrderDetails = ({ orderId, onBack }) => {
         <Section icon={CreditCard} title="Payment & Shipping">
           <div className="space-y-1">
             <InfoRow label="Payment Method" value={tracking.paymentMethod} />
+            <InfoRow label="Payment Gateway" value={tracking.paymentGateway} />
             <InfoRow label="Payment Status" value={tracking.paymentStatus} />
             <InfoRow label="Shipping Type" value={tracking.shippingType?.toUpperCase()} />
+            <InfoRow label="Shipping Address" value={addressText(tracking.shippingAddress)} />
+            <InfoRow label="Dispatch Mode" value={tracking.dispatchMode} />
             <InfoRow label="Product Total" value={`NPR ${productTotal.toLocaleString()}`} />
             <InfoRow label="Shipping Cost" value={`NPR ${shippingCost.toLocaleString()}`} />
             <InfoRow label="Grand Total" value={`NPR ${grandTotal.toLocaleString()}`} highlight />
@@ -459,22 +492,30 @@ const NepalcanOrderDetails = ({ orderId, onBack }) => {
             <InfoRow label="Order ID" value={tracking.orderId} />
             <InfoRow label="Order Ref ID" value={tracking.orderRefId} />
             <InfoRow label="Source" value={tracking.source} />
-            <InfoRow label="Origin Branch" value={branchMap[tracking.originBranch] || tracking.originBranch || '-'} />
-            <InfoRow label="Destination Branch" value={branchMap[tracking.destinationBranch] || tracking.destinationBranch || '-'} />
-            <InfoRow label="Delivery Status" value={tracking.deliveryStatus} />
+            <InfoRow label="Platform" value={tracking.platform} />
+            <InfoRow label="Origin Branch" value={branchLabel(tracking.originBranch, branchMap, tracking.originBranchName)} />
+            <InfoRow label="Destination Branch" value={branchLabel(tracking.destinationBranch, branchMap, tracking.destinationBranchName)} />
+            <InfoRow label="Delivery Status" value={tracking.deliveryStatus || tracking.orderStatus} />
             <InfoRow label="Cancelled By" value={tracking.cancelledBy} />
+            <InfoRow label="Cancelled Reason" value={tracking.cancelledReason} />
             <InfoRow label="Delivery Note" value={tracking.deliveryNote} />
             <InfoRow label="Multi-Vendor" value={tracking.isMultipleVendors ? 'Yes' : 'No'} />
+            <InfoRow label="Vendor Fault" value={tracking.vendorFault ? 'Yes' : 'No'} />
+            <InfoRow label="RTV" value={tracking.isRTV ? 'Yes' : 'No'} />
             <InfoRow label="Unattended Count" value={tracking.unAttendedCount} />
+            <InfoRow label="Settlement" value={tracking.settlementStatus?.vendorPaymentStatus} />
             <InfoRow label="Fulfillment Duration" value={formatDuration(
               tracking.createdAt && tracking.deliveredAt
                 ? Math.round((new Date(tracking.deliveredAt) - new Date(tracking.createdAt)) / (1000 * 60 * 60))
                 : null
             )} highlight />
             <InfoRow label="Created" value={tracking.createdAt ? formatNepaliDateTime(tracking.createdAt) : '-'} />
+            <InfoRow label="Confirmed" value={tracking.confirmedAt ? formatNepaliDateTime(tracking.confirmedAt) : 'Not recorded'} />
+            <InfoRow label="Dispatched" value={tracking.dispatchedAt ? formatNepaliDateTime(tracking.dispatchedAt) : 'Not recorded'} />
             <InfoRow label="Processing" value={tracking.processingAt ? formatNepaliDateTime(tracking.processingAt) : 'Not recorded'} />
             <InfoRow label="Shipped" value={tracking.shippedAt ? formatNepaliDateTime(tracking.shippedAt) : 'Not recorded'} />
             <InfoRow label="Delivered" value={tracking.deliveredAt ? formatNepaliDateTime(tracking.deliveredAt) : 'Not recorded'} highlight={tracking.orderStatus === 'Delivered'} />
+            <InfoRow label="Delivery Date" value={tracking.deliveryDate ? formatNepaliDateTime(tracking.deliveryDate) : 'Not recorded'} />
             <InfoRow label="Returned" value={tracking.returnedAt ? formatNepaliDateTime(tracking.returnedAt) : 'Not recorded'} />
             <InfoRow label="Cancelled" value={tracking.cancelledAt ? formatNepaliDateTime(tracking.cancelledAt) : 'Not recorded'} />
             <InfoRow label="Updated" value={tracking.updatedAt ? formatNepaliDateTime(tracking.updatedAt) : '-'} />
@@ -498,12 +539,36 @@ const NepalcanOrderDetails = ({ orderId, onBack }) => {
                     </span>
                   </div>
                   <p className="text-xs text-slate-700" dangerouslySetInnerHTML={{ __html: note.comment }} />
+                  {note.attachments?.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {note.attachments.map((attachment, index) => (
+                        <a
+                          key={attachment.url || index}
+                          href={attachment.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[10px] font-bold text-red-600 hover:underline break-all"
+                        >
+                          Attachment {index + 1}
+                        </a>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
           </div>
         </Section>
       )}
+
+      <details className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
+        <summary className="px-5 py-4 cursor-pointer text-sm font-bold text-slate-700 select-none">
+          All order data (JSON)
+        </summary>
+        <pre className="px-5 pb-5 text-[10px] leading-relaxed text-slate-600 overflow-auto max-h-[32rem] whitespace-pre-wrap break-words">
+          {JSON.stringify(tracking, null, 2)}
+        </pre>
+      </details>
     </div>
   );
 };
