@@ -81,7 +81,15 @@ const processOrdersPage = async (job, token) => {
 
       // Skip if API timestamp unchanged AND order is terminal (can't advance further)
       if (ex && apiTs > 0 && storedTs > 0 && apiTs === storedTs && ['Delivered', 'Cancelled', 'Returned'].includes(ex.orderStatus)) { successful++; continue; }
-      const u = buildOrderUpdate(orderData, trackingMap.get(orderId), ex || null);
+
+      // Skip unchanged non-terminal rows when the tracker returned nothing for
+      // them: buildOrderUpdate would only rewrite identical values plus
+      // lastSyncedAt/updatedAt. They stay in the window and are re-checked on
+      // the next pass.
+      const trackingData = trackingMap.get(orderId);
+      if (ex && !trackingData && apiTs > 0 && storedTs > 0 && apiTs === storedTs) { successful++; continue; }
+
+      const u = buildOrderUpdate(orderData, trackingData, ex || null);
       const vl = orderData.vendor ? (vlMap.get(String(orderData.vendor).toLowerCase()) || vlMap.get(orderData.vendor)) : null;
       if (u.isNew) { if (vl) u.update.$setOnInsert.vendor_lead_id = vl; ops.push({ updateOne: { ...u, upsert: true } }); }
       else { if (vl) u.update.$set.vendor_lead_id = vl; ops.push({ updateOne: u }); }
@@ -132,6 +140,11 @@ const processTrackingBatch = async (job) => {
       const ns = deriveStatusFromTracking(td?.marketplaceProcesses, td);
       if (!ns) { successful++; continue; }
       const resolved = resolveStatus(order.orderStatus, ns, 'logistics_api');
+      // Nothing new from the tracker: skip the write entirely (it would only
+      // refresh lastSyncedAt/updatedAt).
+      if (resolved.status === order.orderStatus && JSON.stringify(td) === JSON.stringify(order.trackingData)) {
+        successful++; continue;
+      }
       const set = { 'rawData.trackingProcesses': td.marketplaceProcesses, trackingData: td, lastSyncedAt: new Date() };
       if (resolved.status !== order.orderStatus) {
         set.orderStatus = resolved.status; set.statusSource = resolved.source;
