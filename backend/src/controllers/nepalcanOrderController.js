@@ -14,6 +14,7 @@ const {
   statusDateField,
   statusAt
 } = require('../utils/orderLifecycle');
+const { applyOrderChange, getOrderSummary, rebuildOrderStats } = require('../services/nepalcanOrderStatsService');
 
 const API_BASE = 'https://commerce.thecanbrand.com/api';
 
@@ -69,15 +70,37 @@ exports.syncNepalcanOrders = async (req, res) => {
   }
 };
 
-// Get all Nepalcan orders with filtering
+// Get all Nepalcan orders with filtering. Returns one page of table columns
+// plus whole-dataset status counts; the browser never downloads the collection.
+const ORDER_LIST_PROJECTION = [
+  'orderId', 'customer', 'vendor', 'source', 'orderStatus', 'paymentStatus', 'paymentMethod',
+  'totalAmount', 'shippingAmount', 'createdAt', 'processingAt', 'shippedAt', 'deliveredAt',
+  'cancelledAt', 'returnedAt', 'processingDurationHours', 'updatedAt'
+].join(' ');
+
+const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const ORDER_SORT_FIELDS = {
+  createdAt: 'createdAt',
+  deliveredAt: 'deliveredAt',
+  totalAmount: 'totalAmount',
+  orderStatus: 'orderStatus',
+  orderId: 'orderId',
+  customer: 'customer',
+  vendor: 'vendor'
+};
+
 exports.getNepalcanOrders = async (req, res) => {
   try {
-    const { 
-      status, 
-      customer, 
-      startDate, 
+    const {
+      status,
+      customer,
+      search,
+      startDate,
       endDate,
       dateBasis = 'created',
+      sort = '',
+      order = 'desc',
       page = 1,
       limit = 100
     } = req.query;
@@ -91,10 +114,25 @@ exports.getNepalcanOrders = async (req, res) => {
       return res.status(400).json({ message: 'Invalid dateBasis' });
     }
 
-    const query = {};
+    // Base filter = everything except the explicit status tab. Status counts
+    // for the tabs are computed from this so they stay global for the filter.
+    const baseQuery = {};
 
-    if (status) query.orderStatus = status;
-    if (customer) query.customer = new RegExp(customer, 'i');
+    if (customer) baseQuery.customer = new RegExp(escapeRegex(customer), 'i');
+
+    if (search && String(search).trim()) {
+      const rx = new RegExp(escapeRegex(String(search).trim()), 'i');
+      baseQuery.$or = [
+        { orderId: rx },
+        { customer: rx },
+        { vendor: rx },
+        { paymentStatus: rx },
+        { paymentMethod: rx },
+        { orderStatus: rx },
+        { source: rx }
+      ];
+    }
+
     let sortField = 'createdAt';
     const basisStatus = { delivered: 'Delivered', returned: 'Returned', cancelled: 'Cancelled', shipped: 'Shipped', processing: 'Processing' }[dateBasis];
     if (basisStatus) {
@@ -102,7 +140,7 @@ exports.getNepalcanOrders = async (req, res) => {
       // order may still have a valid deliveredAt event and must remain in
       // delivered-date drilldowns unless the caller explicitly supplies a
       // current-status filter.
-      if (!status && dateBasis !== 'delivered') query.orderStatus = basisStatus;
+      if (!status && dateBasis !== 'delivered') baseQuery.orderStatus = basisStatus;
       sortField = statusDateField(basisStatus);
     }
     if (startDate || endDate) {
@@ -118,38 +156,47 @@ exports.getNepalcanOrders = async (req, res) => {
       }
       if (basisStatus) {
         const expr = statusDateExpression(basisStatus);
-        query.$expr = { $and: [
+        baseQuery.$expr = { $and: [
           ...(start ? [{ $gte: [expr, start] }] : []),
           ...(end ? [{ $lte: [expr, end] }] : [])
         ] };
       } else {
-        query[field] = {};
-        if (start) query[field].$gte = start;
-        if (end) query[field].$lte = end;
+        baseQuery[field] = {};
+        if (start) baseQuery[field].$gte = start;
+        if (end) baseQuery[field].$lte = end;
       }
     }
 
+    const query = status ? { ...baseQuery, orderStatus: status } : baseQuery;
+    const sortKey = ORDER_SORT_FIELDS[sort] || sortField;
+    const sortDirection = String(order).toLowerCase() === 'asc' ? 1 : -1;
     const skip = (pageNumber - 1) * limitNumber;
 
-    const orders = await NepalcanOrder.find(query)
-      .sort({ [sortField]: -1, createdAt: -1 })
-      .skip(skip)
-      .limit(limitNumber);
+    const [orders, statusAgg] = await Promise.all([
+      NepalcanOrder.find(query, ORDER_LIST_PROJECTION)
+        .sort({ [sortKey]: sortDirection, createdAt: -1 })
+        .skip(skip)
+        .limit(limitNumber)
+        .lean(),
+      NepalcanOrder.aggregate([
+        { $match: baseQuery },
+        { $group: { _id: '$orderStatus', count: { $sum: 1 } } }
+      ])
+    ]);
 
-    const total = await NepalcanOrder.countDocuments(query);
-
-    // Add processingDurationHours to each order (use denormalized field or compute on-the-fly)
-    const ordersWithDuration = orders.map(order => {
-      const obj = order.toObject();
-      Object.assign(obj, lifecycleFields(obj));
-      if (obj.processingDurationHours === null || obj.processingDurationHours === undefined) {
-        obj.processingDurationHours = computeProcessingDuration(obj.statusHistory);
-      }
-      return obj;
-    });
+    const statusCounts = {};
+    for (const counts of statusAgg) {
+      if (counts._id) statusCounts[counts._id] = counts.count;
+    }
+    // Total for the current query is a sum/read of the status counts — avoids
+    // a second full collection scan on Atlas.
+    const total = status
+      ? (statusCounts[status] || 0)
+      : Object.values(statusCounts).reduce((sum, count) => sum + count, 0);
 
     res.json({
-      orders: ordersWithDuration,
+      orders,
+      statusCounts,
       pagination: {
         total,
         page: pageNumber,
@@ -166,9 +213,18 @@ exports.getNepalcanOrders = async (req, res) => {
 
 // Get order statistics and processing times
 // ponytail: ?startDate&endDate filter orders by createdAt (NPT day clamp); empty = all-time
+const STATS_CACHE_TTL_MS = 60 * 1000;
+const statsCache = new Map();
+const invalidateNepalcanStatsCache = () => statsCache.clear();
+
 exports.getNepalcanStats = async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
+    const cacheKey = `${startDate || ''}|${endDate || ''}`;
+    const cached = statsCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < STATS_CACHE_TTL_MS) {
+      return res.json(cached.value);
+    }
     // Get basic stats
     const totalOrders = await NepalcanOrder.countDocuments();
     const statusCounts = await NepalcanOrder.aggregate([
@@ -272,11 +328,34 @@ exports.getNepalcanStats = async (req, res) => {
       dateQuality: { exactTimelineOrders, estimatedTimelineOrders }
     };
 
+    statsCache.set(cacheKey, { at: Date.now(), value: stats });
     res.json(stats);
 
   } catch (error) {
     console.error('Get stats error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+// Whole-dataset dashboard numbers, read from the running-total documents.
+exports.getNepalcanOrderSummary = async (req, res) => {
+  try {
+    res.json(await getOrderSummary());
+  } catch (error) {
+    console.error('Get summary error:', error);
+    res.status(500).json({ message: 'Failed to load order summary', error: error.message });
+  }
+};
+
+// Repair the running totals from the orders collection (deploy, backfills, drift).
+exports.rebuildNepalcanOrderStats = async (req, res) => {
+  try {
+    const result = await rebuildOrderStats();
+    invalidateNepalcanStatsCache();
+    res.json({ status: 'success', ...result });
+  } catch (error) {
+    console.error('Rebuild stats error:', error);
+    res.status(500).json({ message: 'Failed to rebuild order stats', error: error.message });
   }
 };
 
@@ -1404,6 +1483,13 @@ exports.updateNepalcanOrder = async (req, res) => {
     );
 
     const updated = await NepalcanOrder.findByIdAndUpdate(id, { $set: setFields }, { new: true, runValidators: true });
+
+    // Keep the whole-dataset running totals in sync with this manual edit.
+    try {
+      await applyOrderChange(order.toObject(), updated.toObject());
+    } catch (statsError) {
+      console.error('[Order Update] Stats update failed:', statsError.message);
+    }
 
     // Auto-recalculate Lead revenue when order becomes Delivered or amount changes on Delivered order
     if (updated.vendor_lead_id && (

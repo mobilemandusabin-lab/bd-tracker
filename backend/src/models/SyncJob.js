@@ -27,7 +27,7 @@ const syncJobSchema = new mongoose.Schema({
   current_page: { type: Number, default: 1 },
   last_processed_id: { type: String, default: null },
   payload: {
-    phase: { type: String, enum: ['orders', 'tracking', 'vendors', 'branches', 'done'], default: 'orders' },
+    phase: { type: String, enum: ['orders', 'details', 'tracking', 'vendors', 'branches', 'done'], default: 'orders' },
     pages: { type: mongoose.Schema.Types.Mixed, default: {} },
     totals: { type: mongoose.Schema.Types.Mixed, default: {} },
     phaseStats: { type: mongoose.Schema.Types.Mixed, default: {} },

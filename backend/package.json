@@ -11,6 +11,8 @@
     "restore": "node src/scripts/restoreDb.js",
     "retention": "node src/scripts/retention.js",
     "backfill:order-details": "node src/scripts/backfillOrderDetails.js",
+    "backfill:order-durations": "node src/scripts/backfillOrderDurations.js",
+    "rebuild:order-stats": "node src/scripts/rebuildOrderStats.js",
     "restore:order-details": "node src/scripts/restoreOrderDetailsFromBackup.js",
     "build": "node --check src/controllers/*.js && node --check src/services/*.js && node --check src/middlewares/*.js && node --check src/models/*.js && node --check src/routes/*.js && echo 'Syntax OK'",
     "test": "echo \"Error: no test specified\" && exit 1",

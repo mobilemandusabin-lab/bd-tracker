@@ -3,7 +3,8 @@ const NepalcanSyncLog = require('../models/NepalcanSyncLog');
 const Lead = require('../models/Lead');
 const axios = require('axios');
 const { loginToNepalcan, getDefaultSyncUser } = require('./nepalcanAuthService');
-const { lifecycleFields, mergeStatusHistory, statusDateExpression, trackingEvents } = require('../utils/orderLifecycle');
+const { lifecycleFields, mergeStatusHistory, processingDurationHours, statusDateExpression, trackingEvents } = require('../utils/orderLifecycle');
+const { applyOrderChanges } = require('./nepalcanOrderStatsService');
 const {
   ORDERS_API_URL, buildOrderRequestParams, isLastOrderPage, parseOrderResponse
 } = require('./nepalcanOrderWindow');
@@ -235,6 +236,7 @@ const buildOrderUpdate = (orderData, trackingData, existingOrder) => {
   }
   const timeline = mergeStatusHistory(existingOrder?.statusHistory || [], observedTimeline);
   const lifecycle = lifecycleFields({ ...existingOrder, statusHistory: timeline, trackingData });
+  const durationHours = processingDurationHours(timeline);
 
   if (existingOrder) {
     // ponytail: API is truth for contact fields too — renames/payment changes must not freeze at insert
@@ -246,7 +248,8 @@ const buildOrderUpdate = (orderData, trackingData, existingOrder) => {
       paymentMethod: orderData.paymentMethod ?? existingOrder.paymentMethod,
       source: orderData.source ?? existingOrder.source,
       totalAmount: orderData.totalAmount ?? existingOrder.totalAmount,
-      shippingAmount: orderData.shippingAmount ?? existingOrder.shippingAmount };
+      shippingAmount: orderData.shippingAmount ?? existingOrder.shippingAmount,
+      processingDurationHours: durationHours };
 
     if (statusChanged || hasTracking) {
       setFields.statusHistory = timeline;
@@ -280,7 +283,7 @@ const buildOrderUpdate = (orderData, trackingData, existingOrder) => {
       setFields.priceHistory = [...(existingOrder.priceHistory || []), ...priceChanges];
     }
 
-    return { filter: { _id: existingOrder._id }, update: { $set: setFields }, isNew: false };
+    return { filter: { _id: existingOrder._id }, update: { $set: setFields }, isNew: false, nextState: { ...existingOrder, ...setFields } };
   }
 
   let vendorLeadId = null;
@@ -308,6 +311,7 @@ const buildOrderUpdate = (orderData, trackingData, existingOrder) => {
     deliveredAt: lifecycle.deliveredAt,
     cancelledAt: lifecycle.cancelledAt,
     returnedAt: lifecycle.returnedAt,
+    processingDurationHours: durationHours,
     rawData: orderData,
     priceHistory: [],
     lastSyncedAt: now
@@ -317,7 +321,7 @@ const buildOrderUpdate = (orderData, trackingData, existingOrder) => {
     doc.trackingData = trackingData;
   }
 
-  return { filter: { orderId }, update: { $setOnInsert: doc }, isNew: true };
+  return { filter: { orderId }, update: { $setOnInsert: doc }, isNew: true, nextState: doc };
 };
 
 const syncNepalcanOrders = async (token = null) => {
@@ -358,7 +362,7 @@ const syncNepalcanOrders = async (token = null) => {
 
     // Load existing DB orders into map for O(1) delta comparison
     const existingOrders = await NepalcanOrder.find({})
-      .select('orderId apiUpdatedAt orderStatus customer vendor totalAmount shippingAmount paymentStatus priceHistory')
+      .select('orderId apiUpdatedAt orderStatus customer vendor totalAmount shippingAmount paymentStatus deliveredAt priceHistory')
       .lean();
     const existingMap = new Map(existingOrders.map(o => [o.orderId, o]));
 
@@ -423,6 +427,7 @@ const syncNepalcanOrders = async (token = null) => {
 
     // Build bulk operations
     const upsertOps = [];
+    const statChanges = [];
     const flippedToReturned = [];
     const healedToDelivered = [];
 
@@ -435,6 +440,7 @@ const syncNepalcanOrders = async (token = null) => {
       const update = buildOrderUpdate(orderData, trackingData, null);
       update.update.$setOnInsert.vendor_lead_id = vendorLeadId;
       upsertOps.push({ updateOne: { ...update, upsert: true } });
+      statChanges.push({ prev: null, next: update.nextState });
       if (update.update.$setOnInsert.orderStatus === 'Returned') flippedToReturned.push(orderId);
       newCount++;
     }
@@ -451,6 +457,7 @@ const syncNepalcanOrders = async (token = null) => {
         update.update.$set.vendor_lead_id = vendorLeadId;
       }
       upsertOps.push({ updateOne: update });
+      statChanges.push({ prev: existing || null, next: update.nextState });
       if (update.update.$set?.orderStatus === 'Returned' && existing?.orderStatus !== 'Returned') flippedToReturned.push(orderId);
       if (update.update.$set?.orderStatus === 'Delivered' && existing?.orderStatus === 'Returned') healedToDelivered.push(orderId);
       updatedCount++;
@@ -459,6 +466,7 @@ const syncNepalcanOrders = async (token = null) => {
     // Execute writes
     if (upsertOps.length > 0) {
       await NepalcanOrder.bulkWrite(upsertOps, { ordered: false });
+      await applyOrderChanges(statChanges);
     }
 
     // ponytail: flag finance rows for newly-returned orders — keep row, exclude from totals
@@ -489,7 +497,7 @@ const syncNepalcanOrders = async (token = null) => {
 
     console.log(`[Nepalcan Sync] Written ${upsertOps.length} orders to DB`);
 
-    // Update Lead metrics only if orders changed
+    // Update Lead metrics only if orders changed — bulkWrite avoids N+1 queries
     if (newCount + updatedCount > 0) {
       console.log('[Nepalcan Sync] Updating lead metrics...');
 
@@ -503,35 +511,60 @@ const syncNepalcanOrders = async (token = null) => {
         } }
       ]);
 
-      for (const vendorData of deliveredOrdersAgg) {
-        const { _id: vendorLeadId, deliveredCount, totalAmount, lastOrderDate } = vendorData;
-        if (!vendorLeadId) continue;
-        const leadToUpdate = await Lead.findById(vendorLeadId);
-        if (leadToUpdate) {
-          const previousNepalcanStatus = leadToUpdate.last_nepalcan_status;
-          leadToUpdate.delivered_order_count = deliveredCount;
-          leadToUpdate.active_seller = deliveredCount > 0;
-          leadToUpdate.last_order_date = lastOrderDate;
-          leadToUpdate.total_revenue = totalAmount;
-          leadToUpdate.lead_status = 'Active Seller';
-          leadToUpdate.last_nepalcan_status = 'Active Seller';
-          if (!leadToUpdate.converted_at) leadToUpdate.converted_at = new Date();
-          await leadToUpdate.save();
+      if (deliveredOrdersAgg.length > 0) {
+        // Fetch all affected leads in one query to detect status transitions
+        const affectedIds = deliveredOrdersAgg.map(d => d._id).filter(Boolean);
+        const existingLeads = await Lead.find({ _id: { $in: affectedIds } })
+          .select('_id business_name last_nepalcan_status converted_at').lean();
+        const existingLeadMap = new Map(existingLeads.map(l => [String(l._id), l]));
 
-          if (previousNepalcanStatus && previousNepalcanStatus !== 'Active Seller') {
-            const Activity = require('../models/Activity');
-            const syncUserId = (await getDefaultSyncUser())?._id;
-            if (syncUserId) {
-              await Activity.create({
-                lead_id: leadToUpdate._id,
-                user_id: syncUserId,
-                activity_type: 'status_change',
-                description: `Pipeline changed (sync): ${previousNepalcanStatus} → Active Seller`,
-                status: 'completed'
-              });
+        const bulkLeadOps = [];
+        const activities = [];
+        const now = new Date();
+        const syncUserId = (await getDefaultSyncUser())?._id;
+
+        for (const vendorData of deliveredOrdersAgg) {
+          const { _id: vendorLeadId, deliveredCount, totalAmount, lastOrderDate } = vendorData;
+          if (!vendorLeadId) continue;
+          const existing = existingLeadMap.get(String(vendorLeadId));
+          if (!existing) continue;
+
+          const previousNepalcanStatus = existing.last_nepalcan_status;
+          bulkLeadOps.push({
+            updateOne: {
+              filter: { _id: vendorLeadId },
+              update: {
+                $set: {
+                  delivered_order_count: deliveredCount,
+                  active_seller: deliveredCount > 0,
+                  last_order_date: lastOrderDate,
+                  total_revenue: totalAmount,
+                  lead_status: 'Active Seller',
+                  last_nepalcan_status: 'Active Seller',
+                  ...(!existing.converted_at ? { converted_at: now } : {})
+                }
+              }
             }
+          });
+
+          if (syncUserId && previousNepalcanStatus && previousNepalcanStatus !== 'Active Seller') {
+            activities.push({
+              lead_id: vendorLeadId,
+              user_id: syncUserId,
+              activity_type: 'status_change',
+              description: `Pipeline changed (sync): ${previousNepalcanStatus} → Active Seller`,
+              status: 'completed'
+            });
           }
-          console.log(`[Nepalcan Sync] Updated lead ${leadToUpdate.business_name}: ${deliveredCount} delivered orders`);
+        }
+
+        if (bulkLeadOps.length) {
+          await Lead.bulkWrite(bulkLeadOps, { ordered: false });
+          console.log(`[Nepalcan Sync] Bulk-updated ${bulkLeadOps.length} vendor leads to Active Seller`);
+        }
+        if (activities.length) {
+          const Activity = require('../models/Activity');
+          await Activity.insertMany(activities, { ordered: false });
         }
       }
 
@@ -651,7 +684,9 @@ const enrichOrdersWithTracking = async () => {
     const trackingMap = await batchFetchTracking(orderIds);
     let updated = 0;
     const bulkOps = [];
+    const statChanges = [];
     for (const order of activeOrders) {
+      const previousState = order.toObject();
       const trackingData = trackingMap.get(order.orderId);
       // ponytail: empty/unknown tracking yields null — must not demote Delivered to Pending
       if (!trackingData?.marketplaceProcesses?.length && !trackingData?.processHistory?.length && !trackingData?.deliveryDate && !deriveFromLogisticsFields(trackingData)) continue;
@@ -694,6 +729,8 @@ const enrichOrdersWithTracking = async () => {
         setFields.orderStatus = resolved.status;
         setFields.statusSource = resolved.source;
       }
+      setFields.processingDurationHours = processingDurationHours(mergedTimeline);
+      statChanges.push({ prev: previousState, next: { ...previousState, ...setFields } });
       bulkOps.push({
         updateOne: {
           filter: { _id: order._id },
@@ -707,6 +744,7 @@ const enrichOrdersWithTracking = async () => {
     }
     if (bulkOps.length > 0) {
       await NepalcanOrder.bulkWrite(bulkOps, { ordered: false });
+      await applyOrderChanges(statChanges);
     }
     // ponytail: flag finance rows for orders that just flipped to Returned; heal falses demoted to Delivered
     try {

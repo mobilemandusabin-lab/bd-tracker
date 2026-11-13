@@ -124,11 +124,30 @@ const doBatch = async (job, workerId) => {
   const now = new Date();
   if (!job.started_at) { job.started_at = job.started_at || now; job.startedAt = job.startedAt || now; }
   const phase = phaseFor(job.sync_type, job.payload?.phase);
+
+  // Guard: if an orders/vendors job's checkpoint is older than the sync window
+  // (19 days), its page cursor points into a date range the API no longer returns.
+  // Reset to page 1 so this batch starts fresh against today's window.
+  const ORDER_SYNC_DAYS = parseInt(process.env.NEPALCAN_ORDER_FETCH_DAYS) || 60;
+  const jobAgeMs = now - new Date(job.started_at || job.createdAt);
+  const windowMs = ORDER_SYNC_DAYS * 24 * 60 * 60 * 1000;
+  if ((phase === 'orders' || phase === 'vendors') && jobAgeMs > windowMs && (job.current_page || 1) > 1) {
+    console.warn(`[SYNC] Job ${job._id} checkpoint is ${Math.round(jobAgeMs / 86400000)}d old (window=${ORDER_SYNC_DAYS}d) — resetting page to 1`);
+    await SyncJob.findByIdAndUpdate(job._id, { $set: { current_page: 1, processed: 0, successful: 0, failed: 0, 'payload.phaseStats': {}, 'payload.totals': {}, total: 0 } });
+    job.current_page = 1;
+    job.processed = 0; job.successful = 0; job.failed = 0;
+  }
+
   console.log(`[SYNC] ${phase} batch started job=${job._id} page=${job.current_page}`);
 
   let token = null;
-  try { token = await loginToNepalcan(); } catch (e) {
-    console.error(`[SYNC] login failed: ${e.message}`);
+  // Only phases that call the Nepalcan Commerce API need a token.
+  // details and tracking use their own APIs/DB — login cost is wasted there.
+  const needsToken = phase === 'orders' || phase === 'vendors' || phase === 'branches';
+  if (needsToken) {
+    try { token = await loginToNepalcan(); } catch (e) {
+      console.error(`[SYNC] login failed: ${e.message}`);
+    }
   }
 
   let r;
@@ -174,17 +193,21 @@ const doBatch = async (job, workerId) => {
       const i = PHASES.indexOf(phase);
       if (i < PHASES.length - 1) {
         nextPhase = PHASES[i + 1];
+        // Reset per-phase cursors when entering a new phase
         update['payload.phase'] = nextPhase;
-        update.current_page = 1; update.last_processed_id = null; update.cursor = null;
+        update.current_page = 1;
+        update.last_processed_id = null;
+        update.cursor = null;
         console.log(`[SYNC] phase ${phase} complete → ${nextPhase} job=${job._id}`);
       } else { jobDone = true; }
     } else { jobDone = true; }
-    if (phase === 'orders' && !jobDone) update.current_page = (job.current_page || 1) + 1;
-    if (phase === 'vendors' && !jobDone) update.current_page = (job.current_page || 1) + 1;
-    if ((phase === 'tracking' || phase === 'branches') && !jobDone) update.last_processed_id = job.last_processed_id;
+    // When done=true but not transitioning phases (single-type jobs that just finished
+    // their last record), these are already set above or irrelevant for jobDone=true.
+    // Do NOT double-increment page here — the page reset above already handles phase transitions.
   } else {
+    // Batch returned more work to do: advance the cursor for this phase
     if (phase === 'orders' || phase === 'vendors') update.current_page = (job.current_page || 1) + 1;
-    else update.last_processed_id = job.last_processed_id;
+    else update.last_processed_id = r.last_processed_id || job.last_processed_id;
     if (job.sync_type === 'full') update['payload.phase'] = phase;
   }
   if (r.totalApi && job.sync_type === 'full') update['payload.totalApi'] = r.totalApi;
@@ -211,15 +234,22 @@ exports.ensureAndRunOneBatch = async (syncType = 'full') => {
   let active = await SyncJob.findOne({ status: { $in: ['pending', 'running', 'paused'] }, sync_type: syncType }).sort({ updatedAt: -1 });
   if (!active) {
     const now = new Date();
-    active = await SyncJob.create({
-      sync_type: syncType, status: 'pending', total: 0, processed: 0, successful: 0, failed: 0, skipped: 0,
-      batchSize: parseInt(process.env.SYNC_BATCH_SIZE) || 50,
-      current_page: 1, last_processed_id: null, cursor: null,
-      payload: { phase: phaseFor(syncType, null), pages: {}, totals: {}, phaseStats: {}, totalApi: null },
-      started_at: now, startedAt: now, last_heartbeat_at: now, lastProcessedAt: now,
-      retry_count: 0
-    });
-    console.log(`[SYNC] ensure created job ${active._id} type=${syncType}`);
+    // Use findOneAndUpdate upsert to avoid duplicate-key race between concurrent calls
+    active = await SyncJob.findOneAndUpdate(
+      { sync_type: syncType, status: { $in: ['pending', 'running', 'paused'] } },
+      {
+        $setOnInsert: {
+          sync_type: syncType, status: 'pending', total: 0, processed: 0, successful: 0, failed: 0, skipped: 0,
+          batchSize: parseInt(process.env.SYNC_BATCH_SIZE) || 50,
+          current_page: 1, last_processed_id: null, cursor: null,
+          payload: { phase: phaseFor(syncType, null), pages: {}, totals: {}, phaseStats: {}, totalApi: null },
+          started_at: now, startedAt: now, last_heartbeat_at: now, lastProcessedAt: now,
+          retry_count: 0
+        }
+      },
+      { upsert: true, returnDocument: 'after' }
+    );
+    console.log(`[SYNC] ensure upserted job ${active._id} type=${syncType}`);
   }
   const now = new Date();
   const workerId = `e_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -275,19 +305,27 @@ exports.kickSync = async (req, res) => {
   if (!SYNC_TYPES.includes(syncType)) return res.status(400).json({ success: false, error: `Invalid type. Use: ${SYNC_TYPES.join(', ')}` });
   let job = null;
   try {
-    let active = await SyncJob.findOne({ status: { $in: ['pending', 'running', 'paused'] } }).sort({ updatedAt: -1 });
+    // Filter by sync_type so a running 'nepalcan_orders' job doesn't block a 'full' kick
+    let active = await SyncJob.findOne({ status: { $in: ['pending', 'running', 'paused'] }, sync_type: syncType }).sort({ updatedAt: -1 });
     if (!active) {
       const now = new Date();
       const phase = phaseFor(syncType, null);
-      active = await SyncJob.create({
-        sync_type: syncType, status: 'pending', total: 0, processed: 0, successful: 0, failed: 0,
-        batchSize: parseInt(process.env.SYNC_BATCH_SIZE) || 50,
-        current_page: 1, last_processed_id: null, cursor: null,
-        payload: { phase, pages: {}, totals: {}, phaseStats: {}, totalApi: null },
-        started_at: now, startedAt: now, last_heartbeat_at: now, lastProcessedAt: now,
-        retry_count: 0
-      });
-      console.log(`[SYNC] Kick created job ${active._id} type=${syncType}`);
+      // Use findOneAndUpdate upsert to avoid duplicate-key race between concurrent kicks
+      active = await SyncJob.findOneAndUpdate(
+        { sync_type: syncType, status: { $in: ['pending', 'running', 'paused'] } },
+        {
+          $setOnInsert: {
+            sync_type: syncType, status: 'pending', total: 0, processed: 0, successful: 0, failed: 0,
+            batchSize: parseInt(process.env.SYNC_BATCH_SIZE) || 50,
+            current_page: 1, last_processed_id: null, cursor: null,
+            payload: { phase, pages: {}, totals: {}, phaseStats: {}, totalApi: null },
+            started_at: now, startedAt: now, last_heartbeat_at: now, lastProcessedAt: now,
+            retry_count: 0
+          }
+        },
+        { upsert: true, returnDocument: 'after' }
+      );
+      console.log(`[SYNC] Kick upserted job ${active._id} type=${syncType}`);
     }
     // Reuse process path: claim then run one batch
     const now = new Date();

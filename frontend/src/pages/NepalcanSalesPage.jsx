@@ -34,6 +34,11 @@ const NepalcanSalesPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [orders, setOrders] = useState([]);
+  const [summary, setSummary] = useState(null);
+  const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 50, totalPages: 0 });
+  const [statusCounts, setStatusCounts] = useState({});
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const [nepalcanStats, setNepalcanStats] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [orderHistory, setOrderHistory] = useState(null);
@@ -42,7 +47,10 @@ const NepalcanSalesPage = () => {
   const [syncHistory, setSyncHistory] = useState([]);
   const [showSyncHistory, setShowSyncHistory] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [customerOrders, setCustomerOrders] = useState([]);
+  const [customerLoading, setCustomerLoading] = useState(false);
   const [orderSearch, setOrderSearch] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [syncing, setSyncing] = useState(false);
   const [editingOrder, setEditingOrder] = useState(null);
@@ -51,28 +59,35 @@ const NepalcanSalesPage = () => {
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
-  const [ordersTotal, setOrdersTotal] = useState(null);
   const [procStart, setProcStart] = useState('');
   const [procEnd, setProcEnd] = useState('');
   // ponytail: frozen snapshot — drafts edit freely, appliedRange drives label
   const [appliedRange, setAppliedRange] = useState({ start: '', end: '' });
   const [statsLoading, setStatsLoading] = useState(false);
-
   const [syncMsg, setSyncMsg] = useState(null);
-  // ponytail: one click = a few resumable batches (each <10s), then refresh from DB
+
+  // ponytail: keep firing batches until the job reports done or we hit the
+  // safety cap (100 batches ≈ 5000 orders + full vendor sync). Each batch
+  // is <10s so this stays well inside a browser request timeout.
   const triggerSync = async () => {
     setSyncing(true);
     setSyncMsg(null);
     try {
       const backendToken = localStorage.getItem('token');
       const headers = backendToken ? { 'Authorization': `Bearer ${backendToken}` } : {};
-      for (let i = 0; i < 4; i++) {
+      const MAX_BATCHES = 100;
+      for (let i = 0; i < MAX_BATCHES; i++) {
         const res = await axios.post(`${API_URL}/nepalcan-orders/sync`, {}, { headers });
         const d = res.data || {};
-        setSyncMsg(d.message || `Batch ${d.processed ?? 0}/${d.total ?? 0}`);
-        if (d.done) break;
+        const pct = d.progress != null ? `${d.progress}%` : '';
+        setSyncMsg(d.message || `Syncing… ${pct} (${d.processed ?? 0}/${d.total ?? 0})`);
+        if (d.done || d.status === 'completed') break;
+        // If job is busy (another worker claimed it), wait a tick then retry
+        if (d.note === 'busy — next tick resumes') {
+          await new Promise(resolve => setTimeout(resolve, 1500));
+        }
       }
-      await Promise.all([fetchOrders(), fetchStats(), fetchSyncLog()]);
+      await Promise.all([fetchOrders({ page }), fetchSummary(), fetchStats(), fetchSyncLog()]);
     } catch (err) {
       setError(err.response?.data?.message || 'Sync failed');
     } finally { setSyncing(false); }
@@ -124,29 +139,76 @@ const NepalcanSalesPage = () => {
     } catch (err) { console.error('Failed to fetch sync log:', err.message); }
   };
 
-  const fetchOrders = async () => {
+  const authHeaders = () => {
+    const backendToken = localStorage.getItem('token');
+    return backendToken ? { Authorization: `Bearer ${backendToken}` } : {};
+  };
+
+  // One page of rows + whole-dataset status counts. Search/status run in Mongo,
+  // so paging never changes the dashboard numbers.
+  const fetchOrders = async ({ page: targetPage = page, search = appliedSearch, status = statusFilter, limit = pageSize } = {}) => {
     setLoading(true);
     setError(null);
     try {
-      const backendToken = localStorage.getItem('token');
-      const headers = backendToken ? { 'Authorization': `Bearer ${backendToken}` } : {};
-      let page = 1;
-      let totalPages = 1;
-      const allOrders = [];
-      do {
-        const res = await axios.get(`${API_URL}/nepalcan-orders/orders?page=${page}&limit=500`, { headers });
-        allOrders.push(...(res.data.orders || []));
-        totalPages = res.data.pagination?.totalPages || 1;
-        if (page === 1) setOrdersTotal(res.data.pagination?.total ?? (res.data.orders || []).length);
-        page += 1;
-      } while (page <= totalPages);
-      setOrders(allOrders);
+      const params = new URLSearchParams({ page: String(targetPage), limit: String(limit) });
+      if (search.trim()) params.set('search', search.trim());
+      if (status && status !== 'All') params.set('status', status);
+      const res = await axios.get(`${API_URL}/nepalcan-orders/orders?${params.toString()}`, { headers: authHeaders() });
+      setOrders(res.data.orders || []);
+      setStatusCounts(res.data.statusCounts || {});
+      setPagination(res.data.pagination || { total: 0, page: targetPage, limit, totalPages: 0 });
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to fetch sales data');
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchOrders(); fetchStats(); fetchSyncLog(); }, []);
+  // Cards/charts are precomputed server-side from running totals — independent
+  // of the page size or the current search/filter.
+  const fetchSummary = async () => {
+    try {
+      const res = await axios.get(`${API_URL}/nepalcan-orders/summary`, { headers: authHeaders() });
+      setSummary(res.data);
+    } catch (err) { console.error('Failed to fetch summary:', err.message); }
+  };
+
+  const fetchCustomerOrders = async (customer) => {
+    setCustomerLoading(true);
+    try {
+      const params = new URLSearchParams({ customer, limit: '500' });
+      const res = await axios.get(`${API_URL}/nepalcan-orders/orders?${params.toString()}`, { headers: authHeaders() });
+      setCustomerOrders(res.data.orders || []);
+    } catch (err) {
+      console.error('Failed to fetch customer orders:', err.message);
+      setCustomerOrders([]);
+    } finally { setCustomerLoading(false); }
+  };
+
+  const openCustomer = (customer) => {
+    setSelectedCustomer(customer);
+    fetchCustomerOrders(customer);
+  };
+
+  useEffect(() => {
+    fetchSummary();
+    fetchStats();
+    fetchSyncLog();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Server-side paging/search/status. This is the only fetch that changes the table.
+  useEffect(() => {
+    fetchOrders({ page, search: appliedSearch, status: statusFilter, limit: pageSize });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, appliedSearch, statusFilter, pageSize]);
+
+  // Debounce typing so each search is one DB query, not one per keystroke.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1);
+      setAppliedSearch(orderSearch);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [orderSearch]);
 
   const fetchOrderHistory = async (orderId) => {
     setHistoryLoading(true);
@@ -187,65 +249,36 @@ const NepalcanSalesPage = () => {
       Object.keys(editForm).forEach(k => { if (editForm[k] !== '' && editForm[k] !== null) payload[k] = editForm[k]; });
       await axios.put(`${API_URL}/nepalcan-orders/order/${editingOrder._id}`, payload, { headers });
       setEditingOrder(null);
-      await Promise.all([fetchOrders(), fetchStats()]);
+      await Promise.all([fetchOrders({ page }), fetchSummary()]);
     } catch (err) {
       setEditError(err.response?.data?.message || 'Failed to save changes');
     } finally { setSavingEdit(false); }
   };
 
+  // Numbers come precomputed from the server (whole dataset, incrementally
+  // maintained) — never derived from the current page of rows.
   const dashboardMetrics = useMemo(() => {
-    if (!orders || orders.length === 0) return null;
-    const delivered = orders.filter(o => o.orderStatus === 'Delivered');
-    const totalRevenue = delivered.reduce((s, o) => s + (o.totalAmount || 0), 0);
-    const customerOrders = {};
-    delivered.forEach(o => { customerOrders[o.customer || 'Unknown'] = (customerOrders[o.customer || 'Unknown'] || 0) + 1; });
-    const weeklySales = {};
-    delivered.forEach(o => { if (o.deliveredAt) { const d = new Date(o.deliveredAt); const w = new Date(d); w.setDate(d.getDate() - d.getDay()); const k = w.toISOString().split('T')[0]; weeklySales[k] = (weeklySales[k] || 0) + (o.totalAmount || 0); } });
-    const ordersByStatus = {};
-    orders.forEach(o => { ordersByStatus[o.orderStatus || 'Unknown'] = (ordersByStatus[o.orderStatus || 'Unknown'] || 0) + 1; });
+    if (!summary) return null;
     return {
-      totalOrders: orders.length,
-      totalRevenue,
-      aov: delivered.length > 0 ? Math.round(totalRevenue / delivered.length) : 0,
-      processingOrders: orders.filter(o => ['Processing', 'Pending'].includes(o.orderStatus)).length,
-      deliveredOrders: delivered.length,
-      uniqueCustomers: [...new Set(orders.filter(o => o.orderStatus !== 'Cancelled').map(o => o.customer).filter(Boolean))].length,
-      topCustomers: Object.entries(customerOrders).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, count]) => ({ name, count })),
-      salesPerWeek: Object.entries(weeklySales).sort((a, b) => a[0].localeCompare(b[0])).map(([week, revenue]) => ({ week, weekBs: formatNepaliDateShort(`${week}T00:00:00+05:45`), revenue })),
-      statusData: Object.entries(ordersByStatus).map(([name, value]) => ({ name, value })),
+      ...summary,
+      salesPerWeek: (summary.salesPerWeek || []).map(row => ({
+        ...row,
+        weekBs: formatNepaliDateShort(`${row.week}T00:00:00+05:45`)
+      }))
     };
-  }, [orders]);
+  }, [summary]);
 
-  const customerOrders = useMemo(() => {
-    if (!selectedCustomer || !orders) return [];
-    return orders.filter(o => (o.customer || 'Unknown') === selectedCustomer);
-  }, [orders, selectedCustomer]);
-
-  const filteredOrders = useMemo(() => {
-    if (!orderSearch.trim()) return orders;
-    const q = orderSearch.toLowerCase();
-    return orders.filter(o =>
-      (o.orderId || '').toLowerCase().includes(q) ||
-      (o.customer || '').toLowerCase().includes(q) ||
-      (o.vendor || '').toLowerCase().includes(q) ||
-      (o.orderStatus || '').toLowerCase().includes(q) ||
-      (o.paymentStatus || '').toLowerCase().includes(q)
-    );
-  }, [orders, orderSearch]);
-
-  const ordersByStatus = useMemo(() => {
-    const counts = {};
-    filteredOrders.forEach(o => {
-      const s = o.orderStatus || 'Unknown';
-      counts[s] = (counts[s] || 0) + 1;
-    });
-    return counts;
-  }, [filteredOrders]);
-
-  const statusFilteredOrders = useMemo(() => {
-    if (statusFilter === 'All') return filteredOrders;
-    return filteredOrders.filter(o => o.orderStatus === statusFilter);
-  }, [filteredOrders, statusFilter]);
+  const STATUS_TAB_ORDER = ['Pending', 'Hold', 'Processing', 'Confirmed', 'Shipped', 'Delivered', 'Cancelled', 'Returned'];
+  const statusTabs = useMemo(() => {
+    const known = STATUS_TAB_ORDER
+      .filter(status => (statusCounts[status] || 0) > 0)
+      .map(status => ({ status, count: statusCounts[status] }));
+    const extras = Object.keys(statusCounts)
+      .filter(status => !STATUS_TAB_ORDER.includes(status))
+      .map(status => ({ status, count: statusCounts[status] }));
+    const total = Object.values(statusCounts).reduce((sum, count) => sum + count, 0);
+    return { total, options: [...known, ...extras] };
+  }, [statusCounts]);
 
   const StatCard = ({ icon: Icon, label, value, color, tooltip }) => (
     <div className="bg-white p-4 lg:p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all group relative cursor-help">
@@ -294,7 +327,7 @@ const NepalcanSalesPage = () => {
             className="flex flex-1 sm:flex-none items-center justify-center gap-2 px-4 py-2.5 bg-red-600 border border-red-600 rounded-xl text-xs font-bold text-white hover:bg-red-700 transition-all disabled:opacity-50">
             <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} /> {syncing ? 'Syncing...' : 'Sync Now'}
           </button>
-          <button onClick={() => { fetchOrders(); fetchStats(); fetchSyncLog(); }} disabled={loading}
+          <button onClick={() => { fetchOrders({ page }); fetchSummary(); fetchStats(); fetchSyncLog(); }} disabled={loading}
             className="flex flex-1 sm:flex-none items-center justify-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 transition-all">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
           </button>
@@ -356,7 +389,7 @@ const NepalcanSalesPage = () => {
             <StatCard icon={BarChart3} label="AOV" value={`NPR ${dashboardMetrics.aov.toLocaleString()}`} color="bg-purple-600" tooltip="Average Order Value = Total Revenue ÷ Number of Delivered orders." />
             <StatCard icon={Truck} label="Processing" value={dashboardMetrics.processingOrders} color="bg-amber-600" tooltip="Orders currently in Pending or Processing status (not yet shipped or delivered)." />
             <StatCard icon={CheckCircle} label="Delivered" value={dashboardMetrics.deliveredOrders} color="bg-emerald-600" tooltip="Orders that have been successfully delivered to the customer." />
-            <StatCard icon={Users} label="Customers" value={dashboardMetrics.uniqueCustomers} color="bg-red-600" tooltip="Count of unique customer names from Delivered and Pending orders." />
+            <StatCard icon={Users} label="Customers" value={dashboardMetrics.uniqueCustomers} color="bg-red-600" tooltip="Count of unique customers with at least one non-cancelled order." />
           </div>
 
           {/* Processing Times */}
@@ -483,7 +516,7 @@ const NepalcanSalesPage = () => {
             </div>
             <div className="divide-y divide-slate-50">
               {dashboardMetrics.topCustomers.map((c, i) => (
-                <div key={c.name} onClick={() => setSelectedCustomer(c.name)} className="px-5 py-3 flex items-center justify-between hover:bg-red-50/50 transition-colors cursor-pointer group">
+                <div key={c.name} onClick={() => openCustomer(c.name)} className="px-5 py-3 flex items-center justify-between hover:bg-red-50/50 transition-colors cursor-pointer group">
                   <div className="flex items-center gap-3">
                     <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-extrabold ${i === 0 ? 'bg-red-600 text-white' : 'bg-slate-100 text-slate-600'}`}>{i + 1}</div>
                     <span className="font-bold text-sm text-slate-900 group-hover:text-red-600 transition-colors">{c.name}</span>
@@ -502,41 +535,45 @@ const NepalcanSalesPage = () => {
             <div className="px-5 py-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <ShoppingBag size={16} className="text-red-600" />
-                <h3 className="text-sm font-extrabold text-slate-900">Recent Orders</h3>
-                {ordersTotal != null && (
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    Showing {filteredOrders.length} of {ordersTotal}
-                  </span>
-                )}
+                <h3 className="text-sm font-extrabold text-slate-900">Orders</h3>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                  Showing {orders.length} of {pagination.total}
+                </span>
               </div>
-              <div className="relative w-full sm:w-auto">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10 pointer-events-none" />
-                <input type="text" placeholder="Search orders..." value={orderSearch} onChange={e => setOrderSearch(e.target.value)}
-                  style={{ paddingLeft: '2.25rem', paddingRight: '2rem' }}
-                  className="py-2 w-full sm:w-56 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 focus:ring-2 focus:ring-red-100 focus:border-red-300 outline-none transition-all" />
-                {orderSearch && <button onClick={() => setOrderSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-red-500 z-10"><X size={12} /></button>}
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <div className="relative flex-1 sm:flex-none">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10 pointer-events-none" />
+                  <input type="text" placeholder="Search orders..." value={orderSearch} onChange={e => setOrderSearch(e.target.value)}
+                    style={{ paddingLeft: '2.25rem', paddingRight: '2rem' }}
+                    className="py-2 w-full sm:w-56 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 focus:ring-2 focus:ring-red-100 focus:border-red-300 outline-none transition-all" />
+                  {orderSearch && <button onClick={() => setOrderSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-red-500 z-10"><X size={12} /></button>}
+                </div>
+                <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}
+                  className="px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-[11px] font-bold text-slate-600 outline-none">
+                  {[25, 50, 100].map(size => <option key={size} value={size}>{size} / page</option>)}
+                </select>
               </div>
             </div>
             {/* Status Filter Tabs */}
             <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2 overflow-x-auto">
-              {['All', ...Object.keys(ordersByStatus)].map(status => (
+              {[{ status: 'All', count: statusTabs.total }, ...statusTabs.options].map(({ status, count }) => (
                 <button
                   key={status}
-                  onClick={() => setStatusFilter(status)}
+                  onClick={() => { setStatusFilter(status); setPage(1); }}
                   className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap"
                   style={statusFilter === status
                     ? { backgroundColor: status === 'All' ? '#dc2626' : (STATUS_COLORS[status] || '#64748b'), color: '#fff' }
                     : { backgroundColor: '#f1f5f9', color: '#64748b' }
                   }
                 >
-                  {status} ({status === 'All' ? filteredOrders.length : (ordersByStatus[status] || 0)})
+                  {status} ({count})
                 </button>
               ))}
             </div>
             <div className="md:hidden divide-y divide-slate-100">
-              {statusFilteredOrders.length === 0 ? (
+              {orders.length === 0 ? (
                 <div className="px-4 py-12 text-center text-xs font-bold text-slate-400 uppercase tracking-wider">No orders found</div>
-              ) : statusFilteredOrders.map(order => (
+              ) : orders.map(order => (
                 <div key={order._id || order.orderId} className="p-4 space-y-3">
                   <div className="flex items-start justify-between gap-3">
                     <button className="min-w-0 text-left" onClick={() => setViewOrder(order)}>
@@ -570,9 +607,9 @@ const NepalcanSalesPage = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {statusFilteredOrders.length === 0 ? (
+                  {orders.length === 0 ? (
                     <tr><td colSpan="10" className="px-4 py-12 text-center text-xs font-bold text-slate-400 uppercase tracking-wider">No orders found</td></tr>
-                  ) : statusFilteredOrders.map(order => (
+                  ) : orders.map(order => (
                     <tr key={order._id || order.orderId} className="hover:bg-red-50/50 transition-colors">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
@@ -608,6 +645,24 @@ const NepalcanSalesPage = () => {
                   ))}
                 </tbody>
               </table>
+            </div>
+            {/* Server-side pagination — display only; cards above stay global */}
+            <div className="px-5 py-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                Page {pagination.totalPages ? pagination.page : 0} of {pagination.totalPages || 0} · {pagination.total} orders
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={loading || pagination.page <= 1}
+                  className="px-3 py-1.5 bg-slate-100 rounded-lg text-[10px] font-bold uppercase tracking-wider text-slate-600 hover:bg-slate-200 transition-all disabled:opacity-40"
+                >Prev</button>
+                <button
+                  onClick={() => setPage(p => p + 1)}
+                  disabled={loading || pagination.page >= (pagination.totalPages || 1)}
+                  className="px-3 py-1.5 bg-slate-100 rounded-lg text-[10px] font-bold uppercase tracking-wider text-slate-600 hover:bg-slate-200 transition-all disabled:opacity-40"
+                >Next</button>
+              </div>
             </div>
           </div>
         </div>
@@ -796,7 +851,9 @@ const NepalcanSalesPage = () => {
               <button onClick={() => setSelectedCustomer(null)} className="p-2 hover:bg-white/10 rounded-lg"><X size={18} /></button>
             </div>
             <div className="p-5 overflow-y-auto max-h-[65vh]">
-              {customerOrders.length === 0 ? (
+              {customerLoading ? (
+                <div className="flex items-center justify-center py-10"><Loader2 size={24} className="text-red-600 animate-spin" /></div>
+              ) : customerOrders.length === 0 ? (
                 <p className="text-sm text-slate-400 text-center py-8">No orders found</p>
               ) : (
                 <>
@@ -818,7 +875,7 @@ const NepalcanSalesPage = () => {
 
                   {/* Orders List */}
                   <div className="space-y-2">
-                    {customerOrders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(order => (
+                    {[...customerOrders].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(order => (
                       <div key={order._id || order.orderId} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl hover:bg-red-50/30 transition-colors cursor-pointer" onClick={() => { setSelectedCustomer(null); fetchOrderHistory(order.orderId || order._id); }}>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">

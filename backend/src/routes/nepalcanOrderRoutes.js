@@ -11,6 +11,8 @@ const {
   getNepalcanAnalytics,
   getMonthlyData,
   getDailySalesData,
+  getNepalcanOrderSummary,
+  rebuildNepalcanOrderStats,
   syncNepalcanOrders,
   recalculateRevenue
 } = require('../controllers/nepalcanOrderController');
@@ -34,6 +36,10 @@ router.get('/orders', getNepalcanOrders);
 
 // Get statistics and processing times
 router.get('/stats', getNepalcanStats);
+
+// Whole-dataset running totals for the sales dashboard cards/charts
+router.get('/summary', getNepalcanOrderSummary);
+router.post('/summary/rebuild', rebuildNepalcanOrderStats);
 
 // Get comprehensive analytics
 router.get('/analytics', getNepalcanAnalytics);

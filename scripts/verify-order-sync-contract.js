@@ -1,7 +1,9 @@
 const assert = require('assert');
 const {
+  ORDER_CREATED_FETCH_DAYS,
   ORDERS_API_URL,
   buildOrderRequestParams,
+  getOrderSyncWindow,
   isLastOrderPage,
   parseOrderResponse
 } = require('../backend/src/services/nepalcanOrderWindow');
@@ -14,16 +16,21 @@ assert.strictEqual(
   'default endpoint must be the verified JSON orders API'
 );
 
-const params = buildOrderRequestParams(2, 50, new Date('2026-10-06T01:00:00.000Z'));
+const CONTRACT_NOW = new Date('2026-10-06T01:00:00.000Z');
+const params = buildOrderRequestParams(2, 50, CONTRACT_NOW);
+// Derive the expected date window from the configured window length so this
+// contract test tracks NEPALCAN_ORDER_FETCH_DAYS instead of going stale.
+const expectedWindow = getOrderSyncWindow(CONTRACT_NOW);
 assert.deepStrictEqual(params, {
   tab: 'marketplace',
   page: 2,
   limit: 50,
   unattendedOrders: '',
   status: 'Active',
-  fromDate: '2026-09-17',
-  toDate: '2026-10-06'
+  fromDate: expectedWindow.fromDate,
+  toDate: expectedWindow.toDate
 });
+assert.ok(ORDER_CREATED_FETCH_DAYS > 0, 'order fetch window must be positive');
 assert.strictEqual(Object.hasOwn(params, 'perPage'), false, 'perPage is ignored by the live API');
 
 const valid = parseOrderResponse({

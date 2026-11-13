@@ -51,6 +51,16 @@ const normalizeStatusHistory = (history = []) => {
 
 const mergeStatusHistory = (...histories) => normalizeStatusHistory(histories.flat().filter(Boolean));
 
+// Hours between the first and last recorded status event. Stored on the order
+// so the list endpoint never has to ship statusHistory just to compute it.
+const processingDurationHours = (history = []) => {
+  const normalized = normalizeStatusHistory(history);
+  if (normalized.length < 2) return null;
+  const diffMs = normalized[normalized.length - 1].timestamp - normalized[0].timestamp;
+  if (diffMs <= 0) return 0;
+  return Math.round(diffMs / (1000 * 60 * 60));
+};
+
 const trackingEvents = (trackingData) => {
   const processes = trackingData?.marketplaceProcesses;
   const events = Array.isArray(processes) ? processes.map(proc => {
@@ -186,6 +196,7 @@ module.exports = {
   lifecycleFields,
   mergeStatusHistory,
   normalizeStatusHistory,
+  processingDurationHours,
   statusDateExpression,
   statusDateField,
   statusEvent,

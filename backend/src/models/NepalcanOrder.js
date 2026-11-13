@@ -57,7 +57,9 @@ const nepalcanOrderSchema = new mongoose.Schema({
   },
   orderStatus: {
     type: String,
-    enum: ['Pending', 'Hold', 'Processing', 'Shipped', 'Delivered', 'Cancelled', 'Returned'],
+    // 'Confirmed' appears in Nepalcan API responses and is treated as Processing.
+    // It is kept in the enum so existing DB rows don't fail validation on read.
+    enum: ['Pending', 'Hold', 'Processing', 'Confirmed', 'Shipped', 'Delivered', 'Cancelled', 'Returned'],
     default: 'Pending'
   },
   paymentStatus: {

@@ -12,13 +12,13 @@ const {
 } = require('./nepalcanVendorSyncService');
 const {
   ORDERS_API_URL, buildOrderRequestParams, getOrderSyncWindow,
-  isLastOrderPage, parseOrderResponse
+  isLastOrderPage, isOrderFrozen, parseOrderResponse
 } = require('./nepalcanOrderWindow');
 
 const API_BASE = 'https://commerce.thecanbrand.com/api';
 const MAX_RETRIES = parseInt(process.env.SYNC_MAX_RETRIES) || 3;
 // ponytail: tiny batches fit Hobby 10s / Render throttle; override via env
-const ORDERS_LIMIT = parseInt(process.env.SYNC_ORDERS_LIMIT) || 50;
+const ORDERS_LIMIT = parseInt(process.env.SYNC_ORDERS_LIMIT) || 200;
 const TRACKING_LIMIT = parseInt(process.env.SYNC_TRACKING_LIMIT) || 25;
 const DETAILS_LIMIT = parseInt(process.env.SYNC_DETAILS_LIMIT) || 25;
 const VENDORS_LIMIT = parseInt(process.env.SYNC_VENDORS_LIMIT) || 25;
@@ -66,6 +66,7 @@ const processOrdersPage = async (job, token) => {
 
   const trackingMap = await batchFetchTracking(ids, TRACKING_CONCURRENCY);
   const ops = [];
+  const statChanges = [];
   let successful = 0, failed = 0;
   for (const orderData of ordersList) {
     try {
@@ -73,16 +74,23 @@ const processOrdersPage = async (job, token) => {
       const ex = existingMap.get(orderId);
       const apiTs = orderData.updatedAt ? new Date(orderData.updatedAt).getTime() : 0;
       const storedTs = ex?.apiUpdatedAt ? new Date(ex.apiUpdatedAt).getTime() : 0;
-      // ponytail: equal timestamps skip only terminal rows — tracking can still promote the rest to Delivered
-      if (ex && apiTs > 0 && storedTs > 0 && apiTs === storedTs && ['Delivered', 'Cancelled', 'Returned'].includes(ex.orderStatus)) { successful++; continue; } // unchanged skip
+
+      // Skip frozen orders — terminal status + grace period expired.
+      // These are done and won't change; no point writing them every sync.
+      if (ex && isOrderFrozen(ex)) { successful++; continue; }
+
+      // Skip if API timestamp unchanged AND order is terminal (can't advance further)
+      if (ex && apiTs > 0 && storedTs > 0 && apiTs === storedTs && ['Delivered', 'Cancelled', 'Returned'].includes(ex.orderStatus)) { successful++; continue; }
       const u = buildOrderUpdate(orderData, trackingMap.get(orderId), ex || null);
       const vl = orderData.vendor ? (vlMap.get(String(orderData.vendor).toLowerCase()) || vlMap.get(orderData.vendor)) : null;
       if (u.isNew) { if (vl) u.update.$setOnInsert.vendor_lead_id = vl; ops.push({ updateOne: { ...u, upsert: true } }); }
       else { if (vl) u.update.$set.vendor_lead_id = vl; ops.push({ updateOne: u }); }
+      statChanges.push({ prev: ex || null, next: u.nextState });
       successful++;
     } catch (e) { failed++; pushError(job, orderData.orderId || orderData._id, e.message); }
   }
   if (ops.length) await NepalcanOrder.bulkWrite(ops, { ordered: false });
+  if (statChanges.length) await require('./nepalcanOrderStatsService').applyOrderChanges(statChanges);
   // ponytail: totalApi known — done when page covers it, not only on short page (exact multiples stall)
   const isLast = isLastOrderPage({ page, limit: ORDERS_LIMIT, count: ordersList.length, total: totalApi });
   return { done: !!isLast, totalApi, successful, failed, count: ordersList.length };
@@ -91,18 +99,30 @@ const processOrdersPage = async (job, token) => {
 // --- TRACKING: small slice after last_processed_id ---
 const processTrackingBatch = async (job) => {
   const { from, to } = getOrderSyncWindow();
+  const TERMINAL_GRACE_MS = (parseInt(process.env.NEPALCAN_ORDER_TERMINAL_GRACE_DAYS) || 10) * 24 * 60 * 60 * 1000;
+  const graceCutoff = new Date(Date.now() - TERMINAL_GRACE_MS);
+
   const filter = {
-    orderStatus: { $in: ['Pending', 'Processing', 'Shipped', 'Delivered', 'Returned'] },
-    createdAt: { $gte: from, $lte: to }
+    // Active orders OR terminal orders still within the grace period
+    $or: [
+      { orderStatus: { $in: ['Pending', 'Processing', 'Shipped', 'Hold'] } },
+      { orderStatus: 'Delivered', deliveredAt: { $gte: graceCutoff } },
+      { orderStatus: 'Cancelled', cancelledAt: { $gte: graceCutoff } },
+      { orderStatus: 'Returned', returnedAt: { $gte: graceCutoff } },
+      // Orders with no terminal date yet — may still get tracking update
+      { orderStatus: { $in: ['Delivered', 'Cancelled', 'Returned'] }, deliveredAt: null, cancelledAt: null, returnedAt: null },
+    ],
+    createdAt: { $gte: from }
   };
   if (job.last_processed_id) filter._id = { $gt: job.last_processed_id };
   const batch = await NepalcanOrder.find(filter).sort({ _id: 1 }).limit(TRACKING_LIMIT)
-    .select('_id orderId orderStatus statusHistory rawData trackingData processingAt shippedAt deliveredAt cancelledAt returnedAt').lean();
+    .select('_id orderId orderStatus customer totalAmount statusHistory rawData trackingData processingAt shippedAt deliveredAt cancelledAt returnedAt').lean();
   if (!batch.length) return { done: true, successful: 0, failed: 0, count: 0 };
   const { deriveStatusFromTracking, extractStatusTimeline, resolveStatus } = require('./nepalcanOrderSyncService');
-  const { lifecycleFields, mergeStatusHistory } = require('../utils/orderLifecycle');
+  const { lifecycleFields, mergeStatusHistory, processingDurationHours } = require('../utils/orderLifecycle');
   const trackingMap = await batchFetchTracking(batch.map(o => o.orderId), TRACKING_CONCURRENCY);
   const ops = [];
+  const statChanges = [];
   let successful = 0, failed = 0;
   for (const order of batch) {
     try {
@@ -123,51 +143,60 @@ const processTrackingBatch = async (job) => {
             if (lifecycle[field]) set[field] = lifecycle[field];
           }
         }
+        set.processingDurationHours = processingDurationHours(set.statusHistory || order.statusHistory || []);
       }
+      statChanges.push({ prev: order, next: { ...order, ...set } });
       ops.push({ updateOne: { filter: { _id: order._id }, update: { $set: set } } });
       successful++;
     } catch (e) { failed++; pushError(job, order.orderId, e.message); }
   }
   if (ops.length) await NepalcanOrder.bulkWrite(ops, { ordered: false });
-  job.last_processed_id = String(batch[batch.length - 1]._id);
-  return { done: batch.length < TRACKING_LIMIT, successful, failed, count: batch.length };
+  if (statChanges.length) await require('./nepalcanOrderStatsService').applyOrderChanges(statChanges);
+  const lastId = String(batch[batch.length - 1]._id);
+  job.last_processed_id = lastId;
+  return { done: batch.length < TRACKING_LIMIT, last_processed_id: lastId, successful, failed, count: batch.length };
 };
 
-// --- DETAILS: small slice after last_processed_id, fills missing Commerce snapshots ---
+// --- DETAILS: cursor-walk all orders by _id, fetch detailData only for those missing it.
+// Always advances by _id so the phase terminates regardless of whether API returns data.
 const processDetailsBatch = async (job) => {
-  const filter = { nepalcanId: { $exists: true, $ne: null }, detailData: null };
+  const filter = { nepalcanId: { $exists: true, $ne: null } };
   if (job.last_processed_id) filter._id = { $gt: job.last_processed_id };
   const batch = await NepalcanOrder.find(filter).sort({ _id: 1 }).limit(DETAILS_LIMIT)
-    .select('_id orderId nepalcanId').lean();
+    .select('_id orderId nepalcanId detailData detailFetchedAt').lean();
   if (!batch.length) return { done: true, successful: 0, failed: 0, count: 0 };
 
+  const needsFetch = batch.filter(o => !o.detailData && !o.detailFetchedAt);
   const ops = [];
   let successful = 0, failed = 0;
-  for (let i = 0; i < batch.length; i += DETAILS_CONCURRENCY) {
-    const chunk = batch.slice(i, i + DETAILS_CONCURRENCY);
-    const settled = await Promise.allSettled(chunk.map(async (order) => {
-      const raw = await fetchOrderDetail(order.nepalcanId);
-      return { order, detail: normalizeOrderDetail(raw) };
-    }));
-    settled.forEach((result, index) => {
-      if (result.status === 'fulfilled') {
-        const { order, detail } = result.value;
-        ops.push({
-          updateOne: {
-            filter: { _id: order._id },
-            update: { $set: { detailData: detail, detailFetchedAt: new Date() } }
-          }
-        });
-        successful++;
-      } else {
-        failed++;
-        pushError(job, chunk[index]?.orderId, result.reason?.message);
-      }
-    });
+
+  if (needsFetch.length > 0) {
+    for (let i = 0; i < needsFetch.length; i += DETAILS_CONCURRENCY) {
+      const chunk = needsFetch.slice(i, i + DETAILS_CONCURRENCY);
+      const settled = await Promise.allSettled(chunk.map(async (order) => {
+        const raw = await fetchOrderDetail(order.nepalcanId);
+        return { order, detail: normalizeOrderDetail(raw) };
+      }));
+      settled.forEach((result, index) => {
+        const o = chunk[index];
+        if (result.status === 'fulfilled') {
+          ops.push({ updateOne: { filter: { _id: o._id }, update: { $set: { detailData: result.value.detail, detailFetchedAt: new Date() } } } });
+          successful++;
+        } else {
+          ops.push({ updateOne: { filter: { _id: o._id }, update: { $set: { detailFetchedAt: new Date() } } } });
+          failed++;
+          pushError(job, o?.orderId, result.reason?.message);
+        }
+      });
+    }
   }
+  // Count already-done orders as successful so totals are accurate
+  successful += batch.length - needsFetch.length;
+
   if (ops.length) await NepalcanOrder.bulkWrite(ops, { ordered: false });
-  job.last_processed_id = String(batch[batch.length - 1]._id);
-  return { done: batch.length < DETAILS_LIMIT, successful, failed, count: batch.length };
+  const lastId = String(batch[batch.length - 1]._id);
+  job.last_processed_id = lastId;
+  return { done: batch.length < DETAILS_LIMIT, last_processed_id: lastId, successful, failed, count: batch.length };
 };
 
 // --- VENDORS: ONE API page (default 25), bulkWrite + bulk Activity ---
@@ -306,9 +335,10 @@ const processBranchesBatch = async (job, token) => {
     } catch (e) { failed++; pushError(job, vendor.nepalcanId, e.message); }
   }
   if (ops.length) await Lead.bulkWrite(ops, { ordered: false });
-  job.last_processed_id = String(vendors[vendors.length - 1]._id);
-  const remaining = await Lead.countDocuments({ type: 'vendor', nepalcanId: { $exists: true, $ne: null }, _id: { $gt: job.last_processed_id } });
-  return { done: remaining === 0, successful, failed, count: vendors.length };
+  const lastId = String(vendors[vendors.length - 1]._id);
+  job.last_processed_id = lastId;
+  const remaining = await Lead.countDocuments({ type: 'vendor', nepalcanId: { $exists: true, $ne: null }, _id: { $gt: lastId } });
+  return { done: remaining === 0, last_processed_id: lastId, successful, failed, count: vendors.length };
 };
 
 module.exports = {
