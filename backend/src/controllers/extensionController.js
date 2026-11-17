@@ -716,7 +716,7 @@ exports.getAnalytics = async (req, res) => {
       ]),
       ExtensionEvent.aggregate([
         { $match: { ...rawFilter, product_name: { $ne: null } } },
-        { $group: { _id: '$product_name', total: { $sum: BULK_SUM }, listings: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, 1, 0] } }, specs: { $sum: { $cond: [{ $eq: ['$event_type', 'spec_added'] }, 1, 0] } }, updates: { $sum: { $cond: [{ $eq: ['$event_type', 'product_updated'] }, 1, 0] } }, qc_approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, BULK_SUM, 0] } }, qc_rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, BULK_SUM, 0] } } } },
+        { $group: { _id: '$product_name', total: { $sum: BULK_SUM }, listings: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, 1, 0] } }, variants: { $sum: { $cond: [{ $eq: ['$event_type', 'listing_created'] }, { $ifNull: ['$variant_count', 0] }, 0] } }, specs: { $sum: { $cond: [{ $eq: ['$event_type', 'spec_added'] }, 1, 0] } }, updates: { $sum: { $cond: [{ $eq: ['$event_type', 'product_updated'] }, 1, 0] } }, qc_approved: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_approved'] }, BULK_SUM, 0] } }, qc_rejected: { $sum: { $cond: [{ $eq: ['$event_type', 'qc_rejected'] }, BULK_SUM, 0] } } } },
         { $sort: { total: -1 } },
         { $limit: 10 }
       ]),
@@ -1003,7 +1003,7 @@ exports.getAnalyticsDetails = async (req, res) => {
     }
 
     const events = await ExtensionEvent.find(matchFilter)
-      .select('product_name product_id created_at vendor_id qc_status metadata')
+      .select('product_name product_id created_at vendor_id qc_status has_variant variant_count variant_skus metadata')
       .sort({ created_at: -1 })
       .limit(200)
       .lean();

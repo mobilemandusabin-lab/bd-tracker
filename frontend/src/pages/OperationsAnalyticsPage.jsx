@@ -445,11 +445,15 @@ const OperationsAnalyticsPage = () => {
                   </div>
                   <p className="text-2xl font-extrabold text-slate-900">{count}</p>
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">{label}</p>
-                  {key === 'listing_created' && summary.listing_variants > 0 && (
-                    <p className="text-[10px] font-bold text-blue-500 mt-0.5">
-                      {summary.listing_variants.toLocaleString()} variants
-                      {summary.products_with_variants > 0 ? ` · ${summary.products_with_variants} with variants` : ''}
-                    </p>
+                  {key === 'listing_created' && (
+                    summary.listing_variants > 0 ? (
+                      <p className="text-[10px] font-bold text-blue-500 mt-0.5">
+                        {summary.listing_variants.toLocaleString()} variants
+                        {summary.products_with_variants > 0 ? ` · ${summary.products_with_variants} with variants` : ''}
+                      </p>
+                    ) : (
+                      <p className="text-[10px] font-bold text-slate-300 mt-0.5">no variants yet</p>
+                    )
                   )}
                   {isClickable && (
                     <p className="text-[9px] text-slate-300 mt-1">Click to view</p>
@@ -602,6 +606,7 @@ const OperationsAnalyticsPage = () => {
                       <th className="px-4 py-2.5 text-left text-[10px] font-bold text-slate-400 uppercase">Product</th>
                       <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Total</th>
                       <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Listings</th>
+                      <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Variants</th>
                       <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Specs</th>
                       <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Updates</th>
                       <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">QC Pass</th>
@@ -615,6 +620,7 @@ const OperationsAnalyticsPage = () => {
                         <td className="px-4 py-2.5 font-bold text-slate-900 max-w-xs truncate">{p._id}</td>
                         <td className="px-4 py-2.5 text-center font-extrabold text-slate-900">{p.total}</td>
                         <td className="px-4 py-2.5 text-center font-bold text-blue-600">{p.listings || 0}</td>
+                        <td className="px-4 py-2.5 text-center font-bold text-indigo-600">{p.variants || 0}</td>
                         <td className="px-4 py-2.5 text-center font-bold text-violet-600">{p.specs || 0}</td>
                         <td className="px-4 py-2.5 text-center font-bold text-slate-500">{p.updates || 0}</td>
                         <td className="px-4 py-2.5 text-center font-bold text-emerald-600">{p.qc_approved || 0}</td>
@@ -905,6 +911,9 @@ const OperationsAnalyticsPage = () => {
                             >
                               <p className={`text-lg font-extrabold ${c.text}`}>{count}</p>
                               <p className="text-[8px] font-bold text-slate-400 uppercase leading-tight mt-0.5">{label.split(' ').pop()}</p>
+                              {key === 'listing_created' && (user.listing_variants || 0) > 0 && (
+                                <p className="text-[8px] font-bold text-blue-600 leading-tight">{user.listing_variants} var</p>
+                              )}
                             </button>
                           );
                         })}
@@ -1337,6 +1346,18 @@ const OperationsAnalyticsPage = () => {
                           {formatNepaliDateTime(ev.created_at)}
                           {ev.qc_status && <span className="ml-2 capitalize">QC: {ev.qc_status}</span>}
                         </p>
+                        {ev.variant_count > 0 && (
+                          <p className="text-[10px] font-bold text-blue-600 mt-0.5 truncate">
+                            {ev.variant_count} variant{ev.variant_count === 1 ? '' : 's'}
+                            {Array.isArray(ev.variant_skus) && ev.variant_skus.length > 0 && (
+                              <span className="font-medium text-slate-400">
+                                {' · '}
+                                {ev.variant_skus.slice(0, 3).join(', ')}
+                                {ev.variant_skus.length > 3 ? ` +${ev.variant_skus.length - 3}` : ''}
+                              </span>
+                            )}
+                          </p>
+                        )}
                       </div>
                     </div>
                   ))}
