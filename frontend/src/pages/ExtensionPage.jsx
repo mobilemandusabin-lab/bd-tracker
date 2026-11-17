@@ -188,7 +188,15 @@ const ExtensionPage = () => {
 
         {/* Activity Metric Cards */}
         <div className="p-6 grid grid-cols-2 lg:grid-cols-5 gap-4">
-          <ActivityCard icon={Package} label="Products Listed" value={analytics?.summary?.listing_created || 0} color="blue" />
+          <ActivityCard
+            icon={Package}
+            label="Products Listed"
+            value={analytics?.summary?.listing_created || 0}
+            color="blue"
+            sub={analytics?.summary?.listing_variants > 0
+              ? `${analytics.summary.listing_variants} variants · ${analytics.summary.products_with_variants || 0} with variants`
+              : null}
+          />
           <ActivityCard icon={ShieldCheck} label="QC Approved" value={analytics?.summary?.qc_approved || 0} color="emerald" />
           <ActivityCard icon={ShieldX} label="QC Rejected" value={analytics?.summary?.qc_rejected || 0} color="red" />
           <ActivityCard icon={Clock} label="QC Pending" value={analytics?.summary?.qc_pending || 0} color="amber" />
@@ -396,7 +404,7 @@ const StatCard = ({ icon: Icon, label, value, color }) => {
   );
 };
 
-const ActivityCard = ({ icon: Icon, label, value, color }) => {
+const ActivityCard = ({ icon: Icon, label, value, color, sub }) => {
   const colors = {
     emerald: 'bg-emerald-50 text-emerald-600',
     blue: 'bg-blue-50 text-blue-600',
@@ -412,6 +420,7 @@ const ActivityCard = ({ icon: Icon, label, value, color }) => {
       </div>
       <p className="text-2xl font-extrabold text-slate-900">{value}</p>
       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">{label}</p>
+      {sub ? <p className="text-[10px] font-bold text-slate-500 mt-0.5">{sub}</p> : null}
     </div>
   );
 };

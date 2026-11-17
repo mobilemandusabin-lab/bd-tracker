@@ -186,6 +186,14 @@ body {
   min-height: 11px;
 }
 
+.stat-sub {
+  font-size: 9px;
+  font-weight: 700;
+  color: #2563eb;
+  margin-top: 2px;
+  min-height: 11px;
+}
+
 .stat-card.accent .stat-target {
   color: #b45309;
 }

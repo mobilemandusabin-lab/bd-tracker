@@ -341,7 +341,8 @@ The extension intercepts network requests on the Nepalcan marketplace and record
 
 Click the extension icon to see your personal stats:
 
-- **Listings** — Number of products you've listed today
+- **Listings** — Number of products you've listed today (a product counts as 1)
+- **Variants** — Child variants accumulated across your listings (a product with 4 variants = 1 listing + 4 variants)
 - **Spec Added** — Number of specs you've added
 - **QC Approved** — Number of quality-check approvals
 
@@ -358,6 +359,20 @@ Below that you'll see:
 - **Bulk reject:** The extension reads `rejected` from the response `{ data: { rejected: N } }` and records 1 event with `bulk_count: N`
 
 All QC events are counted correctly in analytics using the `bulk_count` field.
+
+### Variants: Products vs Variants
+
+Marketplace products can carry variants (`hasVariant: true` with a `variants[]`
+array, each entry having its own `productSku`). The extension treats them as
+**one product with N variants**, never as N listings:
+
+- `product_sku` is always the **parent** product SKU
+- `variant_count` = `variants.length`, `variant_skus` = the child SKUs
+- Listing counts stay per-product; variant totals accumulate separately
+- Variants added after listing (list → then add red/l, red/xl, …) back-patch the
+  existing listing row, so nothing is double counted
+- Analytics surfaces both: `Products Listed` with a `N variants` sub-line, and a
+  per-user `Variants` column
 
 ### Admin: Clear QC Pending
 
@@ -447,7 +462,7 @@ npm run dev            # Starts on port 5173
    rm -f extension.zip && zip -r extension.zip . -x "*.zip"
    ```
 3. Load the unpacked extension in Chrome
-4. To verify the extension is running your local code, check the console for `[BD Tracker v1.0.12-bulkcnt]`
+4. To verify the extension is running your local code, check the console for `[BD Tracker v1.0.13-variants]`
 
 ### Deploy
 

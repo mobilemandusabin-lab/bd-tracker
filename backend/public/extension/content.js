@@ -4,7 +4,7 @@
   // VERSION is the single source of truth for "is the new code active?".
   // Manifest version stays 1.0.12 — this build suffix lets you confirm in
   // the console which copy of the code is running without bumping manifest.
-  const VERSION = '1.0.12-bulkcnt';
+  const VERSION = '1.0.13-variants';
   console.log(`[BD Tracker v${VERSION}] Content script loaded on ${window.location.hostname}`);
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -62,6 +62,41 @@
   const ProductContext = {};
   const PRODUCT_CONTEXT_KEY_PREFIX = 'bd_ctx_';
   const PRODUCT_CONTEXT_TTL_MS = 5 * 60 * 1000;
+
+  // Variant capture: the marketplace returns `hasVariant` + a `variants[]`
+  // array (one entry per child SKU, e.g. { productSku, option: "red-l" }).
+  // We store the child SKUs so listings can be reported as
+  // "N products listed with M variants" without inflating the product count.
+  const MAX_VARIANTS = 100;
+
+  function variantSource(d) {
+    if (!d || typeof d !== 'object') return null;
+    if (Array.isArray(d.variants)) return d;
+    for (const key of ['product', 'payload', 'body']) {
+      const nested = d[key];
+      if (nested && typeof nested === 'object' && Array.isArray(nested.variants)) return nested;
+    }
+    return null;
+  }
+
+  function extractVariantSkus(d) {
+    const src = variantSource(d);
+    if (!src) return [];
+    return src.variants
+      .map((v) => (v && typeof v === 'object' ? v.productSku : null))
+      .filter((sku) => typeof sku === 'string' && sku.length > 0)
+      .slice(0, MAX_VARIANTS);
+  }
+
+  function extractVariantCount(d) {
+    const src = variantSource(d);
+    return src ? src.variants.length : 0;
+  }
+
+  function extractVariantFlag(d) {
+    const src = variantSource(d);
+    return !!(src && (src.hasVariant === true || src.variants.length > 0));
+  }
 
   function _ctxKey(productId) {
     return PRODUCT_CONTEXT_KEY_PREFIX + productId;
@@ -148,15 +183,25 @@
   function cacheProductContext(productId, responseData) {
     if (!productId) return;
     const d = unwrap(responseData);
+    const prev = getContext(productId) || {};
     const product_name = d.productName || d.name ||
                          d.product?.productName || d.product?.name ||
                          d.payload?.productName || d.payload?.name ||
-                         d.body?.productName || d.body?.name || null;
+                         d.body?.productName || d.body?.name ||
+                         prev.product_name || null;
+    // Merge variant/SKU/name info: a thin response (e.g. a PUT that only
+    // returns {_id, productName}) must not wipe what an earlier GET taught us.
+    const variantCount = extractVariantCount(d);
+    const variantSkus = extractVariantSkus(d);
     setContext(productId, {
       has_package_type: hasPackageType(d),
       has_specs: hasSpecValues(d),
-      has_spec_schema: hasSpecSchema(d),
-      product_name
+      has_spec_schema: hasSpecSchema(d) || !!prev.has_spec_schema,
+      product_name,
+      product_sku: d.productSku || d.sku || prev.product_sku || null,
+      has_variant: extractVariantFlag(d) || !!prev.has_variant,
+      variant_count: variantCount > 0 ? variantCount : (prev.variant_count || 0),
+      variant_skus: variantSkus.length ? variantSkus : (prev.variant_skus || [])
     });
   }
 
@@ -268,6 +313,10 @@
       const summary = {
         product_id: productId,
         product_name: g.product_name || null,
+        product_sku: g.product_sku || null,
+        has_variant: !!g.has_variant,
+        variant_count: g.variant_count || 0,
+        variant_skus: Array.isArray(g.variant_skus) ? g.variant_skus : [],
         tab_id: 'recovered',
         tab_ids: tabIds,
         tab_count: tabIds.length,
@@ -425,6 +474,10 @@
         this._sessions[productId] = {
           product_id: productId,
           product_name: g.product_name || null,
+          product_sku: g.product_sku || null,
+          has_variant: !!g.has_variant,
+          variant_count: g.variant_count || 0,
+          variant_skus: Array.isArray(g.variant_skus) ? g.variant_skus.slice() : [],
           tab_id: tabId,
           first_seen: g.first_seen || Date.now(),
           last_event_at: Date.now(),
@@ -463,6 +516,14 @@
       const b = reqBody || {};
 
       if (responseData?.product_name) s.product_name = responseData.product_name;
+      if (responseData?.product_sku) s.product_sku = responseData.product_sku;
+      if (responseData?.has_variant) s.has_variant = true;
+      if (typeof responseData?.variant_count === 'number' && responseData.variant_count > 0) {
+        s.variant_count = responseData.variant_count;
+      }
+      if (Array.isArray(responseData?.variant_skus) && responseData.variant_skus.length > 0) {
+        s.variant_skus = responseData.variant_skus.slice(0, MAX_VARIANTS);
+      }
       if (hasPackageType(b) || hasPackageType(d)) s.has_package_type = true;
       if (hasSpecValues(b) || hasSpecValues(d)) {
         s.has_specs = true;
@@ -499,6 +560,10 @@
         const payload = {
           first_seen: s.first_seen,
           product_name: s.product_name || null,
+          product_sku: s.product_sku || null,
+          has_variant: !!s.has_variant,
+          variant_count: s.variant_count || 0,
+          variant_skus: s.variant_skus || [],
           current_state: s.current_state,
           previous_state: s.previous_state,
           has_package_type: s.has_package_type,
@@ -569,6 +634,10 @@
         const summary = {
           product_id: s.product_id,
           product_name: s.product_name || null,
+          product_sku: s.product_sku || null,
+          has_variant: !!s.has_variant,
+          variant_count: s.variant_count || 0,
+          variant_skus: s.variant_skus || [],
           tab_id: tabId,
           tab_ids: s.tab_ids,
           tab_count: s.tab_ids.length,
@@ -653,6 +722,14 @@
                       d.payload?._id || d.payload?.id ||
                       b._id || b.id || fallbackProductId || null;
     const ctx = productId ? getContext(productId) : null;
+    const responseVariantCount = extractVariantCount(d);
+    const bodyVariantCount = extractVariantCount(b);
+    const responseVariantSkus = extractVariantSkus(d);
+    const bodyVariantSkus = extractVariantSkus(b);
+    const variant_count = responseVariantCount || bodyVariantCount || (ctx && ctx.variant_count) || 0;
+    const variant_skus = responseVariantSkus.length
+      ? responseVariantSkus
+      : (bodyVariantSkus.length ? bodyVariantSkus : ((ctx && ctx.variant_skus) || []));
     return {
       product_id: productId,
       vendor_id: typeof d.vendor === 'object' ? (d.vendor && d.vendor._id) : (d.vendor || b.vendor || null),
@@ -662,7 +739,11 @@
                     d.body?.productName || d.body?.name ||
                     ctx?.product_name || null,
       qc_status: d.qcStatus || null,
-      product_sku: d.productSku || b.productSku || null,
+      product_sku: d.productSku || b.productSku || ctx?.product_sku || null,
+      has_variant: extractVariantFlag(d) || extractVariantFlag(b) ||
+                   variant_count > 0 || !!(ctx && ctx.has_variant),
+      variant_count,
+      variant_skus,
       vendor_updated_at: d.updatedAt || b.updatedAt || null,
       bulk_count: typeof d.bulk_count === 'number' ? d.bulk_count : null,
       categoryComplianceDetails: b.categoryComplianceDetails || d.categoryComplianceDetails || b.productComplianceDetails || d.productComplianceDetails || null

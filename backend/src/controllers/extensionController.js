@@ -206,6 +206,18 @@ exports.heartbeat = async (req, res) => {
 exports.logActivity = async (req, res) => {
   try {
     const { event_type, product_id, vendor_id, product_name, qc_status, product_sku, pending_count, bulk_count, metadata, workflow_state, session_duration } = req.body;
+    const { has_variant, variant_count, variant_skus } = req.body;
+
+    // Variants are counted per PRODUCT, never per SKU: a product with 4
+    // variants is 1 listing + 4 variants (parent SKU lives in product_sku).
+    const variantSkus = Array.isArray(variant_skus)
+      ? variant_skus.filter((sku) => typeof sku === 'string' && sku.length > 0).slice(0, 100)
+      : [];
+    const parsedVariantCount = Number(variant_count);
+    const variantTotal = Number.isFinite(parsedVariantCount) && parsedVariantCount > 0
+      ? Math.floor(parsedVariantCount)
+      : variantSkus.length;
+    const hasVariant = has_variant === true || variantTotal > 0;
 
     console.log('[EXT] logActivity', { event_type, product_id, user_id: req.user?._id, method: metadata?.method, url: metadata?.url });
 
@@ -226,6 +238,30 @@ exports.logActivity = async (req, res) => {
       if (match) effectiveProductId = match[1];
     }
 
+    // Variants are usually filled in AFTER the product is listed (list → then
+    // add red/l, red/xl, ...). Copy them onto the product's existing listing
+    // row so "N listed with M variants" stays correct without counting a
+    // second listing. Idempotent: the filter skips rows already up to date.
+    const backPatchListingVariants = async () => {
+      if (!effectiveProductId || variantTotal <= 0) return 0;
+      const result = await ExtensionEvent.updateOne(
+        {
+          product_id: effectiveProductId,
+          event_type: 'listing_created',
+          $or: [{ has_variant: { $ne: true } }, { variant_count: { $ne: variantTotal } }]
+        },
+        {
+          $set: {
+            has_variant: true,
+            variant_count: variantTotal,
+            variant_skus: variantSkus,
+            product_sku: product_sku || undefined
+          }
+        }
+      );
+      return result?.modifiedCount || 0;
+    };
+
     // session_ended: log directly, no dedup
     if (event_type === 'session_ended') {
       const extensionEvent = await ExtensionEvent.create({
@@ -233,7 +269,10 @@ exports.logActivity = async (req, res) => {
         product_id: effectiveProductId,
         vendor_id: vendor_id || null,
         product_name: product_name || null,
-        product_sku: null,
+        product_sku: product_sku || null,
+        has_variant: hasVariant,
+        variant_count: variantTotal,
+        variant_skus: variantSkus,
         qc_status: null,
         pending_count: null,
         user_id: req.user._id,
@@ -257,7 +296,10 @@ exports.logActivity = async (req, res) => {
             product_id: effectiveProductId,
             vendor_id: vendor_id || null,
             product_name: product_name || null,
-            product_sku: null,
+            product_sku: product_sku || null,
+            has_variant: hasVariant,
+            variant_count: variantTotal,
+            variant_skus: variantSkus,
             qc_status: null,
             pending_count: null,
             user_id: req.user._id,
@@ -267,6 +309,11 @@ exports.logActivity = async (req, res) => {
           console.log('[EXT] reclassifier: created listing_created from session_ended', { product_id: effectiveProductId });
         }
       }
+
+      // Variants may have been added during the session after the listing
+      // event fired — propagate them before returning.
+      const patched = await backPatchListingVariants();
+      if (patched) console.log('[EXT] session_ended: back-patched listing variants', { product_id: effectiveProductId, variant_count: variantTotal });
 
       return res.status(201).json({
         status: 'success',
@@ -363,6 +410,8 @@ exports.logActivity = async (req, res) => {
         created_at: { $gte: oneHourAgo }
       });
       if (recentListing) {
+        // Variants added along with specs still belong on the listing row.
+        await backPatchListingVariants();
         console.log('[EXT] SUPPRESSED spec_added (1h rule)', { product_id: effectiveProductId, user_id: req.user._id, listing_id: recentListing._id, minutes_since_listing: Math.floor((Date.now() - recentListing.created_at.getTime()) / 60000) });
         return res.status(200).json({
           status: 'success',
@@ -411,6 +460,8 @@ exports.logActivity = async (req, res) => {
         created_at: { $gte: todayStart }
       });
       if (existingSpec) {
+        // Deduplicated event, but variant data must still reach the listing row.
+        await backPatchListingVariants();
         return res.status(200).json({
           status: 'success',
           data: {
@@ -440,6 +491,9 @@ exports.logActivity = async (req, res) => {
       vendor_id,
       product_name,
       product_sku,
+      has_variant: hasVariant,
+      variant_count: variantTotal,
+      variant_skus: variantSkus,
       qc_status,
       pending_count: pending_count || metadata?.pending_count || null,
       bulk_count: bulk_count || null,
@@ -450,7 +504,13 @@ exports.logActivity = async (req, res) => {
       metadata: metadata || {}
     });
 
-    console.log('[EXT] logActivity → INSERTED', { _id: extensionEvent._id, event_type: effectiveEventType, product_id: effectiveProductId });
+    // Variants usually arrive after the listing was created — copy them onto
+    // the product's existing listing row (a brand-new row above already has them).
+    if (effectiveEventType !== 'listing_created') {
+      await backPatchListingVariants();
+    }
+
+    console.log('[EXT] logActivity → INSERTED', { _id: extensionEvent._id, event_type: effectiveEventType, product_id: effectiveProductId, variant_count: variantTotal });
 
     res.status(201).json({
       status: 'success',
@@ -642,7 +702,8 @@ exports.getAnalytics = async (req, res) => {
       recentEvents,
       latestPending,
       userSessions,
-      rollupRows
+      rollupRows,
+      variantRows
     ] = await Promise.all([
       ExtensionEvent.aggregate([
         { $match: rawFilter },
@@ -702,7 +763,21 @@ exports.getAnalytics = async (req, res) => {
       ]),
       rollupRange.useRollup
         ? ExtensionDailyStat.find(statsFilter).lean()
-        : Promise.resolve([])
+        : Promise.resolve([]),
+      // Variants are per PRODUCT: one listing row carries the product's
+      // variant count, so summing variant_count never inflates the listing
+      // count. Raw-only — rollups don't carry variant data.
+      ExtensionEvent.aggregate([
+        { $match: { ...rawFilter, event_type: 'listing_created' } },
+        {
+          $group: {
+            _id: '$user_id',
+            products: { $sum: 1 },
+            products_with_variants: { $sum: { $cond: [{ $eq: ['$has_variant', true] }, 1, 0] } },
+            variants: { $sum: { $ifNull: ['$variant_count', 0] } }
+          }
+        }
+      ])
     ]);
 
     const latestPendingCount = (latestPending || [])[0]?.pending_count ?? null;
@@ -807,7 +882,13 @@ exports.getAnalytics = async (req, res) => {
       else user.events.push({ event_type: row.event_type, count: row.count });
       user.total += row.count;
     }
-    const mergedEventsByUser = [...userMap.values()].sort((a, b) => b.total - a.total);
+    // Attach per-user variant totals (raw listing rows only).
+    const variantsByUser = new Map(
+      variantRows.map((row) => [String(row._id), row.variants || 0])
+    );
+    const mergedEventsByUser = [...userMap.values()]
+      .map((user) => ({ ...user, listing_variants: variantsByUser.get(String(user._id)) || 0 }))
+      .sort((a, b) => b.total - a.total);
 
     // Build summary
     const summary = {};
@@ -816,6 +897,8 @@ exports.getAnalytics = async (req, res) => {
         summary[item._id] = item.count;
       }
     }
+    const listingVariantTotal = variantRows.reduce((sum, row) => sum + (row.variants || 0), 0);
+    const productsWithVariants = variantRows.reduce((sum, row) => sum + (row.products_with_variants || 0), 0);
 
     // Build dailyComparison: merge pending counts + event counts per day
     const pendingMap = {};
@@ -861,6 +944,8 @@ exports.getAnalytics = async (req, res) => {
         summary: {
           product_created: summary.product_created || 0,
           listing_created: summary.listing_created || 0,
+          listing_variants: listingVariantTotal,
+          products_with_variants: productsWithVariants,
           product_updated: summary.product_updated || 0,
           qc_approved: summary.qc_approved || 0,
           qc_rejected: summary.qc_rejected || 0,
@@ -967,6 +1052,13 @@ exports.getMyStats = async (req, res) => {
       if (myStats.hasOwnProperty(item._id)) myStats[item._id] = item.count;
     }
 
+    // Variants accumulated across this user's own listings today.
+    const myVariantAgg = await ExtensionEvent.aggregate([
+      { $match: { user_id: userId, event_type: 'listing_created', created_at: { $gte: todayStart, $lte: now } } },
+      { $group: { _id: null, variants: { $sum: { $ifNull: ['$variant_count', 0] } } } }
+    ]);
+    const myListingVariants = myVariantAgg[0]?.variants || 0;
+
     // Build team leaderboard
     // listing team sees listing users; qc team sees qc users; admin/super_admin see all
     let teamFilter = {};
@@ -990,10 +1082,18 @@ exports.getMyStats = async (req, res) => {
       { $group: { _id: { user_id: '$user_id', event_type: '$event_type' }, count: { $sum: { $ifNull: ['$bulk_count', 1] } } } }
     ]);
 
+    // Per-user variant totals for the leaderboard
+    const teamVariantAgg = await ExtensionEvent.aggregate([
+      { $match: { user_id: { $in: teamUserIds }, event_type: 'listing_created', created_at: { $gte: todayStart, $lte: now } } },
+      { $group: { _id: '$user_id', variants: { $sum: { $ifNull: ['$variant_count', 0] } } } }
+    ]);
+    const teamVariantsByUser = {};
+    for (const row of teamVariantAgg) teamVariantsByUser[row._id.toString()] = row.variants || 0;
+
     // Build leaderboard
     const userMap = {};
     for (const u of teamUsers) {
-      userMap[u._id.toString()] = { user_id: u._id, name: u.name, team: u.team, listing_created: 0, product_created: 0, product_updated: 0, qc_approved: 0, qc_rejected: 0, spec_added: 0, total: 0 };
+      userMap[u._id.toString()] = { user_id: u._id, name: u.name, team: u.team, listing_created: 0, listing_variants: 0, product_created: 0, product_updated: 0, qc_approved: 0, qc_rejected: 0, spec_added: 0, total: 0 };
     }
 
     for (const item of teamEvents) {
@@ -1003,6 +1103,10 @@ exports.getMyStats = async (req, res) => {
         userMap[uid][eventType] = item.count;
         userMap[uid].total += item.count;
       }
+    }
+
+    for (const [uid, variants] of Object.entries(teamVariantsByUser)) {
+      if (userMap[uid]) userMap[uid].listing_variants = variants;
     }
 
     const leaderboard = Object.values(userMap).sort((a, b) => b.total - a.total);
@@ -1034,7 +1138,7 @@ exports.getMyStats = async (req, res) => {
     res.status(200).json({
       status: 'success',
       data: {
-        my: { ...myStats, total: Object.values(myStats).reduce((a, b) => a + b, 0) },
+        my: { ...myStats, listing_variants: myListingVariants, total: Object.values(myStats).reduce((a, b) => a + b, 0) },
         team: leaderboard,
         user: { name: req.user.name, team: userTeam, role: userRole },
         goals: goalsData
@@ -1406,7 +1510,7 @@ exports.getUserDetail = async (req, res) => {
 
     const userInfo = await User.findById(userId).select('name team role').lean();
 
-    const [facetResult, rawEvents, rollupRows] = await Promise.all([
+    const [facetResult, rawEvents, rollupRows, variantAgg] = await Promise.all([
       ExtensionEvent.aggregate([
         { $match: rawFilter },
         { $facet: {
@@ -1444,7 +1548,17 @@ exports.getUserDetail = async (req, res) => {
         .lean(),
       rollupRange.useRollup
         ? ExtensionDailyStat.find(statsFilter).lean()
-        : Promise.resolve([])
+        : Promise.resolve([]),
+      ExtensionEvent.aggregate([
+        { $match: { ...rawFilter, event_type: 'listing_created' } },
+        {
+          $group: {
+            _id: null,
+            products_with_variants: { $sum: { $cond: [{ $eq: ['$has_variant', true] }, 1, 0] } },
+            variants: { $sum: { $ifNull: ['$variant_count', 0] } }
+          }
+        }
+      ])
     ]);
 
     const facetData = Array.isArray(facetResult) ? facetResult[0] || {} : facetResult;
@@ -1461,6 +1575,9 @@ exports.getUserDetail = async (req, res) => {
       if (summary.hasOwnProperty(eventType)) summary[eventType] = count;
     }
     summary.total = Object.values(summary).reduce((a, b) => a + b, 0);
+    const variantTotals = variantAgg[0] || { variants: 0, products_with_variants: 0 };
+    summary.listing_variants = variantTotals.variants || 0;
+    summary.products_with_variants = variantTotals.products_with_variants || 0;
 
     const dailyByDate = {};
     for (const ev of dailyBreakdownRaw) {

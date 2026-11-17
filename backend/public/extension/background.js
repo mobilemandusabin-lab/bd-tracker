@@ -180,7 +180,10 @@ async function handleEvent(message) {
           product_id: data.product_id,
           vendor_id: null,
           product_name: data.product_name || null,
-          product_sku: null,
+          product_sku: data.product_sku || null,
+          has_variant: !!data.has_variant,
+          variant_count: data.variant_count || 0,
+          variant_skus: Array.isArray(data.variant_skus) ? data.variant_skus : [],
           qc_status: null,
           pending_count: null,
           metadata: data
@@ -224,22 +227,29 @@ async function handleEvent(message) {
         vendor_id: data.vendor_id,
         product_name: data.product_name,
         product_sku: data.product_sku,
+        has_variant: !!data.has_variant,
+        variant_count: data.variant_count || 0,
+        variant_skus: Array.isArray(data.variant_skus) ? data.variant_skus : [],
         qc_status: data.qc_status,
         pending_count: data.pending_count,
         bulk_count: data.bulk_count,
-        metadata: {
-          ...data,
-          // Include session context in metadata
-          workflow_state: data.workflow_state,
-          previous_state: data.previous_state,
-          session_duration: data.session_duration,
-          time_to_first_spec: data.time_to_first_spec,
-          time_to_listing: data.time_to_listing,
-          total_views: data.total_views,
-          spec_count: data.spec_count,
-          has_package_type: data.has_package_type,
-          tab_id: data.tab_id
-        }
+        metadata: (() => {
+          // variant_skus has a dedicated column — don't store it twice.
+          const { variant_skus, ...rest } = data;
+          return {
+            ...rest,
+            // Include session context in metadata
+            workflow_state: data.workflow_state,
+            previous_state: data.previous_state,
+            session_duration: data.session_duration,
+            time_to_first_spec: data.time_to_first_spec,
+            time_to_listing: data.time_to_listing,
+            total_views: data.total_views,
+            spec_count: data.spec_count,
+            has_package_type: data.has_package_type,
+            tab_id: data.tab_id
+          };
+        })()
       })
     });
 

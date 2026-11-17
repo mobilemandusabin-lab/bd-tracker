@@ -138,6 +138,13 @@ async function fetchStats() {
       document.getElementById('myListings').textContent = data.my.listing_created || 0;
       document.getElementById('mySpecs').textContent = data.my.spec_added || 0;
       document.getElementById('myQc').textContent = data.my.qc_approved || 0;
+
+      const variantsEl = document.getElementById('myListingVariants');
+      if (variantsEl) {
+        variantsEl.textContent = data.my.listing_variants > 0
+          ? `${data.my.listing_variants} variant${data.my.listing_variants === 1 ? '' : 's'}`
+          : '';
+      }
     }
 
     // Populate Targets

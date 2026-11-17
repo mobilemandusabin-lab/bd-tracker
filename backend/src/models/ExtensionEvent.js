@@ -22,6 +22,17 @@ const extensionEventSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  has_variant: {
+    type: Boolean,
+    default: false
+  },
+  variant_count: {
+    type: Number,
+    default: 0
+  },
+  variant_skus: [{
+    type: String
+  }],
   qc_status: {
     type: String,
     default: null
@@ -67,6 +78,7 @@ extensionEventSchema.index({ user_id: 1, created_at: -1 });
 extensionEventSchema.index({ user_id: 1, event_type: 1, created_at: -1 });
 extensionEventSchema.index({ event_type: 1, pending_count: 1, created_at: -1 });
 extensionEventSchema.index({ product_id: 1, event_type: 1, created_at: -1 });
+extensionEventSchema.index({ event_type: 1, has_variant: 1, created_at: -1 });
 
 const ExtensionEvent = mongoose.model('ExtensionEvent', extensionEventSchema);
 module.exports = ExtensionEvent;

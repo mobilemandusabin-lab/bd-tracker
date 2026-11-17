@@ -248,6 +248,7 @@ const OperationsAnalyticsPage = () => {
       name: u.user_name || 'Unknown',
       team: u.user_team || '',
       ...eventMap,
+      listing_variants: u.listing_variants || 0,
       total: u.total,
     };
   });
@@ -444,6 +445,12 @@ const OperationsAnalyticsPage = () => {
                   </div>
                   <p className="text-2xl font-extrabold text-slate-900">{count}</p>
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">{label}</p>
+                  {key === 'listing_created' && summary.listing_variants > 0 && (
+                    <p className="text-[10px] font-bold text-blue-500 mt-0.5">
+                      {summary.listing_variants.toLocaleString()} variants
+                      {summary.products_with_variants > 0 ? ` · ${summary.products_with_variants} with variants` : ''}
+                    </p>
+                  )}
                   {isClickable && (
                     <p className="text-[9px] text-slate-300 mt-1">Click to view</p>
                   )}
@@ -951,6 +958,7 @@ const OperationsAnalyticsPage = () => {
                         {eventTypes.map(({ key, label }) => (
                           <th key={key} className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">{label}</th>
                         ))}
+                        <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Variants</th>
                         <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Total</th>
                         <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Sessions</th>
                         <th className="px-4 py-2.5 text-center text-[10px] font-bold text-slate-400 uppercase">Active</th>
@@ -985,6 +993,9 @@ const OperationsAnalyticsPage = () => {
                                 {global ? (summary[key] ?? '—') : (user[key] || 0)}
                               </td>
                             ))}
+                            <td className="px-4 py-2.5 text-center font-bold text-blue-600">
+                              {user.listing_variants || 0}
+                            </td>
                             <td className="px-4 py-2.5 text-center font-bold text-slate-900">{user.total}</td>
                             <td className="px-4 py-2.5 text-center font-bold text-emerald-600">{userSession?.sessions || 0}</td>
                             <td className="px-4 py-2.5 text-center font-bold text-blue-600">{userSession?.active_hours || 0}h</td>
