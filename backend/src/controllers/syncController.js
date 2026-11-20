@@ -145,8 +145,21 @@ const doBatch = async (job, workerId) => {
   // details and tracking use their own APIs/DB — login cost is wasted there.
   const needsToken = phase === 'orders' || phase === 'vendors' || phase === 'branches';
   if (needsToken) {
-    try { token = await loginToNepalcan(); } catch (e) {
+    try {
+      token = await loginToNepalcan();
+    } catch (e) {
       console.error(`[SYNC] login failed: ${e.message}`);
+      const status = e.response?.status;
+      const err = new Error(`Nepalcan login failed: ${e.response?.data?.message || e.message}`);
+      // Bad credentials/config won't recover by retrying the same batch.
+      err.nonRetryable = status === 400 || status === 401 || status === 403;
+      err.causeStatus = status;
+      throw err;
+    }
+    if (!token) {
+      const err = new Error('Nepalcan login failed: no token received');
+      err.nonRetryable = true;
+      throw err;
     }
   }
 
